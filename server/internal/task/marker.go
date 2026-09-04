@@ -1,4 +1,4 @@
-// Package task owns loopd's generic Task CRD integration.
+// Package task implements loop-server's Task CRD persistence adapter.
 package task
 
 import (
@@ -7,7 +7,7 @@ import (
 	"time"
 
 	loopd "github.com/compforge/loopd"
-	taskv1alpha1 "github.com/compforge/loopd/task/v1alpha1"
+	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )

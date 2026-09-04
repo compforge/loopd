@@ -11,12 +11,11 @@ import (
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
-	"github.com/compforge/loopd/task"
 )
 
 type Config struct {
 	Database DatabaseConfig
-	Tasks    task.Marker
+	Tasks    TaskMarker
 	Logger   *slog.Logger
 }
 

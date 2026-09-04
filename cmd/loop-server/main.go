@@ -11,9 +11,8 @@ import (
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
+	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	"github.com/compforge/loopd/server"
-	"github.com/compforge/loopd/task"
-	taskv1alpha1 "github.com/compforge/loopd/task/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	kubeconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -81,7 +80,7 @@ func run() error {
 	}
 }
 
-func newTaskMarker(namespace string) (*task.KubernetesMarker, error) {
+func newTaskMarker(namespace string) (server.TaskMarker, error) {
 	scheme := runtime.NewScheme()
 	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("register loopd Task scheme: %w", err)
@@ -94,7 +93,7 @@ func newTaskMarker(namespace string) (*task.KubernetesMarker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	return task.NewKubernetesMarker(kubeClient, namespace, 10*time.Second), nil
+	return server.NewKubernetesTaskMarker(kubeClient, namespace, 10*time.Second), nil
 }
 
 func envOr(name, fallback string) string {

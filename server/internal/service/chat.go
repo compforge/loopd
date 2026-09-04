@@ -9,7 +9,6 @@ import (
 
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
-	"github.com/compforge/loopd/task"
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
@@ -17,16 +16,21 @@ type ChatRepository interface {
 	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 }
 
+type TaskMarker interface {
+	Create(context.Context, string, loopd.ResponderRef) error
+	Delete(context.Context, string) error
+}
+
 // ChatService owns the transaction boundary for one user question. It writes
 // the visible message pair, creates the same-ID Task CRD before commit, and
 // returns the responder message that will be updated as work progresses.
 type ChatService struct {
 	repo       ChatRepository
-	taskMarker task.Marker
+	taskMarker TaskMarker
 	logger     *slog.Logger
 }
 
-func NewChatService(repository ChatRepository, taskMarker task.Marker, logger *slog.Logger) *ChatService {
+func NewChatService(repository ChatRepository, taskMarker TaskMarker, logger *slog.Logger) *ChatService {
 	return &ChatService{repo: repository, taskMarker: taskMarker, logger: loggerOrDefault(logger)}
 }
 

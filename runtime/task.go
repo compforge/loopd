@@ -7,7 +7,7 @@ import (
 	"net/url"
 
 	loopd "github.com/compforge/loopd"
-	taskv1alpha1 "github.com/compforge/loopd/task/v1alpha1"
+	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"

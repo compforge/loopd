@@ -18,9 +18,8 @@ loopd/
 ├── config/crd/             # loopd Task CRD 安装清单
 ├── docs/                   # loopd 稳定内核与跨模块设计
 ├── harness/                # Harness Adapter 公共契约与具体适配
-├── runtime/                # Operator Reconciler 使用的 Go client
+├── runtime/                # Operator 使用的 Go client 与内置 Task CRD API
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
-├── task/                   # Task Kubernetes API 与 server 侧 Marker client
 └── *.go                    # 跨 server、runtime 和 harness 的公共协作模型
 ```
 

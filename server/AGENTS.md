@@ -18,6 +18,7 @@ server/
 ├── internal/repo/          # 数据库连接及按表拆分的持久化操作
 │   ├── conversation.go
 │   └── message.go
+├── internal/task/          # server 侧 Task CRD Create/Delete Adapter
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
