@@ -39,7 +39,8 @@ server/
    `sequence` 字段。
 5. 一次 Chat 请求由 `ChatService` 在数据库事务中创建 user Message 和目标 Actor 的空 response Message，再以
    `task_id` 初始化 AgentUE Redis Stream 并创建 Task CRD；任一步失败则事务回滚。外部资源创建成功但 DB
-   commit 失败时，server 尽力删除 Stream 与 CRD。
+   commit 失败时，server 尽力删除 Stream 与 CRD。完成时先固化 Message 并终结 Stream，再幂等删除 Task
+   marker；删除失败必须返回可重试错误。
 6. `conversations.parent_message_id` 只用于把 Operator 详情会话挂到主链路 response Message。主会话为空，
    详情会话不可继续嵌套，同一 Message 最多对应一个详情会话。
 7. 页面不可见的 prompt、tool call/result、重试和成本等完整轨迹进入 AgentLedger，不扩张 Message schema。

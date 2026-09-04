@@ -40,14 +40,6 @@ type Actor struct {
 	Description string `json:"description,omitempty"`
 }
 
-type ResourceRef struct {
-	APIVersion string `json:"api_version"`
-	Kind       string `json:"kind"`
-	Namespace  string `json:"namespace,omitempty"`
-	Name       string `json:"name"`
-	UID        string `json:"uid"`
-}
-
 type Timestamped struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

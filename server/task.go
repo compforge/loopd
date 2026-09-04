@@ -9,8 +9,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TaskClient is the loop-server boundary for managing Task CRDs inside the
-// chat submission work unit.
+// TaskClient is the loop-server boundary for managing marker CRDs across one
+// chat task's active lifetime.
 type TaskClient interface {
 	Create(context.Context, string, loopd.ActorRef) error
 	Delete(context.Context, string) error

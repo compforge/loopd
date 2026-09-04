@@ -56,6 +56,10 @@ block 除 `id` 和 `type` 外的字段由 biz 扩展。页面无需展示的 sys
 事件、重试与成本不进入 Message，由 AgentLedger 记录。流式 delta 也不作为独立 Message；AgentUE Redis
 Bridge 承载运行中的页面事件，任务完成时由 server 将它们折叠为可恢复的 content 快照。
 
+Task CRD 只承担活跃问答的持久唤醒职责。完成时，loop-server 先固化 Message 快照并把 Redis Stream 标记为
+终态，再删除 Task marker；该顺序保证 Task 一旦消失，页面答案已经可恢复。删除失败会让完成请求返回可重试
+错误，重复完成不会重复写入回答。
+
 ## UUIDv7 游标
 
 消息列表使用 `id > after ORDER BY id` 翻页，不维护额外 sequence。go-stdx 的 `uuid.V7()` 在当前

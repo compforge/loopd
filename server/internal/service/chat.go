@@ -33,9 +33,9 @@ type ChatDelivery interface {
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
-// ChatService owns the transaction boundary for one user question. It writes
-// the visible message pair, creates the same-ID Task CRD before commit, and
-// returns the selected Actor's message that will be updated as work progresses.
+// ChatService owns the visible lifecycle of one user question. It creates the
+// message pair and same-ID Task marker, then retires the marker only after the
+// response has been made durable.
 type ChatService struct {
 	repo     ChatRepository
 	tasks    TaskClient
@@ -191,7 +191,21 @@ func (service *ChatService) Complete(ctx context.Context, taskID string, failure
 	if taskID == "" {
 		return ErrInvalid
 	}
-	return mapDeliveryError(service.delivery.Complete(ctx, taskID, failure))
+	if err := mapDeliveryError(service.delivery.Complete(ctx, taskID, failure)); err != nil {
+		return err
+	}
+	// The generic Task only wakes its Actor. Once the response is durable and
+	// the event stream is terminal, retaining the marker would make a restarted
+	// controller reconcile completed work again.
+	if err := service.tasks.Delete(context.WithoutCancel(ctx), taskID); err != nil {
+		service.logger.ErrorContext(ctx, "delete completed task CRD failed",
+			"task_id", taskID,
+			"error", err,
+		)
+		return fmt.Errorf("%w: delete completed task %q: %v", ErrUnavailable, taskID, err)
+	}
+	service.logger.InfoContext(ctx, "chat task retired", "task_id", taskID)
+	return nil
 }
 
 func mapDeliveryError(err error) error {

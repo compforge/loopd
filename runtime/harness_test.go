@@ -62,9 +62,9 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsedOperatorEvent, err := agentueui.Parse(operatorEvent.Data)
-	if err != nil || parsedOperatorEvent.Seq != 2 {
-		t.Fatalf("Operator event = %#v, error=%v", parsedOperatorEvent, err)
+	parsedOperatorOutput, err := agentueui.Parse(operatorEvent.Data)
+	if err != nil || parsedOperatorOutput.Seq != 2 {
+		t.Fatalf("Operator event = %#v, error=%v", parsedOperatorOutput, err)
 	}
 
 	prompt := Prompt{TaskID: "task-1", EffectKey: "route", Target: "demo", Text: "hello"}

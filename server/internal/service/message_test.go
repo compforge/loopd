@@ -128,6 +128,51 @@ func TestChatDeletesTaskWhenDatabaseCommitFails(t *testing.T) {
 	}
 }
 
+func TestChatCompleteRetiresTaskMarker(t *testing.T) {
+	tasks := &recordingTaskClient{}
+	streams := &recordingChatRunner{}
+	chat := NewChatService(nil, tasks, streams, nil)
+
+	if err := chat.Complete(context.Background(), "task-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if streams.completedTaskID != "task-1" || tasks.deletedTaskID != "task-1" {
+		t.Fatalf("completed stream %q, deleted Task %q", streams.completedTaskID, tasks.deletedTaskID)
+	}
+}
+
+func TestChatCompleteKeepsTaskWhenDeliveryFails(t *testing.T) {
+	tasks := &recordingTaskClient{}
+	streams := &recordingChatRunner{completeErr: errors.New("redis unavailable")}
+	chat := NewChatService(nil, tasks, streams, nil)
+
+	if err := chat.Complete(context.Background(), "task-1", nil); err == nil {
+		t.Fatal("Complete succeeded when delivery failed")
+	}
+	if tasks.deletedTaskID != "" {
+		t.Fatalf("delivery failure deleted Task %q", tasks.deletedTaskID)
+	}
+}
+
+func TestChatCompleteReportsTaskRetirementFailure(t *testing.T) {
+	tasks := &recordingTaskClient{deleteErr: errors.New("api unavailable")}
+	streams := &recordingChatRunner{}
+	chat := NewChatService(nil, tasks, streams, nil)
+
+	err := chat.Complete(context.Background(), "task-1", nil)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Complete error = %v, want %v", err, ErrUnavailable)
+	}
+	if streams.completedTaskID != "task-1" || tasks.deletedTaskID != "task-1" {
+		t.Fatalf("completed stream %q, attempted Task delete %q", streams.completedTaskID, tasks.deletedTaskID)
+	}
+
+	tasks.deleteErr = nil
+	if err := chat.Complete(context.Background(), "task-1", nil); err != nil {
+		t.Fatalf("retry Complete: %v", err)
+	}
+}
+
 func TestDetailConversationReferencesActorMessage(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
@@ -183,6 +228,8 @@ func (nopChatRunner) Emit(context.Context, string, json.RawMessage) (string, err
 type recordingChatRunner struct {
 	initializedTaskID string
 	deletedTaskID     string
+	completedTaskID   string
+	completeErr       error
 }
 
 func (runner *recordingChatRunner) Initialize(_ context.Context, taskID string, _ json.RawMessage) error {
@@ -199,7 +246,10 @@ func (*recordingChatRunner) Emit(context.Context, string, json.RawMessage) (stri
 	return "", nil
 }
 
-func (*recordingChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
+func (runner *recordingChatRunner) Complete(_ context.Context, taskID string, _ *delivery.Failure) error {
+	runner.completedTaskID = taskID
+	return runner.completeErr
+}
 
 func (*recordingChatRunner) Stream(
 	context.Context,
@@ -226,6 +276,7 @@ type recordingTaskClient struct {
 	createdTarget loopd.ActorRef
 	deletedTaskID string
 	createErr     error
+	deleteErr     error
 }
 
 func (client *recordingTaskClient) Create(_ context.Context, taskID string, target loopd.ActorRef) error {
@@ -236,7 +287,7 @@ func (client *recordingTaskClient) Create(_ context.Context, taskID string, targ
 
 func (client *recordingTaskClient) Delete(_ context.Context, taskID string) error {
 	client.deletedTaskID = taskID
-	return nil
+	return client.deleteErr
 }
 
 type failingCommitRepository struct{}
