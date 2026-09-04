@@ -44,6 +44,17 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(created.Body(), &conversation); err != nil {
 		t.Fatal(err)
 	}
+	listed := ut.PerformRequest(engine, "GET", "/v1/conversations", nil).Result()
+	if listed.StatusCode() != 200 {
+		t.Fatalf("list conversations status=%d body=%s", listed.StatusCode(), listed.Body())
+	}
+	var conversations page[loopd.Conversation]
+	if err := json.Unmarshal(listed.Body(), &conversations); err != nil {
+		t.Fatal(err)
+	}
+	if len(conversations.Data) != 1 || conversations.Data[0].ID != conversation.ID {
+		t.Fatalf("conversations = %#v", conversations.Data)
+	}
 
 	taskID, stream := performChat(t, server, conversation.ID, `{
 		"user_key":"user-1",

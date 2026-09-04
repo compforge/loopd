@@ -21,6 +21,7 @@ loopd/
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
 ├── runtime/                # Operator 使用的 Go client 与内置 Task CRD API
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
+├── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 └── *.go                    # 跨 server、runtime 和 harness 的公共协作模型
 ```
 

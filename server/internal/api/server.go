@@ -41,6 +41,7 @@ func (server *Server) Register(engine *route.Engine) {
 		request.JSON(consts.StatusOK, map[string]bool{"ok": true})
 	})
 	engine.POST("/v1/conversations", server.adapt(server.createConversation))
+	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))

@@ -63,6 +63,22 @@ func (service *ConversationService) GetConversation(ctx context.Context, id stri
 	return conversationFromModel(conversation), err
 }
 
+func (service *ConversationService) ListConversations(
+	ctx context.Context,
+	before string,
+	limit int,
+) ([]loopd.Conversation, error) {
+	conversations, err := service.repo.ListConversations(ctx, before, pageSize(limit))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]loopd.Conversation, len(conversations))
+	for index := range conversations {
+		result[index] = conversationFromModel(conversations[index])
+	}
+	return result, nil
+}
+
 func conversationFromModel(value model.Conversation) loopd.Conversation {
 	result := loopd.Conversation{
 		ID: value.ID, Name: value.Name,
