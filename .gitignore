@@ -1,0 +1,7 @@
+/bin/
+/cover.out
+/.env
+/.DS_Store
+/loopd.db
+/loopd.db-shm
+/loopd.db-wal
