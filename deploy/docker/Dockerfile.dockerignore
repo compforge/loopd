@@ -1,0 +1,10 @@
+.git
+.devloop
+.worktrees
+**/.DS_Store
+**/*_test.go
+**/node_modules
+**/dist
+deploy/k8s
+loopd.db*
+
