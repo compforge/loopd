@@ -7,21 +7,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"gorm.io/gorm"
 )
 
 func (store *Store) EnsureHarnessCall(
 	ctx context.Context,
 	invocationID string,
-	request api.PromptRequest,
-) (api.HarnessCall, bool, error) {
+	request promptRequest,
+) (loopd.HarnessCall, bool, error) {
 	if request.OwnerUID == "" || request.EffectKey == "" || request.Target == "" || strings.TrimSpace(request.Prompt) == "" {
-		return api.HarnessCall{}, false, ErrInvalid
+		return loopd.HarnessCall{}, false, ErrInvalid
 	}
 	requestHash, toolsJSON, err := hashPromptRequest(request)
 	if err != nil {
-		return api.HarnessCall{}, false, ErrInvalid
+		return loopd.HarnessCall{}, false, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -42,7 +42,7 @@ func (store *Store) EnsureHarnessCall(
 		case !errors.Is(err, gorm.ErrRecordNotFound):
 			return err
 		}
-		if api.InvocationPhase(invocation.Phase).Terminal() {
+		if loopd.InvocationPhase(invocation.Phase).Terminal() {
 			return ErrConflict
 		}
 		now := time.Now().UTC()
@@ -55,7 +55,7 @@ func (store *Store) EnsureHarnessCall(
 			Target:       request.Target,
 			Prompt:       strings.TrimSpace(request.Prompt),
 			ToolsJSON:    toolsJSON,
-			Phase:        string(api.CallPending),
+			Phase:        string(loopd.CallPending),
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
@@ -68,54 +68,54 @@ func (store *Store) EnsureHarnessCall(
 	return callFromPO(row), created, err
 }
 
-func (store *Store) GetHarnessCall(ctx context.Context, id string) (api.HarnessCall, error) {
+func (store *Store) GetHarnessCall(ctx context.Context, id string) (loopd.HarnessCall, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row harnessCallPO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.HarnessCall{}, mapDBError(err)
+		return loopd.HarnessCall{}, mapDBError(err)
 	}
 	return callFromPO(row), nil
 }
 
-func (store *Store) GetHarnessRequest(ctx context.Context, id string) (api.HarnessCall, api.PromptRequest, error) {
+func (store *Store) GetHarnessRequest(ctx context.Context, id string) (loopd.HarnessCall, promptRequest, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row harnessCallPO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.HarnessCall{}, api.PromptRequest{}, mapDBError(err)
+		return loopd.HarnessCall{}, promptRequest{}, mapDBError(err)
 	}
-	var tools []api.Tool
+	var tools []loopd.Tool
 	if len(row.ToolsJSON) > 0 {
 		if err := json.Unmarshal(row.ToolsJSON, &tools); err != nil {
-			return api.HarnessCall{}, api.PromptRequest{}, err
+			return loopd.HarnessCall{}, promptRequest{}, err
 		}
 	}
-	return callFromPO(row), api.PromptRequest{
+	return callFromPO(row), promptRequest{
 		OwnerUID: row.OwnerUID, EffectKey: row.EffectKey, Target: row.Target, Prompt: row.Prompt, Tools: tools,
 	}, nil
 }
 
-func (store *Store) ListRunnableHarnessCalls(ctx context.Context, limit int) ([]api.HarnessCall, error) {
+func (store *Store) ListRunnableHarnessCalls(ctx context.Context, limit int) ([]loopd.HarnessCall, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []harnessCallPO
 	err := store.db.WithContext(ctx).
-		Where("phase IN ?", []api.CallPhase{api.CallPending, api.CallStarting, api.CallRunning, api.CallWaitingInput}).
+		Where("phase IN ?", []loopd.CallPhase{loopd.CallPending, loopd.CallStarting, loopd.CallRunning, loopd.CallWaitingInput}).
 		Order("updated_at ASC").
 		Limit(normalizeLimit(limit)).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	result := make([]api.HarnessCall, 0, len(rows))
+	result := make([]loopd.HarnessCall, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, callFromPO(row))
 	}
 	return result, nil
 }
 
-func (store *Store) UpdateHarnessCall(ctx context.Context, id string, update HarnessCallUpdate) (api.HarnessCall, error) {
+func (store *Store) UpdateHarnessCall(ctx context.Context, id string, update HarnessCallUpdate) (loopd.HarnessCall, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row harnessCallPO
@@ -154,7 +154,7 @@ func (store *Store) UpdateHarnessCall(ctx context.Context, id string, update Har
 }
 
 type HarnessCallUpdate struct {
-	Phase          api.CallPhase
+	Phase          loopd.CallPhase
 	ExternalRef    string
 	ProviderCursor string
 	ActivityAt     time.Time
@@ -162,13 +162,13 @@ type HarnessCallUpdate struct {
 	Error          string
 }
 
-func (store *Store) AppendHarnessEvent(ctx context.Context, callID, providerCursor, kind string, data json.RawMessage) (api.HarnessEvent, error) {
+func (store *Store) AppendHarnessEvent(ctx context.Context, callID, providerCursor, kind string, data json.RawMessage) (loopd.HarnessEvent, error) {
 	if kind == "" {
-		return api.HarnessEvent{}, ErrInvalid
+		return loopd.HarnessEvent{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	var result api.HarnessEvent
+	var result loopd.HarnessEvent
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var call harnessCallPO
 		if err := tx.First(&call, "id = ?", callID).Error; err != nil {
@@ -178,7 +178,7 @@ func (store *Store) AppendHarnessEvent(ctx context.Context, callID, providerCurs
 			var existing invocationEventPO
 			err := tx.Where("call_id = ? AND provider_cursor = ?", callID, providerCursor).First(&existing).Error
 			if err == nil {
-				result = api.HarnessEvent{
+				result = loopd.HarnessEvent{
 					Cursor: existing.Cursor, ProviderCursor: existing.ProviderCursor,
 					CallID: call.ID, InvocationID: call.InvocationID,
 					Kind: strings.TrimPrefix(existing.Kind, "harness."),
@@ -210,7 +210,7 @@ func (store *Store) AppendHarnessEvent(ctx context.Context, callID, providerCurs
 		if err := tx.Save(&call).Error; err != nil {
 			return err
 		}
-		result = api.HarnessEvent{
+		result = loopd.HarnessEvent{
 			Cursor: row.Cursor, ProviderCursor: row.ProviderCursor,
 			CallID: call.ID, InvocationID: call.InvocationID,
 			Kind: kind, Data: append(json.RawMessage(nil), data...), CreatedAt: row.CreatedAt,
@@ -220,7 +220,7 @@ func (store *Store) AppendHarnessEvent(ctx context.Context, callID, providerCurs
 	return result, err
 }
 
-func (store *Store) ListHarnessEvents(ctx context.Context, callID string, after uint64, limit int) ([]api.HarnessEvent, error) {
+func (store *Store) ListHarnessEvents(ctx context.Context, callID string, after uint64, limit int) ([]loopd.HarnessEvent, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []invocationEventPO
@@ -229,9 +229,9 @@ func (store *Store) ListHarnessEvents(ctx context.Context, callID string, after 
 		Order("cursor ASC").Limit(normalizeLimit(limit)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.HarnessEvent, 0, len(rows))
+	result := make([]loopd.HarnessEvent, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, api.HarnessEvent{
+		result = append(result, loopd.HarnessEvent{
 			Cursor: row.Cursor, ProviderCursor: row.ProviderCursor,
 			CallID: row.CallID, InvocationID: row.InvocationID,
 			Kind: strings.TrimPrefix(row.Kind, "harness."), Data: json.RawMessage(row.Data), CreatedAt: row.CreatedAt,

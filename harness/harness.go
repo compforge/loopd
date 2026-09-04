@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 )
 
 type Request struct {
@@ -18,11 +18,11 @@ type Request struct {
 	Cursor         string
 	Target         string
 	Prompt         string
-	Tools          []api.Tool
+	Tools          []loopd.Tool
 }
 
 type Observation struct {
-	Phase       api.CallPhase
+	Phase       loopd.CallPhase
 	ExternalRef string
 	Cursor      string
 	ActivityAt  time.Time

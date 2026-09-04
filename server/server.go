@@ -13,14 +13,14 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/harness"
 )
 
 type Server struct {
 	store      *Store
-	responders []api.Responder
-	known      map[api.ResponderRef]struct{}
+	responders []loopd.Responder
+	known      map[loopd.ResponderRef]struct{}
 	runner     *Runner
 	logger     *slog.Logger
 	streamPoll time.Duration
@@ -28,7 +28,7 @@ type Server struct {
 }
 
 type Config struct {
-	Responders []api.Responder
+	Responders []loopd.Responder
 	Adapters   map[string]harness.Adapter
 	Runner     RunnerConfig
 	StreamPoll time.Duration
@@ -46,12 +46,12 @@ func New(store *Store, config Config) *Server {
 	if config.StreamPing <= 0 {
 		config.StreamPing = 15 * time.Second
 	}
-	known := make(map[api.ResponderRef]struct{}, len(config.Responders))
+	known := make(map[loopd.ResponderRef]struct{}, len(config.Responders))
 	for _, responder := range config.Responders {
 		known[responder.ResponderRef] = struct{}{}
 	}
 	return &Server{
-		store: store, responders: append([]api.Responder(nil), config.Responders...), known: known,
+		store: store, responders: append([]loopd.Responder(nil), config.Responders...), known: known,
 		runner: NewRunner(store, config.Adapters, config.Logger, config.Runner), logger: config.Logger,
 		streamPoll: config.StreamPoll, streamPing: config.StreamPing,
 	}
@@ -111,16 +111,16 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	default:
 		server.logger.Error("loop-server request failed", "error", err)
 	}
-	request.JSON(status, api.ErrorResponse{Error: api.APIError{Type: typeName, Message: err.Error()}})
+	request.JSON(status, errorResponse{Error: apiError{Type: typeName, Message: err.Error()}})
 }
 
 func (server *Server) listResponders(_ context.Context, request *hertzapp.RequestContext) error {
-	request.JSON(consts.StatusOK, api.Page[api.Responder]{Data: server.responders})
+	request.JSON(consts.StatusOK, page[loopd.Responder]{Data: server.responders})
 	return nil
 }
 
 func (server *Server) createConversation(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.CreateConversationRequest
+	var input createConversationRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -154,12 +154,12 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, api.Page[api.Message]{Data: messages})
+	request.JSON(consts.StatusOK, page[loopd.Message]{Data: messages})
 	return nil
 }
 
 func (server *Server) createMessage(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.CreateMessageRequest
+	var input createMessageRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -170,8 +170,8 @@ func (server *Server) createMessage(ctx context.Context, request *hertzapp.Reque
 	if err != nil {
 		return err
 	}
-	if input.Responder.Role == api.RoleHarness {
-		_, _, err = server.store.EnsureHarnessCall(ctx, result.Invocation.ID, api.PromptRequest{
+	if input.Responder.Role == loopd.RoleHarness {
+		_, _, err = server.store.EnsureHarnessCall(ctx, result.Invocation.ID, promptRequest{
 			OwnerUID: result.Invocation.ID, EffectKey: "answer", Target: input.Responder.ID, Prompt: input.Content,
 		})
 		if err != nil {
@@ -215,7 +215,7 @@ func (server *Server) listOperatorInvocations(ctx context.Context, request *hert
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, api.Page[api.Invocation]{Data: invocations})
+	request.JSON(consts.StatusOK, page[loopd.Invocation]{Data: invocations})
 	return nil
 }
 
@@ -232,12 +232,12 @@ func (server *Server) listOperatorEvents(ctx context.Context, request *hertzapp.
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, api.Page[api.OperatorEvent]{Data: events})
+	request.JSON(consts.StatusOK, page[loopd.OperatorEvent]{Data: events})
 	return nil
 }
 
 func (server *Server) acceptInvocation(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.AcceptInvocationRequest
+	var input acceptInvocationRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func (server *Server) acceptInvocation(ctx context.Context, request *hertzapp.Re
 }
 
 func (server *Server) replyInvocation(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.ReplyRequest
+	var input replyRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -258,10 +258,10 @@ func (server *Server) replyInvocation(ctx context.Context, request *hertzapp.Req
 	if err != nil {
 		return err
 	}
-	if invocation.Responder.Role != api.RoleOperator {
+	if invocation.Responder.Role != loopd.RoleOperator {
 		return fmt.Errorf("%w: only an Operator can reply through this endpoint", ErrConflict)
 	}
-	invocation, err = server.store.CompleteInvocation(ctx, invocation.ID, api.RoleOperator, invocation.Responder.ID, input.Content)
+	invocation, err = server.store.CompleteInvocation(ctx, invocation.ID, loopd.RoleOperator, invocation.Responder.ID, input.Content)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func (server *Server) replyInvocation(ctx context.Context, request *hertzapp.Req
 }
 
 func (server *Server) upsertActivity(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.ActivityRequest
+	var input loopd.ActivityUpdate
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -283,7 +283,7 @@ func (server *Server) upsertActivity(ctx context.Context, request *hertzapp.Requ
 }
 
 func (server *Server) promptHarness(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.PromptRequest
+	var input promptRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -322,12 +322,12 @@ func (server *Server) listHarnessEvents(ctx context.Context, request *hertzapp.R
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, api.Page[api.HarnessEvent]{Data: events})
+	request.JSON(consts.StatusOK, page[loopd.HarnessEvent]{Data: events})
 	return nil
 }
 
 func (server *Server) createInteraction(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.InteractionRequest
+	var input interactionRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -353,7 +353,7 @@ func (server *Server) getInteraction(ctx context.Context, request *hertzapp.Requ
 }
 
 func (server *Server) resolveInteraction(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input api.ResolveInteractionRequest
+	var input resolveInteractionRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}

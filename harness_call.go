@@ -1,4 +1,4 @@
-package api
+package loopd
 
 import (
 	"encoding/json"
@@ -31,14 +31,6 @@ type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-}
-
-type PromptRequest struct {
-	OwnerUID  string `json:"owner_uid"`
-	EffectKey string `json:"effect_key"`
-	Target    string `json:"target"`
-	Prompt    string `json:"prompt"`
-	Tools     []Tool `json:"tools,omitempty"`
 }
 
 type HarnessCall struct {

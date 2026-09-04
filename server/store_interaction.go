@@ -6,23 +6,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"gorm.io/gorm"
 )
 
 func (store *Store) EnsureInteraction(
 	ctx context.Context,
 	invocationID string,
-	request api.InteractionRequest,
-) (api.Interaction, bool, error) {
+	request interactionRequest,
+) (loopd.Interaction, bool, error) {
 	if request.OwnerUID == "" || request.EffectKey == "" || !request.Requester.Valid() ||
-		(request.Kind != api.InteractionAsk && request.Kind != api.InteractionConfirm) ||
+		(request.Kind != loopd.InteractionAsk && request.Kind != loopd.InteractionConfirm) ||
 		strings.TrimSpace(request.Prompt) == "" {
-		return api.Interaction{}, false, ErrInvalid
+		return loopd.Interaction{}, false, ErrInvalid
 	}
 	requestHash, optionsJSON, err := hashInteractionRequest(request)
 	if err != nil {
-		return api.Interaction{}, false, ErrInvalid
+		return loopd.Interaction{}, false, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -43,7 +43,7 @@ func (store *Store) EnsureInteraction(
 		case !errors.Is(err, gorm.ErrRecordNotFound):
 			return err
 		}
-		if api.InvocationPhase(invocation.Phase).Terminal() {
+		if loopd.InvocationPhase(invocation.Phase).Terminal() {
 			return ErrConflict
 		}
 		now := time.Now().UTC()
@@ -59,7 +59,7 @@ func (store *Store) EnsureInteraction(
 			Title:         request.Title,
 			Prompt:        strings.TrimSpace(request.Prompt),
 			OptionsJSON:   optionsJSON,
-			Phase:         string(api.InteractionPending),
+			Phase:         string(loopd.InteractionPending),
 			ExpiresAt:     request.ExpiresAt,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -69,7 +69,7 @@ func (store *Store) EnsureInteraction(
 		}
 		created = true
 		if err := tx.Model(&invocationPO{}).Where("id = ?", invocationID).
-			Update("phase", api.InvocationWaitingInput).Error; err != nil {
+			Update("phase", loopd.InvocationWaitingInput).Error; err != nil {
 			return err
 		}
 		return appendEvent(tx, invocationID, "", "interaction.created", interactionFromPO(row))
@@ -77,19 +77,19 @@ func (store *Store) EnsureInteraction(
 	return interactionFromPO(row), created, err
 }
 
-func (store *Store) GetInteraction(ctx context.Context, id string) (api.Interaction, error) {
+func (store *Store) GetInteraction(ctx context.Context, id string) (loopd.Interaction, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row interactionPO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.Interaction{}, mapDBError(err)
+		return loopd.Interaction{}, mapDBError(err)
 	}
 	return interactionFromPO(row), nil
 }
 
-func (store *Store) ResolveInteraction(ctx context.Context, id, answer string) (api.Interaction, error) {
+func (store *Store) ResolveInteraction(ctx context.Context, id, answer string) (loopd.Interaction, error) {
 	if strings.TrimSpace(answer) == "" {
-		return api.Interaction{}, ErrInvalid
+		return loopd.Interaction{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -98,32 +98,32 @@ func (store *Store) ResolveInteraction(ctx context.Context, id, answer string) (
 		if err := tx.First(&row, "id = ?", id).Error; err != nil {
 			return mapDBError(err)
 		}
-		if api.InteractionPhase(row.Phase) == api.InteractionResolved {
+		if loopd.InteractionPhase(row.Phase) == loopd.InteractionResolved {
 			if row.Answer == answer {
 				return nil
 			}
 			return ErrConflict
 		}
-		if api.InteractionPhase(row.Phase) != api.InteractionPending {
+		if loopd.InteractionPhase(row.Phase) != loopd.InteractionPending {
 			return ErrConflict
 		}
 		now := time.Now().UTC()
 		row.Answer = answer
-		row.Phase = string(api.InteractionResolved)
+		row.Phase = string(loopd.InteractionResolved)
 		row.ResolvedAt = &now
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
 		var pending int64
 		if err := tx.Model(&interactionPO{}).
-			Where("invocation_id = ? AND id <> ? AND phase = ?", row.InvocationID, row.ID, api.InteractionPending).
+			Where("invocation_id = ? AND id <> ? AND phase = ?", row.InvocationID, row.ID, loopd.InteractionPending).
 			Count(&pending).Error; err != nil {
 			return err
 		}
 		if pending == 0 {
 			if err := tx.Model(&invocationPO{}).
-				Where("id = ? AND phase = ?", row.InvocationID, api.InvocationWaitingInput).
-				Update("phase", api.InvocationRunning).Error; err != nil {
+				Where("id = ? AND phase = ?", row.InvocationID, loopd.InvocationWaitingInput).
+				Update("phase", loopd.InvocationRunning).Error; err != nil {
 				return err
 			}
 		}

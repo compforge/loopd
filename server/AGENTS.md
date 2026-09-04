@@ -12,11 +12,11 @@ Session 产品通过 Adapter 接入后均表现为 Harness。
 ## 代码地图与核心模块
 
 ```text
-├── api/                    # loop-server 的公开 HTTP 数据模型
+├── *.go                    # 根包 loopd：稳定公共协作模型
 ├── cmd/loop-server/        # Hertz 服务组装与进程生命周期
 ├── harness/                # 可替换 Harness provider 边界
 ├── runtime/                # Operator Reconciler 使用的 Go client
-├── server/                 # 持久化、HTTP、AgentUE 投影与 Harness 调度
+├── server/                 # HTTP 私有 DTO、持久化、AgentUE 投影与 Harness 调度
 │   └── docs/persistence.md # 数据库和恢复语义
 └── docs/kernel.md          # 稳定内核、参与者与 ownership
 ```

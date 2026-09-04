@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -103,27 +103,27 @@ func (store *Store) withTimeout(parent context.Context) (context.Context, contex
 	return context.WithTimeout(parent, store.operationTimeout)
 }
 
-func (store *Store) CreateConversation(ctx context.Context, title string) (api.Conversation, error) {
+func (store *Store) CreateConversation(ctx context.Context, title string) (loopd.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	row := conversationPO{ID: newID("conv"), Title: strings.TrimSpace(title)}
 	if err := store.db.WithContext(ctx).Create(&row).Error; err != nil {
-		return api.Conversation{}, err
+		return loopd.Conversation{}, err
 	}
 	return conversationFromPO(row), nil
 }
 
-func (store *Store) GetConversation(ctx context.Context, id string) (api.Conversation, error) {
+func (store *Store) GetConversation(ctx context.Context, id string) (loopd.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row conversationPO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.Conversation{}, mapDBError(err)
+		return loopd.Conversation{}, mapDBError(err)
 	}
 	return conversationFromPO(row), nil
 }
 
-func (store *Store) ListMessages(ctx context.Context, conversationID string, after, through int64, limit int) ([]api.Message, error) {
+func (store *Store) ListMessages(ctx context.Context, conversationID string, after, through int64, limit int) ([]loopd.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	limit = normalizeLimit(limit)
@@ -135,7 +135,7 @@ func (store *Store) ListMessages(ctx context.Context, conversationID string, aft
 	if err := query.Order("sequence ASC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.Message, 0, len(rows))
+	result := make([]loopd.Message, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, messageFromPO(row))
 	}
@@ -145,10 +145,10 @@ func (store *Store) ListMessages(ctx context.Context, conversationID string, aft
 func (store *Store) CreateMessageInvocation(
 	ctx context.Context,
 	conversationID string,
-	request api.CreateMessageRequest,
-) (api.CreateMessageResponse, error) {
+	request createMessageRequest,
+) (createMessageResponse, error) {
 	if strings.TrimSpace(request.Content) == "" || !request.Responder.Valid() {
-		return api.CreateMessageResponse{}, ErrInvalid
+		return createMessageResponse{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -175,7 +175,7 @@ func (store *Store) CreateMessageInvocation(
 			ID:             newID("msg"),
 			ConversationID: conversationID,
 			Sequence:       conversation.LastSequence,
-			Role:           string(api.RoleUser),
+			Role:           string(loopd.RoleUser),
 			AuthorID:       "human",
 			Content:        strings.TrimSpace(request.Content),
 			CreatedAt:      now,
@@ -190,7 +190,7 @@ func (store *Store) CreateMessageInvocation(
 			ResponderRole:     string(request.Responder.Role),
 			ResponderID:       request.Responder.ID,
 			ContextThroughSeq: message.Sequence,
-			Phase:             string(api.InvocationQueued),
+			Phase:             string(loopd.InvocationQueued),
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		}
@@ -203,44 +203,44 @@ func (store *Store) CreateMessageInvocation(
 		})
 	})
 	if err != nil {
-		return api.CreateMessageResponse{}, err
+		return createMessageResponse{}, err
 	}
-	return api.CreateMessageResponse{
+	return createMessageResponse{
 		Message:    messageFromPO(message),
 		Invocation: invocationFromPO(invocation),
 	}, nil
 }
 
-func (store *Store) GetInvocation(ctx context.Context, id string) (api.Invocation, error) {
+func (store *Store) GetInvocation(ctx context.Context, id string) (loopd.Invocation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row invocationPO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.Invocation{}, mapDBError(err)
+		return loopd.Invocation{}, mapDBError(err)
 	}
 	return invocationFromPO(row), nil
 }
 
-func (store *Store) GetInvocationContext(ctx context.Context, id string) (api.InvocationContext, error) {
+func (store *Store) GetInvocationContext(ctx context.Context, id string) (loopd.InvocationContext, error) {
 	invocation, err := store.GetInvocation(ctx, id)
 	if err != nil {
-		return api.InvocationContext{}, err
+		return loopd.InvocationContext{}, err
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var input messagePO
 	if err := store.db.WithContext(ctx).First(&input, "id = ?", invocation.InputMessageID).Error; err != nil {
-		return api.InvocationContext{}, mapDBError(err)
+		return loopd.InvocationContext{}, mapDBError(err)
 	}
 	history, hasEarlier, err := store.listContextMessages(ctx, invocation.ConversationID, invocation.ContextThroughSeq)
 	if err != nil {
-		return api.InvocationContext{}, err
+		return loopd.InvocationContext{}, err
 	}
 	var fromSeq int64
 	if len(history) > 0 {
 		fromSeq = history[0].Sequence
 	}
-	return api.InvocationContext{
+	return loopd.InvocationContext{
 		Invocation:     invocation,
 		Input:          messageFromPO(input),
 		History:        history,
@@ -249,7 +249,7 @@ func (store *Store) GetInvocationContext(ctx context.Context, id string) (api.In
 	}, nil
 }
 
-func (store *Store) listContextMessages(ctx context.Context, conversationID string, through int64) ([]api.Message, bool, error) {
+func (store *Store) listContextMessages(ctx context.Context, conversationID string, through int64) ([]loopd.Message, bool, error) {
 	var rows []messagePO
 	if err := store.db.WithContext(ctx).Where("conversation_id = ? AND sequence <= ?", conversationID, through).
 		Order("sequence DESC").Limit(maxPageSize + 1).Find(&rows).Error; err != nil {
@@ -259,35 +259,35 @@ func (store *Store) listContextMessages(ctx context.Context, conversationID stri
 	if hasEarlier {
 		rows = rows[:maxPageSize]
 	}
-	result := make([]api.Message, len(rows))
+	result := make([]loopd.Message, len(rows))
 	for index, row := range rows {
 		result[len(rows)-1-index] = messageFromPO(row)
 	}
 	return result, hasEarlier, nil
 }
 
-func (store *Store) ListPendingInvocations(ctx context.Context, operatorID string, limit int) ([]api.Invocation, error) {
+func (store *Store) ListPendingInvocations(ctx context.Context, operatorID string, limit int) ([]loopd.Invocation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []invocationPO
 	err := store.db.WithContext(ctx).
-		Where("responder_role = ? AND responder_id = ? AND phase = ?", api.RoleOperator, operatorID, api.InvocationQueued).
+		Where("responder_role = ? AND responder_id = ? AND phase = ?", loopd.RoleOperator, operatorID, loopd.InvocationQueued).
 		Order("created_at ASC").
 		Limit(normalizeLimit(limit)).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	result := make([]api.Invocation, 0, len(rows))
+	result := make([]loopd.Invocation, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, invocationFromPO(row))
 	}
 	return result, nil
 }
 
-func (store *Store) AcceptInvocation(ctx context.Context, id string, resource api.ResourceRef) (api.Invocation, error) {
+func (store *Store) AcceptInvocation(ctx context.Context, id string, resource loopd.ResourceRef) (loopd.Invocation, error) {
 	if resource.APIVersion == "" || resource.Kind == "" || resource.Name == "" || resource.UID == "" {
-		return api.Invocation{}, ErrInvalid
+		return loopd.Invocation{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -296,13 +296,13 @@ func (store *Store) AcceptInvocation(ctx context.Context, id string, resource ap
 		if err := tx.First(&row, "id = ?", id).Error; err != nil {
 			return mapDBError(err)
 		}
-		if api.InvocationPhase(row.Phase) != api.InvocationQueued {
+		if loopd.InvocationPhase(row.Phase) != loopd.InvocationQueued {
 			if row.ResourceUID == resource.UID {
 				return nil
 			}
 			return ErrConflict
 		}
-		row.Phase = string(api.InvocationRunning)
+		row.Phase = string(loopd.InvocationRunning)
 		row.ResourceAPIVersion = resource.APIVersion
 		row.ResourceKind = resource.Kind
 		row.ResourceNamespace = resource.Namespace
@@ -316,7 +316,7 @@ func (store *Store) AcceptInvocation(ctx context.Context, id string, resource ap
 	return invocationFromPO(row), err
 }
 
-func (store *Store) StartInvocation(ctx context.Context, id string) (api.Invocation, error) {
+func (store *Store) StartInvocation(ctx context.Context, id string) (loopd.Invocation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row invocationPO
@@ -324,13 +324,13 @@ func (store *Store) StartInvocation(ctx context.Context, id string) (api.Invocat
 		if err := tx.First(&row, "id = ?", id).Error; err != nil {
 			return mapDBError(err)
 		}
-		if api.InvocationPhase(row.Phase) == api.InvocationRunning {
+		if loopd.InvocationPhase(row.Phase) == loopd.InvocationRunning {
 			return nil
 		}
-		if api.InvocationPhase(row.Phase) != api.InvocationQueued {
+		if loopd.InvocationPhase(row.Phase) != loopd.InvocationQueued {
 			return ErrConflict
 		}
-		row.Phase = string(api.InvocationRunning)
+		row.Phase = string(loopd.InvocationRunning)
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
@@ -342,12 +342,12 @@ func (store *Store) StartInvocation(ctx context.Context, id string) (api.Invocat
 func (store *Store) CompleteInvocation(
 	ctx context.Context,
 	id string,
-	role api.Role,
+	role loopd.Role,
 	authorID string,
 	content string,
-) (api.Invocation, error) {
-	if (role != api.RoleHarness && role != api.RoleOperator) || authorID == "" || strings.TrimSpace(content) == "" {
-		return api.Invocation{}, ErrInvalid
+) (loopd.Invocation, error) {
+	if (role != loopd.RoleHarness && role != loopd.RoleOperator) || authorID == "" || strings.TrimSpace(content) == "" {
+		return loopd.Invocation{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -356,10 +356,10 @@ func (store *Store) CompleteInvocation(
 		if err := tx.First(&invocation, "id = ?", id).Error; err != nil {
 			return mapDBError(err)
 		}
-		if api.InvocationPhase(invocation.Phase) == api.InvocationSucceeded {
+		if loopd.InvocationPhase(invocation.Phase) == loopd.InvocationSucceeded {
 			return nil
 		}
-		if api.InvocationPhase(invocation.Phase).Terminal() {
+		if loopd.InvocationPhase(invocation.Phase).Terminal() {
 			return ErrConflict
 		}
 		result := tx.Model(&conversationPO{}).
@@ -385,7 +385,7 @@ func (store *Store) CompleteInvocation(
 			return err
 		}
 		invocation.OutputMessageID = message.ID
-		invocation.Phase = string(api.InvocationSucceeded)
+		invocation.Phase = string(loopd.InvocationSucceeded)
 		invocation.Error = ""
 		if err := tx.Save(&invocation).Error; err != nil {
 			return err
@@ -406,10 +406,10 @@ func (store *Store) FailInvocation(ctx context.Context, id, reason string) error
 		if err := tx.First(&row, "id = ?", id).Error; err != nil {
 			return mapDBError(err)
 		}
-		if api.InvocationPhase(row.Phase).Terminal() {
+		if loopd.InvocationPhase(row.Phase).Terminal() {
 			return nil
 		}
-		row.Phase = string(api.InvocationFailed)
+		row.Phase = string(loopd.InvocationFailed)
 		row.Error = reason
 		if err := tx.Save(&row).Error; err != nil {
 			return err
@@ -418,9 +418,9 @@ func (store *Store) FailInvocation(ctx context.Context, id, reason string) error
 	})
 }
 
-func (store *Store) UpsertActivity(ctx context.Context, invocationID string, request api.ActivityRequest) (api.Activity, error) {
+func (store *Store) UpsertActivity(ctx context.Context, invocationID string, request loopd.ActivityUpdate) (loopd.Activity, error) {
 	if request.Key == "" || !request.Actor.Valid() || request.Kind == "" || request.Title == "" || request.Phase == "" {
-		return api.Activity{}, ErrInvalid
+		return loopd.Activity{}, ErrInvalid
 	}
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -456,7 +456,7 @@ func (store *Store) UpsertActivity(ctx context.Context, invocationID string, req
 	return activityFromPO(row), err
 }
 
-func (store *Store) ListInvocationEvents(ctx context.Context, invocationID string, after uint64, limit int) ([]api.InvocationEvent, error) {
+func (store *Store) ListInvocationEvents(ctx context.Context, invocationID string, after uint64, limit int) ([]loopd.InvocationEvent, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []invocationEventPO
@@ -465,9 +465,9 @@ func (store *Store) ListInvocationEvents(ctx context.Context, invocationID strin
 		Order("cursor ASC").Limit(normalizeLimit(limit)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.InvocationEvent, 0, len(rows))
+	result := make([]loopd.InvocationEvent, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, api.InvocationEvent{
+		result = append(result, loopd.InvocationEvent{
 			Cursor: row.Cursor, InvocationID: row.InvocationID, CallID: row.CallID, Kind: row.Kind,
 			Data: json.RawMessage(row.Data), CreatedAt: row.CreatedAt,
 		})
@@ -487,7 +487,7 @@ func (store *Store) LatestInvocationCursor(ctx context.Context, invocationID str
 	return row.Cursor, err
 }
 
-func (store *Store) ListOperatorEvents(ctx context.Context, operatorID string, after uint64, limit int) ([]api.OperatorEvent, error) {
+func (store *Store) ListOperatorEvents(ctx context.Context, operatorID string, after uint64, limit int) ([]loopd.OperatorEvent, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []invocationEventPO
@@ -495,7 +495,7 @@ func (store *Store) ListOperatorEvents(ctx context.Context, operatorID string, a
 		Select("invocation_events.*").
 		Joins("JOIN invocations ON invocations.id = invocation_events.invocation_id").
 		Where("invocations.responder_role = ? AND invocations.responder_id = ? AND invocation_events.cursor > ?",
-			api.RoleOperator, operatorID, after).
+			loopd.RoleOperator, operatorID, after).
 		Where("invocation_events.kind IN ?", []string{
 			"invocation.created", "interaction.resolved", "harness_call.updated",
 		}).
@@ -517,18 +517,18 @@ func (store *Store) ListOperatorEvents(ctx context.Context, operatorID string, a
 			return nil, err
 		}
 	}
-	byID := make(map[string]api.Invocation, len(invocations))
+	byID := make(map[string]loopd.Invocation, len(invocations))
 	for _, invocation := range invocations {
 		byID[invocation.ID] = invocationFromPO(invocation)
 	}
-	result := make([]api.OperatorEvent, 0, len(rows))
+	result := make([]loopd.OperatorEvent, 0, len(rows))
 	for _, row := range rows {
 		invocation, exists := byID[row.InvocationID]
 		if !exists {
 			return nil, fmt.Errorf("%w: Invocation %q", ErrNotFound, row.InvocationID)
 		}
-		result = append(result, api.OperatorEvent{
-			Event: api.InvocationEvent{
+		result = append(result, loopd.OperatorEvent{
+			Event: loopd.InvocationEvent{
 				Cursor: row.Cursor, InvocationID: row.InvocationID, CallID: row.CallID, Kind: row.Kind,
 				Data: json.RawMessage(row.Data), CreatedAt: row.CreatedAt,
 			},
@@ -538,7 +538,7 @@ func (store *Store) ListOperatorEvents(ctx context.Context, operatorID string, a
 	return result, nil
 }
 
-func (store *Store) ListActivities(ctx context.Context, invocationID string) ([]api.Activity, error) {
+func (store *Store) ListActivities(ctx context.Context, invocationID string) ([]loopd.Activity, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []activityPO
@@ -546,14 +546,14 @@ func (store *Store) ListActivities(ctx context.Context, invocationID string) ([]
 		Order("created_at ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.Activity, 0, len(rows))
+	result := make([]loopd.Activity, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, activityFromPO(row))
 	}
 	return result, nil
 }
 
-func (store *Store) ListHarnessCalls(ctx context.Context, invocationID string) ([]api.HarnessCall, error) {
+func (store *Store) ListHarnessCalls(ctx context.Context, invocationID string) ([]loopd.HarnessCall, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []harnessCallPO
@@ -561,14 +561,14 @@ func (store *Store) ListHarnessCalls(ctx context.Context, invocationID string) (
 		Order("created_at ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.HarnessCall, 0, len(rows))
+	result := make([]loopd.HarnessCall, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, callFromPO(row))
 	}
 	return result, nil
 }
 
-func (store *Store) ListInteractions(ctx context.Context, invocationID string) ([]api.Interaction, error) {
+func (store *Store) ListInteractions(ctx context.Context, invocationID string) ([]loopd.Interaction, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []interactionPO
@@ -576,19 +576,19 @@ func (store *Store) ListInteractions(ctx context.Context, invocationID string) (
 		Order("created_at ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	result := make([]api.Interaction, 0, len(rows))
+	result := make([]loopd.Interaction, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, interactionFromPO(row))
 	}
 	return result, nil
 }
 
-func (store *Store) GetMessage(ctx context.Context, id string) (api.Message, error) {
+func (store *Store) GetMessage(ctx context.Context, id string) (loopd.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var row messagePO
 	if err := store.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
-		return api.Message{}, mapDBError(err)
+		return loopd.Message{}, mapDBError(err)
 	}
 	return messageFromPO(row), nil
 }
@@ -607,7 +607,7 @@ func appendEvent(tx *gorm.DB, invocationID, callID, kind string, data any) error
 	}).Error
 }
 
-func hashPromptRequest(request api.PromptRequest) (string, []byte, error) {
+func hashPromptRequest(request promptRequest) (string, []byte, error) {
 	tools, err := json.Marshal(request.Tools)
 	if err != nil {
 		return "", nil, err
@@ -633,18 +633,18 @@ func harnessTextDelta(data json.RawMessage) string {
 	return payload.Text
 }
 
-func hashInteractionRequest(request api.InteractionRequest) (string, []byte, error) {
+func hashInteractionRequest(request interactionRequest) (string, []byte, error) {
 	options, err := json.Marshal(request.Options)
 	if err != nil {
 		return "", nil, err
 	}
 	return hashJSON(struct {
-		Requester api.ResponderRef    `json:"requester"`
-		Kind      api.InteractionKind `json:"kind"`
-		Title     string              `json:"title"`
-		Prompt    string              `json:"prompt"`
-		Options   json.RawMessage     `json:"options"`
-		ExpiresAt *time.Time          `json:"expires_at"`
+		Requester loopd.ResponderRef    `json:"requester"`
+		Kind      loopd.InteractionKind `json:"kind"`
+		Title     string                `json:"title"`
+		Prompt    string                `json:"prompt"`
+		Options   json.RawMessage       `json:"options"`
+		ExpiresAt *time.Time            `json:"expires_at"`
 	}{request.Requester, request.Kind, request.Title, strings.TrimSpace(request.Prompt), options, request.ExpiresAt}), options, nil
 }
 
@@ -679,29 +679,29 @@ func mapDBError(err error) error {
 	return err
 }
 
-func conversationFromPO(row conversationPO) api.Conversation {
-	return api.Conversation{ID: row.ID, Title: row.Title, Timestamped: api.Timestamped{
+func conversationFromPO(row conversationPO) loopd.Conversation {
+	return loopd.Conversation{ID: row.ID, Title: row.Title, Timestamped: loopd.Timestamped{
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}}
 }
 
-func messageFromPO(row messagePO) api.Message {
-	return api.Message{
+func messageFromPO(row messagePO) loopd.Message {
+	return loopd.Message{
 		ID: row.ID, ConversationID: row.ConversationID, Sequence: row.Sequence,
-		Role: api.Role(row.Role), AuthorID: row.AuthorID, Content: row.Content, CreatedAt: row.CreatedAt,
+		Role: loopd.Role(row.Role), AuthorID: row.AuthorID, Content: row.Content, CreatedAt: row.CreatedAt,
 	}
 }
 
-func invocationFromPO(row invocationPO) api.Invocation {
-	result := api.Invocation{
+func invocationFromPO(row invocationPO) loopd.Invocation {
+	result := loopd.Invocation{
 		ID: row.ID, ConversationID: row.ConversationID, InputMessageID: row.InputMessageID,
 		OutputMessageID:   row.OutputMessageID,
-		Responder:         api.ResponderRef{Role: api.Role(row.ResponderRole), ID: row.ResponderID},
-		ContextThroughSeq: row.ContextThroughSeq, Phase: api.InvocationPhase(row.Phase), Error: row.Error,
-		Timestamped: api.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
+		Responder:         loopd.ResponderRef{Role: loopd.Role(row.ResponderRole), ID: row.ResponderID},
+		ContextThroughSeq: row.ContextThroughSeq, Phase: loopd.InvocationPhase(row.Phase), Error: row.Error,
+		Timestamped: loopd.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
 	}
 	if row.ResourceUID != "" {
-		result.Resource = &api.ResourceRef{
+		result.Resource = &loopd.ResourceRef{
 			APIVersion: row.ResourceAPIVersion, Kind: row.ResourceKind, Namespace: row.ResourceNamespace,
 			Name: row.ResourceName, UID: row.ResourceUID,
 		}
@@ -709,35 +709,35 @@ func invocationFromPO(row invocationPO) api.Invocation {
 	return result
 }
 
-func activityFromPO(row activityPO) api.Activity {
-	return api.Activity{
+func activityFromPO(row activityPO) loopd.Activity {
+	return loopd.Activity{
 		ID: row.ID, InvocationID: row.InvocationID, Key: row.Key, ParentID: row.ParentID,
-		Actor: api.ResponderRef{Role: api.Role(row.ActorRole), ID: row.ActorID},
-		Kind:  row.Kind, Title: row.Title, Detail: row.Detail, Phase: api.ActivityPhase(row.Phase),
-		Timestamped: api.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
+		Actor: loopd.ResponderRef{Role: loopd.Role(row.ActorRole), ID: row.ActorID},
+		Kind:  row.Kind, Title: row.Title, Detail: row.Detail, Phase: loopd.ActivityPhase(row.Phase),
+		Timestamped: loopd.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
 	}
 }
 
-func callFromPO(row harnessCallPO) api.HarnessCall {
-	return api.HarnessCall{
+func callFromPO(row harnessCallPO) loopd.HarnessCall {
+	return loopd.HarnessCall{
 		ID: row.ID, InvocationID: row.InvocationID, OwnerUID: row.OwnerUID, EffectKey: row.EffectKey,
-		Target: row.Target, Phase: api.CallPhase(row.Phase), ExternalRef: row.ExternalRef,
+		Target: row.Target, Phase: loopd.CallPhase(row.Phase), ExternalRef: row.ExternalRef,
 		ProviderCursor: row.ProviderCursor, LastEventCursor: row.LastEventCursor,
 		StreamText: row.StreamText, Result: row.Result, Error: row.Error,
 		LastActivityAt: row.LastActivityAt,
-		Timestamped:    api.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
+		Timestamped:    loopd.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
 	}
 }
 
-func interactionFromPO(row interactionPO) api.Interaction {
-	var options []api.InteractionOption
+func interactionFromPO(row interactionPO) loopd.Interaction {
+	var options []loopd.InteractionOption
 	_ = json.Unmarshal(row.OptionsJSON, &options)
-	return api.Interaction{
+	return loopd.Interaction{
 		ID: row.ID, InvocationID: row.InvocationID, OwnerUID: row.OwnerUID, EffectKey: row.EffectKey,
-		Requester: api.ResponderRef{Role: api.Role(row.RequesterRole), ID: row.RequesterID},
-		Kind:      api.InteractionKind(row.Kind), Title: row.Title, Prompt: row.Prompt, Options: options,
-		Phase: api.InteractionPhase(row.Phase), Answer: row.Answer, ExpiresAt: row.ExpiresAt,
+		Requester: loopd.ResponderRef{Role: loopd.Role(row.RequesterRole), ID: row.RequesterID},
+		Kind:      loopd.InteractionKind(row.Kind), Title: row.Title, Prompt: row.Prompt, Options: options,
+		Phase: loopd.InteractionPhase(row.Phase), Answer: row.Answer, ExpiresAt: row.ExpiresAt,
 		ResolvedAt:  row.ResolvedAt,
-		Timestamped: api.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
+		Timestamped: loopd.Timestamped{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
 	}
 }

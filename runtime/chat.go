@@ -6,36 +6,36 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 )
 
 type Chat struct {
 	client *client
 }
 
-func (chat Chat) Context(ctx context.Context, invocationID string) (api.InvocationContext, error) {
-	var result api.InvocationContext
+func (chat Chat) Context(ctx context.Context, invocationID string) (loopd.InvocationContext, error) {
+	var result loopd.InvocationContext
 	err := chat.client.do(ctx, http.MethodGet, "/v1/invocations/"+url.PathEscape(invocationID)+"/context", nil, &result)
 	return result, err
 }
 
-func (chat Chat) History(ctx context.Context, conversationID string, after int64, limit int) ([]api.Message, error) {
-	var result api.Page[api.Message]
+func (chat Chat) History(ctx context.Context, conversationID string, after int64, limit int) ([]loopd.Message, error) {
+	var result page[loopd.Message]
 	path := "/v1/conversations/" + url.PathEscape(conversationID) + "/messages?after=" + strconv.FormatInt(after, 10) +
 		"&limit=" + strconv.Itoa(limit)
 	err := chat.client.do(ctx, http.MethodGet, path, nil, &result)
 	return result.Data, err
 }
 
-func (chat Chat) Reply(ctx context.Context, invocationID, content string) (api.Invocation, error) {
-	var result api.Invocation
+func (chat Chat) Reply(ctx context.Context, invocationID, content string) (loopd.Invocation, error) {
+	var result loopd.Invocation
 	err := chat.client.do(ctx, http.MethodPost, "/v1/invocations/"+url.PathEscape(invocationID)+"/reply",
-		api.ReplyRequest{Content: content}, &result)
+		replyRequest{Content: content}, &result)
 	return result, err
 }
 
-func (chat Chat) Activity(ctx context.Context, invocationID string, request api.ActivityRequest) (api.Activity, error) {
-	var result api.Activity
+func (chat Chat) Activity(ctx context.Context, invocationID string, request loopd.ActivityUpdate) (loopd.Activity, error) {
+	var result loopd.Activity
 	err := chat.client.do(ctx, http.MethodPost, "/v1/invocations/"+url.PathEscape(invocationID)+"/activities", request, &result)
 	return result, err
 }

@@ -1,4 +1,4 @@
-package api
+package loopd
 
 import (
 	"encoding/json"
@@ -93,29 +93,7 @@ type OperatorEvent struct {
 	Invocation Invocation      `json:"invocation"`
 }
 
-type CreateConversationRequest struct {
-	Title string `json:"title,omitempty"`
-}
-
-type CreateMessageRequest struct {
-	Content   string       `json:"content"`
-	Responder ResponderRef `json:"responder"`
-}
-
-type CreateMessageResponse struct {
-	Message    Message    `json:"message"`
-	Invocation Invocation `json:"invocation"`
-}
-
-type AcceptInvocationRequest struct {
-	Resource ResourceRef `json:"resource"`
-}
-
-type ReplyRequest struct {
-	Content string `json:"content"`
-}
-
-type ActivityRequest struct {
+type ActivityUpdate struct {
 	Key      string        `json:"key"`
 	ParentID string        `json:"parent_id,omitempty"`
 	Actor    ResponderRef  `json:"actor"`

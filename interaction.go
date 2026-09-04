@@ -1,4 +1,4 @@
-package api
+package loopd
 
 import "time"
 
@@ -42,19 +42,4 @@ type Interaction struct {
 	ExpiresAt    *time.Time          `json:"expires_at,omitempty"`
 	ResolvedAt   *time.Time          `json:"resolved_at,omitempty"`
 	Timestamped
-}
-
-type InteractionRequest struct {
-	OwnerUID  string              `json:"owner_uid"`
-	EffectKey string              `json:"effect_key"`
-	Requester ResponderRef        `json:"requester"`
-	Kind      InteractionKind     `json:"kind"`
-	Title     string              `json:"title,omitempty"`
-	Prompt    string              `json:"prompt"`
-	Options   []InteractionOption `json:"options,omitempty"`
-	ExpiresAt *time.Time          `json:"expires_at,omitempty"`
-}
-
-type ResolveInteractionRequest struct {
-	Answer string `json:"answer"`
 }
