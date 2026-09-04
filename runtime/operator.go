@@ -7,15 +7,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 )
 
 type Operator struct {
 	client *client
 }
 
-func (operator Operator) Events(ctx context.Context, operatorID string, after uint64) ([]api.OperatorEvent, error) {
-	var result api.Page[api.OperatorEvent]
+func (operator Operator) Events(ctx context.Context, operatorID string, after uint64) ([]loopd.OperatorEvent, error) {
+	var result page[loopd.OperatorEvent]
 	path := "/v1/operators/" + url.PathEscape(operatorID) + "/events?after=" + strconv.FormatUint(after, 10)
 	err := operator.client.do(ctx, http.MethodGet, path, nil, &result)
 	return result.Data, err
@@ -25,8 +25,8 @@ func (operator Operator) Events(ctx context.Context, operatorID string, after ui
 // Activity projections are deliberately excluded so they cannot create a
 // Reconcile storm. A controller bridge can create a CRD for invocation.created
 // and enqueue an existing CRD when an Interaction or Harness Call changes.
-func (operator Operator) Watch(ctx context.Context, operatorID string, after uint64) (<-chan api.OperatorEvent, <-chan error) {
-	events := make(chan api.OperatorEvent)
+func (operator Operator) Watch(ctx context.Context, operatorID string, after uint64) (<-chan loopd.OperatorEvent, <-chan error) {
+	events := make(chan loopd.OperatorEvent)
 	errors := make(chan error, 1)
 	go func() {
 		defer close(events)
@@ -60,15 +60,15 @@ func (operator Operator) Watch(ctx context.Context, operatorID string, after uin
 	return events, errors
 }
 
-func (operator Operator) Pending(ctx context.Context, operatorID string) ([]api.Invocation, error) {
-	var result api.Page[api.Invocation]
+func (operator Operator) Pending(ctx context.Context, operatorID string) ([]loopd.Invocation, error) {
+	var result page[loopd.Invocation]
 	err := operator.client.do(ctx, http.MethodGet, "/v1/operators/"+url.PathEscape(operatorID)+"/invocations", nil, &result)
 	return result.Data, err
 }
 
-func (operator Operator) Accept(ctx context.Context, invocationID string, resource api.ResourceRef) (api.Invocation, error) {
-	var result api.Invocation
+func (operator Operator) Accept(ctx context.Context, invocationID string, resource loopd.ResourceRef) (loopd.Invocation, error) {
+	var result loopd.Invocation
 	err := operator.client.do(ctx, http.MethodPost, "/v1/invocations/"+url.PathEscape(invocationID)+"/accept",
-		api.AcceptInvocationRequest{Resource: resource}, &result)
+		acceptInvocationRequest{Resource: resource}, &result)
 	return result, err
 }

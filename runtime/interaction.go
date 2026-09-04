@@ -6,33 +6,33 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 )
 
 type InteractionPrompt struct {
 	InvocationID string
 	OwnerUID     string
 	EffectKey    string
-	Requester    api.ResponderRef
+	Requester    loopd.ResponderRef
 	Title        string
 	Text         string
-	Options      []api.InteractionOption
+	Options      []loopd.InteractionOption
 	ExpiresAt    *time.Time
 }
 
 func (loop Loop) Ask(ctx context.Context, prompt InteractionPrompt) (*Interaction, error) {
-	return loop.interact(ctx, api.InteractionAsk, prompt)
+	return loop.interact(ctx, loopd.InteractionAsk, prompt)
 }
 
 func (loop Loop) Confirm(ctx context.Context, prompt InteractionPrompt) (*Interaction, error) {
-	return loop.interact(ctx, api.InteractionConfirm, prompt)
+	return loop.interact(ctx, loopd.InteractionConfirm, prompt)
 }
 
-func (loop Loop) interact(ctx context.Context, kind api.InteractionKind, prompt InteractionPrompt) (*Interaction, error) {
-	var result api.Interaction
+func (loop Loop) interact(ctx context.Context, kind loopd.InteractionKind, prompt InteractionPrompt) (*Interaction, error) {
+	var result loopd.Interaction
 	err := loop.client.do(ctx, http.MethodPost,
 		"/v1/invocations/"+url.PathEscape(prompt.InvocationID)+"/interactions",
-		api.InteractionRequest{
+		interactionRequest{
 			OwnerUID: prompt.OwnerUID, EffectKey: prompt.EffectKey, Requester: prompt.Requester,
 			Kind: kind, Title: prompt.Title, Prompt: prompt.Text, Options: prompt.Options, ExpiresAt: prompt.ExpiresAt,
 		}, &result)
@@ -44,13 +44,13 @@ func (loop Loop) interact(ctx context.Context, kind api.InteractionKind, prompt 
 
 type Interaction struct {
 	client *client
-	value  api.Interaction
+	value  loopd.Interaction
 }
 
-func (interaction *Interaction) Value() api.Interaction { return interaction.value }
+func (interaction *Interaction) Value() loopd.Interaction { return interaction.value }
 
-func (interaction *Interaction) Refresh(ctx context.Context) (api.Interaction, error) {
-	var result api.Interaction
+func (interaction *Interaction) Refresh(ctx context.Context) (loopd.Interaction, error) {
+	var result loopd.Interaction
 	err := interaction.client.do(ctx, http.MethodGet,
 		"/v1/interactions/"+url.PathEscape(interaction.value.ID), nil, &result)
 	if err == nil {
@@ -59,7 +59,7 @@ func (interaction *Interaction) Refresh(ctx context.Context) (api.Interaction, e
 	return result, err
 }
 
-func (interaction *Interaction) Wait(ctx context.Context) (api.Interaction, error) {
+func (interaction *Interaction) Wait(ctx context.Context) (loopd.Interaction, error) {
 	if interaction.value.Phase.Terminal() {
 		return interaction.value, nil
 	}

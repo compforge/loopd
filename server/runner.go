@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/harness"
 )
 
@@ -81,7 +81,7 @@ func (runner *Runner) dispatch(ctx context.Context) {
 		if !runner.claim(call.ID) {
 			continue
 		}
-		go func(call api.HarnessCall) {
+		go func(call loopd.HarnessCall) {
 			defer runner.release(call.ID)
 			runner.advance(ctx, call)
 		}(call)
@@ -107,11 +107,11 @@ func (runner *Runner) release(id string) {
 	runner.activeMu.Unlock()
 }
 
-func (runner *Runner) advance(parent context.Context, call api.HarnessCall) {
+func (runner *Runner) advance(parent context.Context, call loopd.HarnessCall) {
 	adapter, ok := runner.adapters[call.Target]
 	if !ok {
 		reason := fmt.Sprintf("Harness %q is not configured", call.Target)
-		runner.finishCall(parent, call, HarnessCallUpdate{Phase: api.CallFailed, Error: reason})
+		runner.finishCall(parent, call, HarnessCallUpdate{Phase: loopd.CallFailed, Error: reason})
 		return
 	}
 	current, prompt, err := runner.store.GetHarnessRequest(parent, call.ID)
@@ -132,9 +132,9 @@ func (runner *Runner) advance(parent context.Context, call api.HarnessCall) {
 	defer cancel()
 
 	var observation harness.Observation
-	if current.Phase == api.CallPending || current.Phase == api.CallStarting {
+	if current.Phase == loopd.CallPending || current.Phase == loopd.CallStarting {
 		_, _ = runner.store.UpdateHarnessCall(ctx, current.ID, HarnessCallUpdate{
-			Phase: api.CallStarting, ExternalRef: current.ExternalRef,
+			Phase: loopd.CallStarting, ExternalRef: current.ExternalRef,
 			ProviderCursor: current.ProviderCursor, ActivityAt: time.Now().UTC(),
 		})
 		observation, err = adapter.Ensure(ctx, request, emit)
@@ -144,7 +144,7 @@ func (runner *Runner) advance(parent context.Context, call api.HarnessCall) {
 	if err != nil {
 		if harness.IsOutcomeUnknown(err) {
 			runner.finishCall(parent, current, HarnessCallUpdate{
-				Phase: api.CallUnknown, ExternalRef: observation.ExternalRef,
+				Phase: loopd.CallUnknown, ExternalRef: observation.ExternalRef,
 				ProviderCursor: observation.Cursor, Error: err.Error(),
 			})
 			return
@@ -161,12 +161,12 @@ func (runner *Runner) advance(parent context.Context, call api.HarnessCall) {
 		ActivityAt:     observation.ActivityAt, Result: observation.Result, Error: observation.Error,
 	}
 	if update.Phase == "" {
-		update.Phase = api.CallRunning
+		update.Phase = loopd.CallRunning
 	}
 	runner.finishCall(parent, current, update)
 }
 
-func (runner *Runner) finishCall(ctx context.Context, old api.HarnessCall, update HarnessCallUpdate) {
+func (runner *Runner) finishCall(ctx context.Context, old loopd.HarnessCall, update HarnessCallUpdate) {
 	call, err := runner.store.UpdateHarnessCall(ctx, old.ID, update)
 	if err != nil {
 		runner.logger.Error("persist Harness Call observation", "call_id", old.ID, "error", err)
@@ -182,15 +182,15 @@ func (runner *Runner) finishCall(ctx context.Context, old api.HarnessCall, updat
 	}
 	// Calls owned by an Operator are internal evidence. Only a directly
 	// addressed Harness may publish the Invocation's final chat answer.
-	if invocation.Responder.Role != api.RoleHarness {
+	if invocation.Responder.Role != loopd.RoleHarness {
 		return
 	}
-	if call.Phase == api.CallSucceeded {
+	if call.Phase == loopd.CallSucceeded {
 		answer := call.Result
 		if answer == "" {
 			answer = call.StreamText
 		}
-		if _, err := runner.store.CompleteInvocation(ctx, invocation.ID, api.RoleHarness, invocation.Responder.ID, answer); err != nil {
+		if _, err := runner.store.CompleteInvocation(ctx, invocation.ID, loopd.RoleHarness, invocation.Responder.ID, answer); err != nil {
 			runner.logger.Error("publish Harness answer", "call_id", call.ID, "error", err)
 		}
 		return

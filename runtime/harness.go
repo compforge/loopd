@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 )
 
 type Harness struct {
@@ -20,14 +20,14 @@ type Prompt struct {
 	EffectKey    string
 	Target       string
 	Text         string
-	Tools        []api.Tool
+	Tools        []loopd.Tool
 }
 
 func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error) {
-	var result api.HarnessCall
+	var result loopd.HarnessCall
 	err := service.client.do(ctx, http.MethodPost,
 		"/v1/invocations/"+url.PathEscape(prompt.InvocationID)+"/harness-calls",
-		api.PromptRequest{
+		promptRequest{
 			OwnerUID: prompt.OwnerUID, EffectKey: prompt.EffectKey,
 			Target: prompt.Target, Prompt: prompt.Text, Tools: prompt.Tools,
 		}, &result)
@@ -39,13 +39,13 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 
 type Call struct {
 	client *client
-	value  api.HarnessCall
+	value  loopd.HarnessCall
 }
 
-func (call *Call) Value() api.HarnessCall { return call.value }
+func (call *Call) Value() loopd.HarnessCall { return call.value }
 
-func (call *Call) Refresh(ctx context.Context) (api.HarnessCall, error) {
-	var result api.HarnessCall
+func (call *Call) Refresh(ctx context.Context) (loopd.HarnessCall, error) {
+	var result loopd.HarnessCall
 	err := call.client.do(ctx, http.MethodGet, "/v1/harness-calls/"+url.PathEscape(call.value.ID), nil, &result)
 	if err == nil {
 		call.value = result
@@ -53,7 +53,7 @@ func (call *Call) Refresh(ctx context.Context) (api.HarnessCall, error) {
 	return result, err
 }
 
-func (call *Call) Wait(ctx context.Context) (api.HarnessCall, error) {
+func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	if call.value.Phase.Terminal() {
 		return call.value, nil
 	}
@@ -77,8 +77,8 @@ func (call *Call) Wait(ctx context.Context) (api.HarnessCall, error) {
 
 // Stream polls persisted Harness Events. The stream can be recreated with the
 // last cursor after process or network interruption; it does not own the Call.
-func (call *Call) Stream(ctx context.Context, after uint64) (<-chan api.HarnessEvent, <-chan error) {
-	events := make(chan api.HarnessEvent)
+func (call *Call) Stream(ctx context.Context, after uint64) (<-chan loopd.HarnessEvent, <-chan error) {
+	events := make(chan loopd.HarnessEvent)
 	errors := make(chan error, 1)
 	go func() {
 		defer close(events)
@@ -120,8 +120,8 @@ func (call *Call) Stream(ctx context.Context, after uint64) (<-chan api.HarnessE
 	return events, errors
 }
 
-func (call *Call) events(ctx context.Context, after uint64) ([]api.HarnessEvent, error) {
-	var result api.Page[api.HarnessEvent]
+func (call *Call) events(ctx context.Context, after uint64) ([]loopd.HarnessEvent, error) {
+	var result page[loopd.HarnessEvent]
 	path := "/v1/harness-calls/" + url.PathEscape(call.value.ID) + "/events?after=" + strconv.FormatUint(after, 10)
 	err := call.client.do(ctx, http.MethodGet, path, nil, &result)
 	return result.Data, err

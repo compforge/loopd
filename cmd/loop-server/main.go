@@ -12,7 +12,7 @@ import (
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server"
 )
 
@@ -72,11 +72,11 @@ func run() error {
 	}
 }
 
-func loadResponders(raw string) ([]api.Responder, error) {
+func loadResponders(raw string) ([]loopd.Responder, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	var responders []api.Responder
+	var responders []loopd.Responder
 	if err := json.Unmarshal([]byte(raw), &responders); err != nil {
 		return nil, fmt.Errorf("decode LOOP_SERVER_RESPONDERS: %w", err)
 	}

@@ -12,8 +12,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/compforge/loopd/api"
 )
 
 type Options struct {
@@ -79,7 +77,7 @@ func (client *client) do(ctx context.Context, method, path string, input, output
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		var envelope api.ErrorResponse
+		var envelope errorResponse
 		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&envelope); err == nil && envelope.Error.Message != "" {
 			return &Error{StatusCode: response.StatusCode, Type: envelope.Error.Type, Message: envelope.Error.Message}
 		}

@@ -10,7 +10,7 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/sse"
-	"github.com/compforge/loopd/api"
+	loopd "github.com/compforge/loopd"
 	"gorm.io/gorm"
 )
 
@@ -69,7 +69,7 @@ func (server *Server) streamInvocation(ctx context.Context, request *hertzapp.Re
 				return nil
 			}
 			for _, event := range events {
-				patch := invocationEventPatch(event, invocation.Responder.Role == api.RoleHarness)
+				patch := invocationEventPatch(event, invocation.Responder.Role == loopd.RoleHarness)
 				if err := writeAgentUE(writer, event.Cursor, patch); err != nil {
 					return nil
 				}
@@ -89,12 +89,12 @@ func (server *Server) streamInvocation(ctx context.Context, request *hertzapp.Re
 	}
 }
 
-func (server *Server) invocationModel(ctx context.Context, id string) (agentUEModel, api.Invocation, uint64, error) {
+func (server *Server) invocationModel(ctx context.Context, id string) (agentUEModel, loopd.Invocation, uint64, error) {
 	ctx, cancel := server.store.withTimeout(ctx)
 	defer cancel()
 
 	var model agentUEModel
-	var invocation api.Invocation
+	var invocation loopd.Invocation
 	var cursor uint64
 	err := server.store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var invocationRow invocationPO
@@ -129,7 +129,7 @@ func (server *Server) invocationModel(ctx context.Context, id string) (agentUEMo
 		}
 
 		blocks := []any{map[string]any{
-			"id": "query", "type": "text", "role": api.RoleUser,
+			"id": "query", "type": "text", "role": loopd.RoleUser,
 			"content": messageFromPO(inputRow).Content,
 		}}
 		if invocation.OutputMessageID != "" {
@@ -141,9 +141,9 @@ func (server *Server) invocationModel(ctx context.Context, id string) (agentUEMo
 			blocks = append(blocks, map[string]any{
 				"id": "answer", "type": "text", "role": message.Role, "content": message.Content,
 			})
-		} else if invocation.Responder.Role == api.RoleHarness && len(callRows) > 0 && callRows[0].StreamText != "" {
+		} else if invocation.Responder.Role == loopd.RoleHarness && len(callRows) > 0 && callRows[0].StreamText != "" {
 			blocks = append(blocks, map[string]any{
-				"id": "answer", "type": "text", "role": api.RoleHarness, "content": callRows[0].StreamText,
+				"id": "answer", "type": "text", "role": loopd.RoleHarness, "content": callRows[0].StreamText,
 			})
 		}
 		for _, row := range activityRows {
@@ -171,15 +171,15 @@ func (server *Server) invocationModel(ctx context.Context, id string) (agentUEMo
 		return nil
 	})
 	if err != nil {
-		return agentUEModel{}, api.Invocation{}, 0, err
+		return agentUEModel{}, loopd.Invocation{}, 0, err
 	}
 	return model, invocation, cursor, nil
 }
 
-func invocationEventPatch(event api.InvocationEvent, directHarness bool) agentUEEvent {
+func invocationEventPatch(event loopd.InvocationEvent, directHarness bool) agentUEEvent {
 	if event.Kind == "invocation.completed" {
 		var completed struct {
-			Message api.Message `json:"message"`
+			Message loopd.Message `json:"message"`
 		}
 		if json.Unmarshal(event.Data, &completed) == nil && completed.Message.ID != "" {
 			return agentUEEvent{
@@ -198,7 +198,7 @@ func invocationEventPatch(event api.InvocationEvent, directHarness bool) agentUE
 				Op: "append", Seq: event.Cursor, Timestamp: event.CreatedAt.UnixMilli(),
 				Mask: "block.content", EventType: "message.delta",
 				Block: map[string]any{
-					"id": "answer", "type": "text", "role": api.RoleHarness, "content": delta,
+					"id": "answer", "type": "text", "role": loopd.RoleHarness, "content": delta,
 				},
 			}
 		}
@@ -217,8 +217,8 @@ func invocationEventPatch(event api.InvocationEvent, directHarness bool) agentUE
 	}
 }
 
-func finishAgentUE(writer *sse.Writer, cursor uint64, invocation api.Invocation) error {
-	if invocation.Phase == api.InvocationFailed || invocation.Phase == api.InvocationCancelled {
+func finishAgentUE(writer *sse.Writer, cursor uint64, invocation loopd.Invocation) error {
+	if invocation.Phase == loopd.InvocationFailed || invocation.Phase == loopd.InvocationCancelled {
 		cursor++
 		if err := writeAgentUE(writer, cursor, agentUEEvent{
 			Op: "error", Seq: cursor, Mask: "meta.error",

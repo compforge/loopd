@@ -1,5 +1,6 @@
-// Package api defines loopd's public HTTP contract.
-package api
+// Package loopd defines the stable collaboration model shared by loop-server,
+// Operator runtimes, and Harness adapters.
+package loopd
 
 import "time"
 
@@ -41,19 +42,6 @@ type ResourceRef struct {
 	Namespace  string `json:"namespace,omitempty"`
 	Name       string `json:"name"`
 	UID        string `json:"uid"`
-}
-
-type ErrorResponse struct {
-	Error APIError `json:"error"`
-}
-
-type APIError struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-type Page[T any] struct {
-	Data []T `json:"data"`
 }
 
 type Timestamped struct {
