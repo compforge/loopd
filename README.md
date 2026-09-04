@@ -1,5 +1,7 @@
 # loopd
 
+**English** | [简体中文](README.zh-CN.md)
+
 `loopd` is an orchestration runtime for collaboration among humans, Harnesses,
 and Kubernetes Operators.
 
@@ -12,16 +14,17 @@ Loop = Resource(spec + status) + Reconcile
 Every chat request creates a small loopd Task CRD that wakes the selected
 Actor. A simple Operator can reconcile that Task directly; a complex
 Operator may create domain CRDs for its own state and completion semantics.
-`loopd` keeps visible collaboration in conversations and messages, while full
-execution history belongs to the Harness and AgentLedger.
+`loopd` keeps visible collaboration in conversations and messages. A Harness
+owns its execution state, while AgentLedger records the complete execution
+history.
 
 ![loopd orchestration architecture](docs/arch_v1.svg)
 
 ## Components
 
-- **loop-server** is a Hertz service that owns page-visible conversations and
-  messages. Before committing a chat request, it also creates the Task CRD;
-  failure rolls the messages back.
+- **loop-server** owns page-visible conversations and messages. It pairs each
+  active chat request with a Task CRD so the work can outlive an HTTP request,
+  browser connection, or server process.
 - **loop-runtime** is a Go client embedded in an Operator. It exposes stable
   conversation and message capabilities through `r.Loop.Chat`, and lets a
   Reconciler watch and resolve Tasks through `r.Loop.Task`.
@@ -30,8 +33,10 @@ execution history belongs to the Harness and AgentLedger.
   into the public model. The bundled AgentGo adapter is an in-process demo;
   production durability belongs to agentd.
 
-AgentUE supplies the page-visible event model and Redis bridge. AgentLedger records complete
-prompts, model events, tool calls, retries, and costs; it is not the chat database.
+AgentUE supplies the page-visible event model and Redis bridge. AgentLedger
+records complete prompts, model events, tool calls, retries, and costs; it is
+not the chat database. Hostel provides the agent-native sandbox for file,
+tool, and compute execution.
 
 The public conversation roles are always:
 
