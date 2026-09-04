@@ -81,10 +81,10 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", Key: "user-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
-	responder := existing
-	responder.TaskID = user.TaskID
-	if _, err := store.CreateChatMessages(ctx, user, responder, nil); err == nil {
-		t.Fatal("CreateChatMessages succeeded with a duplicate responder ID")
+	response := existing
+	response.TaskID = user.TaskID
+	if _, err := store.CreateChatMessages(ctx, user, response, nil); err == nil {
+		t.Fatal("CreateChatMessages succeeded with a duplicate response ID")
 	}
 	messages, err := store.ListMessages(ctx, conversationID, "", 100)
 	if err != nil {

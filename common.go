@@ -21,17 +21,21 @@ func (role Role) Valid() bool {
 	}
 }
 
-type ResponderRef struct {
+type ActorRef struct {
 	Kind Role   `json:"kind"`
 	Key  string `json:"key"`
 }
 
-func (ref ResponderRef) Valid() bool {
+func (ref ActorRef) Valid() bool {
+	return ref.Kind.Valid() && ref.Key != ""
+}
+
+func (ref ActorRef) ValidTarget() bool {
 	return (ref.Kind == RoleHarness || ref.Kind == RoleOperator) && ref.Key != ""
 }
 
-type Responder struct {
-	ResponderRef
+type Actor struct {
+	ActorRef
 	DisplayName string `json:"display_name,omitempty"`
 	Description string `json:"description,omitempty"`
 }

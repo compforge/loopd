@@ -32,9 +32,9 @@ loopd/
    可扩展 blocks 承载文本、可见工具状态和产物，不混入完整执行轨迹。
 3. `conversations` 与 `messages` 均使用 go-stdx 生成的 UUIDv7 `id` 作为主键和游标；不再维护平行的
    message sequence。
-4. 一次问答由 user Message、responder Message 和同 ID 的 Task CRD 组成。服务端在数据库事务提交前
-   创建 CRD；创建失败则回滚两条 Message 并向 Human 返回错误。
-5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 responder Message。
+4. 一次问答由 user Message、目标 Actor 的 response Message 和同 ID 的 Task CRD 组成。服务端在数据库事务提交前
+   初始化 AgentUE Redis Stream 并创建 CRD；任一步失败则回滚两条 Message，并尽力删除已创建的外部资源。
+5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 response Message。
    v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
 6. v1alpha1 Task CRD 当前保存路由和唤醒信息，详细上下文由 runtime 按 Task ID 向 server 查询。公共协调
    字段可按 Kubernetes API 兼容规则增量演进；领域状态复杂时，Operator 创建并拥有自己的 CRD。

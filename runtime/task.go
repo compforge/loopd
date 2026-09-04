@@ -31,8 +31,8 @@ func (task Task) Get(ctx context.Context, taskID string) (loopd.TaskContext, err
 
 // Watch registers a controller-runtime Reconciler for Tasks routed to target.
 // The Operator sees only a Task name and uses Get for current chat context.
-func (task Task) Watch(mgr manager.Manager, target loopd.ResponderRef, reconciler reconcile.Reconciler) error {
-	if !target.Valid() {
+func (task Task) Watch(mgr manager.Manager, target loopd.ActorRef, reconciler reconcile.Reconciler) error {
+	if !target.ValidTarget() {
 		return fmt.Errorf("invalid task target %q/%q", target.Kind, target.Key)
 	}
 	if err := taskv1alpha1.AddToScheme(mgr.GetScheme()); err != nil {

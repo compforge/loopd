@@ -28,21 +28,6 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 	return nil
 }
 
-func (server *Server) updateMessageContent(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input updateMessageContentRequest
-	if err := decodeBody(request, &input); err != nil {
-		return err
-	}
-	message, err := server.messages.UpdateMessageContent(
-		ctx, request.Param("conversation_id"), request.Param("message_id"), input.Content,
-	)
-	if err != nil {
-		return err
-	}
-	request.JSON(consts.StatusOK, message)
-	return nil
-}
-
 func queryLimit(request *hertzapp.RequestContext) (int, error) {
 	value := request.Query("limit")
 	if value == "" {

@@ -57,26 +57,6 @@ func (service *MessageService) CreateMessage(
 	return messageFromModel(message), err
 }
 
-func (service *MessageService) UpdateMessageContent(
-	ctx context.Context,
-	conversationID string,
-	messageID string,
-	content json.RawMessage,
-) (loopd.Message, error) {
-	if validateContent(content) != nil {
-		return loopd.Message{}, ErrInvalid
-	}
-	message, err := service.repo.UpdateMessageContent(ctx, conversationID, messageID, content)
-	if err == nil {
-		service.logger.InfoContext(ctx, "message content updated",
-			"conversation_id", conversationID,
-			"message_id", message.ID,
-			"task_id", message.TaskID,
-		)
-	}
-	return messageFromModel(message), err
-}
-
 func (service *MessageService) ListMessages(
 	ctx context.Context,
 	conversationID string,

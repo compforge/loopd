@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -20,14 +21,14 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
 	tasks := &recordingTaskClient{}
-	chat := NewChatService(store, tasks, nil)
+	chat := NewChatService(store, tasks, nopChatRunner{}, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := chat.Create(ctx, conversation.ID, "user-1", loopd.ResponderRef{
+	answer, err := chat.Create(ctx, conversation.ID, "user-1", loopd.ActorRef{
 		Kind: loopd.RoleHarness,
 		Key:  "harness-1",
 	}, textContent("question"))
@@ -41,7 +42,7 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	if answer.Kind != loopd.RoleHarness || answer.Key != "harness-1" {
 		t.Fatalf("answer identity = %s/%s", answer.Kind, answer.Key)
 	}
-	if tasks.createdTaskID != answer.TaskID || tasks.createdTarget != (loopd.ResponderRef{
+	if tasks.createdTaskID != answer.TaskID || tasks.createdTarget != (loopd.ActorRef{
 		Kind: loopd.RoleHarness,
 		Key:  "harness-1",
 	}) {
@@ -74,27 +75,21 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 		t.Fatalf("initial answer content = %s", answer.Content)
 	}
 
-	updated, err := messages.UpdateMessageContent(ctx, conversation.ID, answer.ID, richContent())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.ID != answer.ID || updated.UpdatedAt.Before(answer.UpdatedAt) {
-		t.Fatalf("updated answer = %#v", updated)
-	}
 }
 
 func TestChatRollsBackMessagesWhenTaskCreationFails(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, &recordingTaskClient{createErr: errors.New("api unavailable")}, nil)
+	streams := &recordingChatRunner{}
+	chat := NewChatService(store, &recordingTaskClient{createErr: errors.New("api unavailable")}, streams, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = chat.Create(ctx, conversation.ID, "user-1", loopd.ResponderRef{
+	_, err = chat.Create(ctx, conversation.ID, "user-1", loopd.ActorRef{
 		Kind: loopd.RoleOperator,
 		Key:  "operator-1",
 	}, textContent("question"))
@@ -108,13 +103,17 @@ func TestChatRollsBackMessagesWhenTaskCreationFails(t *testing.T) {
 	if len(history) != 0 {
 		t.Fatalf("Task creation failure left messages: %#v", history)
 	}
+	if streams.initializedTaskID == "" || streams.deletedTaskID != streams.initializedTaskID {
+		t.Fatalf("initialized stream %q, deleted stream %q", streams.initializedTaskID, streams.deletedTaskID)
+	}
 }
 
 func TestChatDeletesTaskWhenDatabaseCommitFails(t *testing.T) {
 	tasks := &recordingTaskClient{}
-	chat := NewChatService(failingCommitRepository{}, tasks, nil)
+	streams := &recordingChatRunner{}
+	chat := NewChatService(failingCommitRepository{}, tasks, streams, nil)
 
-	_, err := chat.Create(context.Background(), "conversation-1", "user-1", loopd.ResponderRef{
+	_, err := chat.Create(context.Background(), "conversation-1", "user-1", loopd.ActorRef{
 		Kind: loopd.RoleOperator,
 		Key:  "operator-1",
 	}, textContent("question"))
@@ -124,20 +123,23 @@ func TestChatDeletesTaskWhenDatabaseCommitFails(t *testing.T) {
 	if tasks.createdTaskID == "" || tasks.deletedTaskID != tasks.createdTaskID {
 		t.Fatalf("created Task %q, deleted Task %q", tasks.createdTaskID, tasks.deletedTaskID)
 	}
+	if streams.initializedTaskID == "" || streams.deletedTaskID != streams.initializedTaskID {
+		t.Fatalf("initialized stream %q, deleted stream %q", streams.initializedTaskID, streams.deletedTaskID)
+	}
 }
 
-func TestDetailConversationReferencesResponderMessage(t *testing.T) {
+func TestDetailConversationReferencesActorMessage(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, nopTaskClient{}, nil)
+	chat := NewChatService(store, nopTaskClient{}, nopChatRunner{}, nil)
 	ctx := context.Background()
 
 	root, err := conversations.CreateConversation(ctx, "Root", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := chat.Create(ctx, root.ID, "user-1", loopd.ResponderRef{
+	answer, err := chat.Create(ctx, root.ID, "user-1", loopd.ActorRef{
 		Kind: loopd.RoleOperator,
 		Key:  "operator-1",
 	}, textContent("question"))
@@ -167,17 +169,66 @@ func TestDetailConversationReferencesResponderMessage(t *testing.T) {
 
 type nopTaskClient struct{}
 
-func (nopTaskClient) Create(context.Context, string, loopd.ResponderRef) error { return nil }
-func (nopTaskClient) Delete(context.Context, string) error                     { return nil }
+func (nopTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
+func (nopTaskClient) Delete(context.Context, string) error                 { return nil }
+
+type nopChatRunner struct{}
+
+func (nopChatRunner) Initialize(context.Context, string, json.RawMessage) error { return nil }
+func (nopChatRunner) Delete(context.Context, string) error                      { return nil }
+func (nopChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
+	return "", nil
+}
+
+type recordingChatRunner struct {
+	initializedTaskID string
+	deletedTaskID     string
+}
+
+func (runner *recordingChatRunner) Initialize(_ context.Context, taskID string, _ json.RawMessage) error {
+	runner.initializedTaskID = taskID
+	return nil
+}
+
+func (runner *recordingChatRunner) Delete(_ context.Context, taskID string) error {
+	runner.deletedTaskID = taskID
+	return nil
+}
+
+func (*recordingChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
+	return "", nil
+}
+
+func (*recordingChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
+
+func (*recordingChatRunner) Stream(
+	context.Context,
+	string,
+	string,
+	string,
+	func(delivery.Event) error,
+) error {
+	return nil
+}
+func (nopChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
+func (nopChatRunner) Stream(
+	context.Context,
+	string,
+	string,
+	string,
+	func(delivery.Event) error,
+) error {
+	return nil
+}
 
 type recordingTaskClient struct {
 	createdTaskID string
-	createdTarget loopd.ResponderRef
+	createdTarget loopd.ActorRef
 	deletedTaskID string
 	createErr     error
 }
 
-func (client *recordingTaskClient) Create(_ context.Context, taskID string, target loopd.ResponderRef) error {
+func (client *recordingTaskClient) Create(_ context.Context, taskID string, target loopd.ActorRef) error {
 	client.createdTaskID = taskID
 	client.createdTarget = target
 	return client.createErr
@@ -220,16 +271,4 @@ func textContent(text string) json.RawMessage {
 		"blocks":  []map[string]any{{"id": "text", "type": "text", "content": text}},
 	})
 	return value
-}
-
-func richContent() json.RawMessage {
-	return json.RawMessage(`{
-		"version":"1.0",
-		"biz":"chat",
-		"meta":{},
-		"blocks":[
-			{"id":"answer","type":"text","content":"answer"},
-			{"id":"tool-1","type":"tool","name":"search","status":"completed"}
-		]
-	}`)
 }

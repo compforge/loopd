@@ -33,14 +33,14 @@ func (store *Store) CreateMessage(ctx context.Context, message model.Message) (m
 func (store *Store) CreateChatMessages(
 	ctx context.Context,
 	userMessage model.Message,
-	responderMessage model.Message,
+	responseMessage model.Message,
 	beforeCommit func(context.Context) error,
 ) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if userMessage.ConversationID != responderMessage.ConversationID || userMessage.TaskID != responderMessage.TaskID {
+		if userMessage.ConversationID != responseMessage.ConversationID || userMessage.TaskID != responseMessage.TaskID {
 			return ErrConflict
 		}
 		if err := ensureConversation(tx, userMessage.ConversationID); err != nil {
@@ -49,7 +49,7 @@ func (store *Store) CreateChatMessages(
 		if err := mapError(tx.Create(&userMessage).Error); err != nil {
 			return err
 		}
-		if err := mapError(tx.Create(&responderMessage).Error); err != nil {
+		if err := mapError(tx.Create(&responseMessage).Error); err != nil {
 			return err
 		}
 		if beforeCommit != nil {
@@ -60,7 +60,7 @@ func (store *Store) CreateChatMessages(
 	if err != nil {
 		return model.Message{}, err
 	}
-	return responderMessage, nil
+	return responseMessage, nil
 }
 
 func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) ([]model.Message, error) {

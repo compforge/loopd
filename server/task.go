@@ -12,7 +12,7 @@ import (
 // TaskClient is the loop-server boundary for managing Task CRDs inside the
 // chat submission work unit.
 type TaskClient interface {
-	Create(context.Context, string, loopd.ResponderRef) error
+	Create(context.Context, string, loopd.ActorRef) error
 	Delete(context.Context, string) error
 }
 

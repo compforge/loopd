@@ -44,11 +44,9 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
-	engine.PUT(
-		"/v1/conversations/:conversation_id/messages/:message_id/content",
-		server.adapt(server.updateMessageContent),
-	)
 	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
+	engine.POST("/v1/tasks/:task_id/events", server.adapt(server.appendTaskEvent))
+	engine.POST("/v1/tasks/:task_id/complete", server.adapt(server.completeTask))
 }
 
 type handler func(context.Context, *hertzapp.RequestContext) error

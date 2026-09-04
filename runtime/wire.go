@@ -34,7 +34,7 @@ type promptRequest struct {
 type interactionRequest struct {
 	OwnerUID  string                    `json:"owner_uid"`
 	EffectKey string                    `json:"effect_key"`
-	Requester loopd.ResponderRef        `json:"requester"`
+	Requester loopd.ActorRef            `json:"requester"`
 	Kind      loopd.InteractionKind     `json:"kind"`
 	Title     string                    `json:"title,omitempty"`
 	Prompt    string                    `json:"prompt"`
