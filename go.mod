@@ -7,6 +7,7 @@ require (
 	github.com/cloudwego/hertz v0.10.4
 	github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676
 	github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a
+	github.com/go-logr/logr v1.4.3
 	github.com/qiankunli/go-stdx v0.0.4-0.20260824051808-f7f6d7c53de2
 	github.com/redis/go-redis/v9 v9.22.0
 	gorm.io/driver/sqlite v1.6.0
@@ -29,7 +30,6 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
@@ -55,6 +55,7 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/voocel/litellm v1.8.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
