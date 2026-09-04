@@ -48,6 +48,8 @@ loopd/
    YAML 与 Helm Chart 中同步的 CRD YAML。
 10. Operator 通过 loop-runtime 调用 Harness；可见 `set/append` 事件由 runtime 发送给任意 loop-server
     实例，再进入共享 Redis Stream。AgentGo Adapter 只用于进程内演示，生产级执行恢复由 agentd 持有。
+11. 根目录 `VERSION` 是 loopd 当前版本，使用 SemVer。任何代码改动都必须在同一变更中递增
+    `VERSION`；初始版本为 `0.0.1`。
 
 ## References
 
