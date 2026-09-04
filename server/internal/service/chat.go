@@ -3,28 +3,31 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
+	"github.com/compforge/loopd/task"
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
 type ChatRepository interface {
-	CreateChatMessages(context.Context, model.Message, model.Message) (model.Message, error)
+	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 }
 
-// ChatService owns the transaction boundary for one user question. It creates
-// the visible user and responder messages together and returns the responder
-// message that the operator or harness will update as work progresses.
+// ChatService owns the transaction boundary for one user question. It writes
+// the visible message pair, creates the same-ID Task CRD before commit, and
+// returns the responder message that will be updated as work progresses.
 type ChatService struct {
-	repo   ChatRepository
-	logger *slog.Logger
+	repo       ChatRepository
+	taskMarker task.Marker
+	logger     *slog.Logger
 }
 
-func NewChatService(repository ChatRepository, logger *slog.Logger) *ChatService {
-	return &ChatService{repo: repository, logger: loggerOrDefault(logger)}
+func NewChatService(repository ChatRepository, taskMarker task.Marker, logger *slog.Logger) *ChatService {
+	return &ChatService{repo: repository, taskMarker: taskMarker, logger: loggerOrDefault(logger)}
 }
 
 func (service *ChatService) Create(
@@ -39,12 +42,16 @@ func (service *ChatService) Create(
 	if userKey == "" || !responder.Valid() || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
+	if service.taskMarker == nil {
+		return loopd.Message{}, ErrUnavailable
+	}
 
 	taskID := uuid.V7()
 	responderContent, err := emptyContent(content)
 	if err != nil {
 		return loopd.Message{}, ErrInvalid
 	}
+	taskCreated := false
 	message, err := service.repo.CreateChatMessages(ctx,
 		model.Message{
 			ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
@@ -54,9 +61,40 @@ func (service *ChatService) Create(
 			ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
 			Kind: string(responder.Kind), Key: responder.Key, Content: responderContent,
 		},
+		func(txCtx context.Context) error {
+			if err := service.taskMarker.Create(txCtx, taskID, responder); err != nil {
+				service.logger.ErrorContext(ctx, "create task marker failed",
+					"conversation_id", conversationID,
+					"task_id", taskID,
+					"responder_kind", responder.Kind,
+					"responder_key", responder.Key,
+					"error", err,
+				)
+				return fmt.Errorf("%w: %v", ErrUnavailable, err)
+			}
+			taskCreated = true
+			return nil
+		},
 	)
+	// Kubernetes and the database do not share a transaction coordinator. If
+	// the CRD was created but the database commit fails, compensate so an
+	// Operator cannot later reconcile a task whose visible chat state vanished.
+	if err != nil && taskCreated {
+		if cleanupErr := service.taskMarker.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
+			service.logger.ErrorContext(ctx, "delete rolled back task marker failed",
+				"conversation_id", conversationID,
+				"task_id", taskID,
+				"error", cleanupErr,
+			)
+		} else {
+			service.logger.InfoContext(ctx, "rolled back task marker",
+				"conversation_id", conversationID,
+				"task_id", taskID,
+			)
+		}
+	}
 	if err == nil {
-		service.logger.InfoContext(ctx, "chat messages created",
+		service.logger.InfoContext(ctx, "chat task created",
 			"conversation_id", conversationID,
 			"task_id", taskID,
 			"responder_message_id", message.ID,

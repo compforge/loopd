@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
@@ -18,7 +19,8 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, nil)
+	marker := &recordingTaskMarker{}
+	chat := NewChatService(store, marker, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
@@ -38,6 +40,12 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	}
 	if answer.Kind != loopd.RoleHarness || answer.Key != "harness-1" {
 		t.Fatalf("answer identity = %s/%s", answer.Kind, answer.Key)
+	}
+	if marker.createdTaskID != answer.TaskID || marker.createdTarget != (loopd.ResponderRef{
+		Kind: loopd.RoleHarness,
+		Key:  "harness-1",
+	}) {
+		t.Fatalf("created Task marker = %q %#v", marker.createdTaskID, marker.createdTarget)
 	}
 
 	history, err := messages.ListMessages(ctx, conversation.ID, "", 100)
@@ -75,11 +83,54 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	}
 }
 
+func TestChatRollsBackMessagesWhenTaskMarkerFails(t *testing.T) {
+	store := openServiceStore(t)
+	conversations := NewConversationService(store, nil)
+	messages := NewMessageService(store, nil)
+	chat := NewChatService(store, &recordingTaskMarker{createErr: errors.New("api unavailable")}, nil)
+	ctx := context.Background()
+
+	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = chat.Create(ctx, conversation.ID, "user-1", loopd.ResponderRef{
+		Kind: loopd.RoleOperator,
+		Key:  "operator-1",
+	}, textContent("question"))
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Create error = %v, want %v", err, ErrUnavailable)
+	}
+	history, err := messages.ListMessages(ctx, conversation.ID, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("task marker failure left messages: %#v", history)
+	}
+}
+
+func TestChatDeletesTaskMarkerWhenDatabaseCommitFails(t *testing.T) {
+	marker := &recordingTaskMarker{}
+	chat := NewChatService(failingCommitRepository{}, marker, nil)
+
+	_, err := chat.Create(context.Background(), "conversation-1", "user-1", loopd.ResponderRef{
+		Kind: loopd.RoleOperator,
+		Key:  "operator-1",
+	}, textContent("question"))
+	if err == nil {
+		t.Fatal("Create succeeded when database commit failed")
+	}
+	if marker.createdTaskID == "" || marker.deletedTaskID != marker.createdTaskID {
+		t.Fatalf("created Task %q, deleted Task %q", marker.createdTaskID, marker.deletedTaskID)
+	}
+}
+
 func TestDetailConversationReferencesResponderMessage(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, nil)
+	chat := NewChatService(store, nopTaskMarker{}, nil)
 	ctx := context.Background()
 
 	root, err := conversations.CreateConversation(ctx, "Root", "")
@@ -112,6 +163,43 @@ func TestDetailConversationReferencesResponderMessage(t *testing.T) {
 	if _, err := conversations.CreateConversation(ctx, "Nested", detailMessage.ID); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("nested detail error = %v, want %v", err, ErrInvalid)
 	}
+}
+
+type nopTaskMarker struct{}
+
+func (nopTaskMarker) Create(context.Context, string, loopd.ResponderRef) error { return nil }
+func (nopTaskMarker) Delete(context.Context, string) error                     { return nil }
+
+type recordingTaskMarker struct {
+	createdTaskID string
+	createdTarget loopd.ResponderRef
+	deletedTaskID string
+	createErr     error
+}
+
+func (marker *recordingTaskMarker) Create(_ context.Context, taskID string, target loopd.ResponderRef) error {
+	marker.createdTaskID = taskID
+	marker.createdTarget = target
+	return marker.createErr
+}
+
+func (marker *recordingTaskMarker) Delete(_ context.Context, taskID string) error {
+	marker.deletedTaskID = taskID
+	return nil
+}
+
+type failingCommitRepository struct{}
+
+func (failingCommitRepository) CreateChatMessages(
+	ctx context.Context,
+	_ model.Message,
+	_ model.Message,
+	beforeCommit func(context.Context) error,
+) (model.Message, error) {
+	if err := beforeCommit(ctx); err != nil {
+		return model.Message{}, err
+	}
+	return model.Message{}, errors.New("commit failed")
 }
 
 func openServiceStore(t *testing.T) *repo.Store {

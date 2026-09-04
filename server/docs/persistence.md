@@ -1,7 +1,8 @@
 # loop-server Persistence
 
-loop-server 当前只持久化 Conversation 与 Message 两类页面可见的聊天事实。执行状态由 Operator CRD 或
-Harness 持有；AgentLedger 保存完整运行轨迹、审计和成本事实，不替代页面聊天记录。
+loop-server 数据库只持久化 Conversation 与 Message 两类页面可见的聊天事实，不建立 `tasks` 表。每次
+问答对应的 Task 是 Kubernetes CRD；AgentLedger 保存完整运行轨迹、审计和成本事实，不替代页面聊天
+记录。
 
 ## Conversation
 
@@ -21,7 +22,7 @@ Harness 持有；AgentLedger 保存完整运行轨迹、审计和成本事实，
 
 - `id`：UUIDv7 主键，同时作为消息读取游标；
 - `conversation_id`：所属 Conversation；
-- `task_id`：Runner 对一次完整问答任务的标识；反问、确认等可见消息继续使用同一值；
+- `task_id`：对应 Task CRD 名称的一次完整问答标识；反问、确认等可见消息继续使用同一值；
 - `kind`：发送者类型，只能是 `user`、`operator`、`harness`；
 - `key`：发送者在所属系统中的稳定标识；
 - `content`：页面可见的 AgentUE semantic model JSON；其中 `blocks` 按顺序承载 `text`、`tool`、
@@ -29,8 +30,13 @@ Harness 持有；AgentLedger 保存完整运行轨迹、审计和成本事实，
 - `created_at`、`updated_at`：创建时间与可见内容最后更新时间。
 
 一次 Chat 请求在一个数据库事务中创建两条 Message：Human 的问题是 `kind=user`，同时创建一条
-`kind=operator` 或 `kind=harness` 的空回答。两条记录共享 `task_id`，HTTP 返回回答 Message；Operator 或
-Harness 在流式处理过程中更新这条回答的 content。
+`kind=operator` 或 `kind=harness` 的空回答。两条记录共享 `task_id`。提交事务前，ChatService 使用该 ID
+和 responder 创建 Task CRD；创建失败则回滚两条 Message 并返回错误。CRD 创建成功但数据库 commit
+失败时，server 尽力删除该 CRD 作为补偿。
+
+Task CRD 可能在数据库 commit 前被 Operator 观察到。此时 Task 查询返回 not found，Reconciler 应稍后
+重试。正常提交后，`GET /v1/tasks/:task_id` 从主 Conversation 的 Message 即时组装 input、response 和
+有界 History；详情 Conversation 中复用该 `task_id` 的内部消息不会改变主链路上下文。
 
 每条 Message 的 content 都是页面可见的完整语义快照，而非纯文本；最小结构为：
 

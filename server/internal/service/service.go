@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	ErrInvalid  = errors.New("invalid request")
-	ErrConflict = errors.New("conflict")
+	ErrInvalid     = errors.New("invalid request")
+	ErrConflict    = errors.New("conflict")
+	ErrUnavailable = errors.New("service unavailable")
 )
 
 func loggerOrDefault(logger *slog.Logger) *slog.Logger {

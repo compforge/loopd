@@ -12,6 +12,11 @@ import (
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
 	"github.com/compforge/loopd/server"
+	"github.com/compforge/loopd/task"
+	taskv1alpha1 "github.com/compforge/loopd/task/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	kubeconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 func main() {
@@ -24,8 +29,13 @@ func main() {
 func run() error {
 	address := envOr("LOOP_SERVER_ADDR", ":8080")
 	databasePath := envOr("LOOP_SERVER_DB", "loopd.db")
+	taskNamespace := envOr("LOOP_SERVER_TASK_NAMESPACE", "default")
+	taskMarker, err := newTaskMarker(taskNamespace)
+	if err != nil {
+		return err
+	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{Path: databasePath}, Logger: slog.Default(),
+		Database: server.DatabaseConfig{Path: databasePath}, Tasks: taskMarker, Logger: slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -51,7 +61,11 @@ func run() error {
 	go loopServer.Run(processCtx)
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("loop-server listening", "address", address, "database", databasePath)
+		logger.Info("loop-server listening",
+			"address", address,
+			"database", databasePath,
+			"task_namespace", taskNamespace,
+		)
 		serveErr <- httpServer.Run()
 	}()
 	select {
@@ -65,6 +79,22 @@ func run() error {
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
+}
+
+func newTaskMarker(namespace string) (*task.KubernetesMarker, error) {
+	scheme := runtime.NewScheme()
+	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("register loopd Task scheme: %w", err)
+	}
+	config, err := kubeconfig.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load Kubernetes config: %w", err)
+	}
+	kubeClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("create Kubernetes client: %w", err)
+	}
+	return task.NewKubernetesMarker(kubeClient, namespace, 10*time.Second), nil
 }
 
 func envOr(name, fallback string) string {

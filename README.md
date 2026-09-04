@@ -9,17 +9,20 @@ Its guiding idea is:
 Loop = Resource(spec + status) + Reconcile
 ```
 
-An Operator owns its domain CRDs and completion semantics. `loopd` supplies the
-visible collaboration plane around those resources: conversations and messages.
-Complete execution history belongs to the Operator, Harness, and AgentLedger.
+Every chat request creates a small loopd Task CRD that wakes the selected
+responder. A simple Operator can reconcile that Task directly; a complex
+Operator may create domain CRDs for its own state and completion semantics.
+`loopd` keeps visible collaboration in conversations and messages, while full
+execution history belongs to the Harness and AgentLedger.
 
 ## Components
 
 - **loop-server** is a Hertz service that owns page-visible conversations and
-  messages. One chat request atomically creates the user and responder messages.
+  messages. Before committing a chat request, it also creates the Task CRD;
+  failure rolls the messages back.
 - **loop-runtime** is a Go client embedded in an Operator. It exposes stable
-  conversation and message capabilities through `r.Loop.Chat`; Harness and
-  interaction capabilities build on the same runtime boundary.
+  conversation and message capabilities through `r.Loop.Chat`, and lets a
+  Reconciler watch and resolve Tasks through `r.Loop.Task`.
 - **Harness adapters** connect loop-server to agentd or another intelligent
   execution service without leaking provider vocabulary into the public model.
 
@@ -37,12 +40,15 @@ user | harness | operator
 A question may run for minutes or days. Its lifecycle is independent from any
 HTTP request or browser connection:
 
-1. loop-server atomically creates a user message and an empty responder message
-   with the same Runner `task_id`;
-2. an Operator binds those identities to its CRD, or a Harness owns its execution;
-3. visible progress updates the responder message while full events enter AgentLedger;
-4. clients may disconnect and reload the current message snapshot;
-5. the selected Harness or Operator finishes the same responder message.
+1. loop-server creates a user message and an empty responder message with one
+   `task_id`, then creates a same-ID Task CRD before committing the messages;
+2. the selected Operator or Harness watches the Task and resolves its current
+   input and conversation history through loop-runtime;
+3. a complex Operator may create a domain CRD, while a simple Operator handles
+   the shared Task directly;
+4. visible progress updates the responder message while full events enter AgentLedger;
+5. clients may disconnect and reload the current message snapshot;
+6. the selected Harness or Operator finishes the same responder message.
 
 `Harness.Prompt` returns a handle. A Reconciler can inspect it and return, or
 call `Wait` when waiting is genuinely the only remaining work. Both paths use

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,8 @@ func TestChatHTTPFlow(t *testing.T) {
 	server := New(
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
-		service.NewChatService(store, nil),
+		service.NewChatService(store, nopTaskMarker{}, nil),
+		service.NewTaskService(store, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))
@@ -54,6 +56,17 @@ func TestChatHTTPFlow(t *testing.T) {
 	if answer.Kind != loopd.RoleOperator || answer.Key != "intent" || answer.TaskID == "" {
 		t.Fatalf("answer = %#v", answer)
 	}
+	taskResponse := ut.PerformRequest(engine, "GET", "/v1/tasks/"+answer.TaskID, nil).Result()
+	if taskResponse.StatusCode() != 200 {
+		t.Fatalf("task status=%d body=%s", taskResponse.StatusCode(), taskResponse.Body())
+	}
+	var task loopd.TaskContext
+	if err := json.Unmarshal(taskResponse.Body(), &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.ID != answer.TaskID || task.Input.Kind != loopd.RoleUser || task.Response.ID != answer.ID {
+		t.Fatalf("task = %#v", task)
+	}
 
 	history := ut.PerformRequest(engine, "GET", "/v1/conversations/"+conversation.ID+"/messages", nil).Result()
 	if history.StatusCode() != 200 {
@@ -70,6 +83,11 @@ func TestChatHTTPFlow(t *testing.T) {
 		t.Fatalf("responders status=%d, want 404", response.StatusCode())
 	}
 }
+
+type nopTaskMarker struct{}
+
+func (nopTaskMarker) Create(context.Context, string, loopd.ResponderRef) error { return nil }
+func (nopTaskMarker) Delete(context.Context, string) error                     { return nil }
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {
 	t.Helper()

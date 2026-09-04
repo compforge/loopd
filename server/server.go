@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -10,10 +11,12 @@ import (
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/task"
 )
 
 type Config struct {
 	Database DatabaseConfig
+	Tasks    task.Marker
 	Logger   *slog.Logger
 }
 
@@ -32,6 +35,9 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	if config.Tasks == nil {
+		return nil, errors.New("task marker is required")
+	}
 	store, err := repo.Open(repo.Config{
 		Path: config.Database.Path, OperationTimeout: config.Database.OperationTimeout,
 		MaxOpenConns: config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
@@ -42,10 +48,11 @@ func New(config Config) (*Server, error) {
 	}
 	conversations := service.NewConversationService(store, config.Logger)
 	messages := service.NewMessageService(store, config.Logger)
-	chat := service.NewChatService(store, config.Logger)
+	chat := service.NewChatService(store, config.Tasks, config.Logger)
+	tasks := service.NewTaskService(store, config.Logger)
 	return &Server{
 		store: store,
-		api:   serverapi.New(conversations, messages, chat, config.Logger),
+		api:   serverapi.New(conversations, messages, chat, tasks, config.Logger),
 	}, nil
 }
 

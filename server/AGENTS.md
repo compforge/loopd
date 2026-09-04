@@ -2,15 +2,16 @@
 
 ## 项目定位与边界
 
-server 是 loop-server 组件，当前只拥有 Conversation 与 Message 两类聊天事实。Operator CRD、Harness
-运行状态、执行审计和成本记录不进入这两个模型；它们分别由 Operator、Harness 与 AgentLedger 持有。
+server 是 loop-server 组件，数据库只拥有 Conversation 与 Message 两类聊天事实。每次问答还会创建一个
+通用 Task CRD 作为 Reconcile 标记；Operator 领域状态、Harness 运行状态、执行审计和成本记录不进入
+聊天模型。
 
 ## 代码地图与核心模块
 
 ```text
 server/
 ├── server.go               # 组件组装与资源生命周期
-├── internal/api/           # Hertz 适配；Conversation、Message、Chat handler 分文件，VO 集中在 view.go
+├── internal/api/           # Hertz 适配；Conversation、Message、Chat、Task handler 分文件
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
 │   └── message.go          # messages
@@ -20,7 +21,8 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
-│   └── chat.go             # ChatService；一次问答的事务边界
+│   ├── chat.go             # ChatService；Message 与 Task CRD 的提交边界
+│   └── task.go             # TaskService；按 task_id 组装 Operator 上下文
 └── docs/persistence.md     # 两表 schema 与 UUIDv7 游标约束
 ```
 
@@ -33,11 +35,14 @@ server/
    不是完整执行日志。
 4. 两张表的 `id` 都由 service 使用 go-stdx `uuid.V7()` 生成。消息按 UUIDv7 字典序读取和翻页，不增加
    `sequence` 字段。
-5. 一次 Chat 请求由 `ChatService` 在同一事务内创建 user Message 和空的 responder Message，两者共享
-   Runner `task_id`；对外只返回 responder Message，后续流式快照更新该记录。
+5. 一次 Chat 请求由 `ChatService` 在数据库事务中创建 user Message 和空的 responder Message，再以
+   `task_id` 创建 Task CRD；CRD 创建失败则事务回滚。Task CRD 创建成功但 DB commit 失败时，server
+   尽力删除该 CRD。
 6. `conversations.parent_message_id` 只用于把 Operator 详情会话挂到主链路 responder Message。主会话为空，
    详情会话不可继续嵌套，同一 Message 最多对应一个详情会话。
 7. 页面不可见的 prompt、tool call/result、重试和成本等完整轨迹进入 AgentLedger，不扩张 Message schema。
+8. Task 查询是基于主 Conversation Message 的实时视图，不增加 `tasks` 表；详情 Conversation 中共享
+   `task_id` 的内部消息不得覆盖主链路的 input/response。
 
 ## References
 
