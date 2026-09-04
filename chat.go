@@ -30,10 +30,11 @@ type Conversation struct {
 type Message struct {
 	ID             string          `json:"id"`
 	ConversationID string          `json:"conversation_id"`
+	TaskID         string          `json:"task_id"`
 	Kind           Role            `json:"kind"`
 	Key            string          `json:"key"`
 	Content        json.RawMessage `json:"content"`
-	CreatedAt      time.Time       `json:"created_at"`
+	Timestamped
 }
 
 type Invocation struct {

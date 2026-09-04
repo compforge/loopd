@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,7 +11,6 @@ import (
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
-	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server"
 )
 
@@ -26,12 +24,8 @@ func main() {
 func run() error {
 	address := envOr("LOOP_SERVER_ADDR", ":8080")
 	databasePath := envOr("LOOP_SERVER_DB", "loopd.db")
-	responders, err := loadResponders(os.Getenv("LOOP_SERVER_RESPONDERS"))
-	if err != nil {
-		return err
-	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{Path: databasePath}, Responders: responders, Logger: slog.Default(),
+		Database: server.DatabaseConfig{Path: databasePath}, Logger: slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -43,8 +37,8 @@ func run() error {
 		hertzserver.WithHostPorts(address),
 		hertzserver.WithTransport(standard.NewTransporter),
 		hertzserver.WithReadTimeout(30*time.Second),
-		// A page may observe an Invocation for hours, but the durable Invocation
-		// continues independently when this SSE connection disappears.
+		// A page may observe one task for hours, but its Operator or Harness
+		// execution continues independently when the connection disappears.
 		hertzserver.WithWriteTimeout(0),
 		hertzserver.WithIdleTimeout(90*time.Second),
 		hertzserver.WithMaxRequestBodySize(1<<20),
@@ -71,22 +65,6 @@ func run() error {
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
-}
-
-func loadResponders(raw string) ([]loopd.Responder, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	var responders []loopd.Responder
-	if err := json.Unmarshal([]byte(raw), &responders); err != nil {
-		return nil, fmt.Errorf("decode LOOP_SERVER_RESPONDERS: %w", err)
-	}
-	for _, responder := range responders {
-		if !responder.ResponderRef.Valid() {
-			return nil, fmt.Errorf("invalid responder %q/%q", responder.Role, responder.ID)
-		}
-	}
-	return responders, nil
 }
 
 func envOr(name, fallback string) string {

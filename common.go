@@ -22,12 +22,12 @@ func (role Role) Valid() bool {
 }
 
 type ResponderRef struct {
-	Role Role   `json:"role"`
-	ID   string `json:"id"`
+	Kind Role   `json:"kind"`
+	Key  string `json:"key"`
 }
 
 func (ref ResponderRef) Valid() bool {
-	return (ref.Role == RoleHarness || ref.Role == RoleOperator) && ref.ID != ""
+	return (ref.Kind == RoleHarness || ref.Kind == RoleOperator) && ref.Key != ""
 }
 
 type Responder struct {

@@ -60,22 +60,22 @@ loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行�
 | 概念 | 语义与 owner |
 |---|---|
 | **Conversation** | loop-server 拥有的持久协作空间；历史属于 Conversation，不属于某个 Operator 或 Harness |
-| **Message** | Conversation 中一次有序表达；`kind + key` 标识发送者，content 保存 AgentUE semantic model 快照 |
-| **Invocation** | 一条用户 Message 请求某个 Operator 或 Harness 作答的处理实例；连接输入、过程和最终回答 |
-| **Harness Call** | 一次可恢复、可流式观察的 Harness 执行；直接问答通常有一个 Call，Operator 可以拥有零到多个 Call |
-| **Interaction** | Operator 或 Harness 等待 Human 给出 typed answer/confirmation 的持久协作对象 |
+| **Message** | Conversation 中一次页面可见表达；`task_id + kind + key` 标识问答任务与发送者，content 保存 AgentUE semantic model 快照 |
+| **Operator Resource** | Operator 自己拥有的 CRD；记录领域目标、状态和与 Message 的关联 |
+| **Harness Execution** | Harness 自己拥有的执行；可耗时、流式返回，完整轨迹由 AgentLedger 记录 |
 
 Activity、Artifact 和各种流式事件是这些对象的过程记录或投影，不与它们平级：
 
-- **Activity** 展示一次 Invocation 内部正在发生什么，例如 Operator 阶段、Harness Call 和工具执行；
+- **Activity** 展示一次问答内部正在发生什么，例如 Operator 阶段、Harness Call 和工具执行；
 - **Artifact** 引用文本之外的结果，例如文件、图片或报告；
 - 流式事件说明 Harness Call 仍有反应，不代表 Call 已经完成。
 
 `loop-server` 和 `loop-runtime` 是平台组件，不是新的协作角色。前者拥有服务端协作状态，后者是供
 Operator Reconciler 使用的 Go API，不单独拥有业务事实。
 
-一次 Invocation 可能持续几十分钟乃至数天。它的业务生命周期必须独立于 HTTP request、SSE 连接、
-浏览器页面和某一个 loop-server 进程；这些都只是创建、观察或恢复持久执行的临时通道。
+一次问答任务可能持续几十分钟乃至数天。`task_id` 只关联本次问答的可见 Message 与执行记录；真正的业务
+生命周期由 Operator Resource 或 Harness 执行持有，不能依赖 HTTP request、SSE 连接、浏览器页面或某一个
+loop-server 进程。
 
 ## 4. Loop is a CRD
 
@@ -93,8 +93,8 @@ Loop = Resource(spec + status) + Reconcile
 CRD 的 schema、子资源、领域状态和完成条件全部由 Operator 拥有。LongHorizon 可以定义 Task、Manager、
 Executor 和 Auditor，其他 Operator 可以采用完全不同的 Resource；这些概念都不进入 loopd Core。
 
-loopd 不要求拥有自己的 CRD。Conversation、Message、Invocation、Interaction、Harness Call 的协调记录
-由 loop-server 持久化；Kubernetes 只承担 Operator 领域 Resource 的声明、Watch 和 Reconcile。
+loopd 不要求拥有自己的 CRD。loop-server v1 只持久化 Conversation 与页面可见的 Message；Kubernetes
+承担 Operator 领域 Resource 的声明、Watch 和 Reconcile，完整执行轨迹进入 AgentLedger。
 
 “Loop is a CRD”也不意味着每次聊天都必须创建 CRD。Human 直接请求 Harness 是基础协作路径；只有
 请求进入 Operator 所拥有的长期领域 Loop 时，才转换为相应的根 Resource。
@@ -105,22 +105,21 @@ loopd 不要求拥有自己的 CRD。Conversation、Message、Invocation、Inter
 
 ```text
 Human
-  → append user Message
-  → create Invocation(target = Harness)
-  → start or resume durable Harness Call
-  → project stream into the Conversation
-  → append harness answer Message
+  → atomically create user Message + empty harness Message (same task_id)
+  → Harness starts or resumes its execution
+  → project visible stream into the harness Message
+  → finish the harness Message
 ```
 
-Harness 的流式文本可以直接构成主回答，工具执行和诊断信息则进入当前 Invocation 的 Activity。一次 Call
-耗时很久不等于没有响应；进行中、等待输入、完成和失败必须是可区分的事实。
+Harness 的流式文本可以直接构成主回答，可见工具状态可以投影到 Message；完整 prompt、tool call/result、
+诊断与成本进入 AgentLedger。一次 Call 耗时很久不等于没有响应；进行中、等待输入、完成和失败必须是
+可区分的事实。
 
 ### 5.2 Human 请求 Operator
 
 ```text
 Human
-  → append user Message
-  → create Invocation(target = Operator)
+  → atomically create user Message + empty operator Message (same task_id)
   → create or update the Operator-owned root CRD
   → Reconciler reads Conversation context
   → Reconciler observes facts and advances the domain Loop
@@ -129,10 +128,10 @@ Human
        ├─ update Activity
        └─ wait for external state
   → Operator aggregates results
-  → append operator answer Message
+  → update and finish the operator Message
 ```
 
-Operator 内部 Harness 的输出默认属于 Invocation 详情，不自动进入主对话。只有 Operator 显式发布的
+Operator 内部 Harness 的输出默认属于详情会话或 AgentLedger，不自动进入主对话。只有 Operator 显式发布的
 内容才成为 `operator` 角色的最终回答；Operator 也可以选择把某个 Harness 结果显式公开为 Conversation
 Message。
 
@@ -146,18 +145,17 @@ Operator CRD 不复制完整对话，只保存协作引用和稳定水位，例�
 ```yaml
 spec:
   loop:
-    invocationID: inv-123
+    taskID: task-123
     conversationID: conv-123
     inputMessageID: msg-456
-    contextThroughMessageID: 01991f3d-1112-7000-8000-000000000000
+    responseMessageID: msg-457
 ```
 
-Reconciler 通过 loop-runtime 读取 Invocation Context。默认 Context 固定在 Invocation 创建时的
-`contextThroughMessageID`，使同一次 Reconcile 在重试时看到稳定输入，而不是被后来进入 Conversation 的消息
-悄悄改变语义。
+Reconciler 通过 loop-runtime 按 Conversation 和 Message ID 读取历史。Operator Resource 应保存本次输入与
+回答 Message 的显式引用，使同一次 Reconcile 在重试时看到稳定输入，而不是扫描“最新一条消息”猜测边界。
 
-Operator 如果确实需要后续消息，应显式读取水位之后的 History。Ask/Confirm 的回答由 Interaction identity
-关联并重新唤醒 Reconcile，不能靠扫描“最新一条消息”猜测回答属于谁。
+Operator 如果确实需要后续消息，应显式读取水位之后的 History。Ask/Confirm 等可见消息沿用同一
+`task_id`，其等待状态和关联关系由 Operator Resource 或 Harness 执行持有。
 
 ## 7. loop-runtime
 
@@ -165,12 +163,12 @@ loop-runtime 向 Operator 暴露少量 typed capability，使领域 Reconcile �
 Human interaction 的控制骨架：
 
 ```text
-Chat.Context     读取本次 Invocation 的稳定输入与历史
+Chat.Conversation 读取 Conversation
 Chat.History     显式读取 Conversation 的增量历史
+Chat.Send        原子创建 user 与 responder Message，并返回 responder Message
+Chat.Update      更新 responder Message 的可见语义快照
 Harness.Prompt   以 prompt、tools 和可选 Harness target 发起或恢复一次 Call
 Ask / Confirm    请求 Human 提供信息或确认决定
-Chat.Activity    发布本次 Invocation 的处理进展
-Chat.Reply       以 Operator 身份提交主回答
 ```
 
 `Harness.Prompt` 返回持久 Call handle，而不是等待整个执行完成的普通 RPC：
@@ -216,28 +214,22 @@ identity、观察、Interaction 和 Chat 投影，不把某种 Agent Team、DAG 
 
 ## 9. 状态与投影边界
 
-loop-server 是 Conversation 协作事实的 owner：
+loop-server 是页面协作读模型的 owner：
 
-- Message 是对话历史的事实来源；
-- Invocation 关联一次用户输入、目标 responder、处理状态和最终回答；
-- Harness Call 保存外部执行引用、幂等 identity、当前状态和结果引用；
-- Interaction 保存待决问题、回答和终态；
-- Activity 是面向 UI 的通用处理详情；
-- Artifact 保存或引用非文本产物。
+- Conversation 代表一个对话框；
+- Message 是页面可见对话历史的事实来源；
+- 同一次问答的 user、responder 及后续可见交互共享 `task_id`；
+- Message content 可以投影 Activity、Artifact 等页面需要展示的内容。
 
 loop-server 不保存 Operator 领域表，也不复制 Operator CRD 的完整状态。通用 Activity 只承载跨 Operator
 都能理解的处理摘要；更丰富的领域详情留在 Operator Resource，必要时通过专用 View 扩展展示。
 
-agentledger 可以记录 Message、Invocation、Harness Call 和 Activity 的不可变执行事实，用于审计、回放和
-成本分析；它不承担 Conversation History、待决 Interaction 或其它业务状态，因此不能替代 loop-server
-的数据模型。
+AgentLedger 记录 prompt、模型事件、Harness Call、tool call/result、重试和成本等完整执行事实，用于审计、
+回放和分析；它不承担页面 Conversation History，因此不能替代 loop-server 的两表业务模型。
 
-AgentUE 在 loopd 中定义 UI model、patch 和 SSE 投影。AgentUE Runner 当前负责 Python 后台任务、Redis
-事件桥和 heartbeat recovery；直接把它嵌入 Go loop-server 会与 loopd DB、Harness provider 及 Operator
-CRD 形成多个执行 owner。因此 v1 由 loopd 自己提供基于数据库的 durable Harness Call runner，不把
-AgentUE Runner 作为 Invocation runner。Python Harness/Operator 可以在自身实现
-内部使用 AgentUE Runner，但对 loopd 仍只暴露 Harness/Operator 契约。未来只有在 Runner 支持 Go 或允许
-复用 loopd 现有 event store 时，才考虑合并两套 lifecycle 基础设施。
+AgentUE 在 loopd 中定义页面语义模型。AgentUE Runner 当前负责 Python 后台任务、Redis 事件桥和 heartbeat
+recovery；直接把它嵌入 Go loop-server 会与 Harness provider 及 Operator CRD 形成多个执行 owner。因此
+v1 只复用 AgentUE 的页面模型，不把 AgentUE Runner 作为 loopd 的执行 owner。
 
 ## 10. 关键不变量
 
@@ -247,18 +239,17 @@ AgentUE Runner 作为 Invocation runner。Python Harness/Operator 可以在自�
    被复制或切断。
 3. **Operator 拥有领域 Loop**：CRD、Reconcile、外部事实、拆解策略和完成条件不进入 loopd Core。
 4. **直接 Harness 问答不伪装成 CRD Loop**：只有需要领域控制循环的请求才进入 Operator Resource。
-5. **外部动作先获得持久 identity**：同一 owner 与 effect key 的重试必须观察或恢复同一次 Harness Call，
+5. **一次问答有稳定 task identity**：初始 user/responder Message 和后续反问、确认共享同一 `task_id`。
+6. **外部动作先获得持久 identity**：同一 owner 与 effect key 的重试必须观察或恢复同一次 Harness Call，
    不能重复触发无法证明结果的副作用。
-6. **流式响应与完成正交**：有事件表示 Call 有进展，不表示成功；长时间运行也不能被等同于失联。
-7. **上下文有明确水位**：Reconcile 默认读取 Invocation 创建时的稳定 Context，后续 History 必须显式请求。
-8. **最终回答由 responder 收口**：直连 Harness 由 Harness 回答；Operator 内部可以调用多个 Harness，但由
+7. **流式响应与完成正交**：有事件表示 Call 有进展，不表示成功；长时间运行也不能被等同于失联。
+8. **上下文有明确引用**：Operator Resource 保存输入、回答 Message ID；后续 History 必须显式读取。
+9. **最终回答由 responder 收口**：直连 Harness 由 Harness 回答；Operator 内部可以调用多个 Harness，但由
    Operator 汇总并回答。
-9. **事实与投影分层**：Message、Invocation、Interaction 和 Call 状态是协作事实；UI、Activity 详情和
-   agentledger 记录不能反向成为业务 owner。
-10. **Harness 差异止于 Adapter**：新增 agentd 或第三方 Harness 不应要求修改 Conversation、Operator 或
-    Interaction 模型。
-11. **连接不拥有执行**：HTTP/SSE 断开只结束本次观察；Invocation、Call、Interaction 与 Operator CRD
-    继续存在，重连从持久 snapshot/cursor 恢复。
+10. **可见历史与完整轨迹分层**：Message 只保存页面可见快照，AgentLedger 保存完整执行轨迹。
+11. **Harness 差异止于 Adapter**：新增 agentd 或第三方 Harness 不应要求修改 Conversation 或 Operator 模型。
+12. **连接不拥有执行**：HTTP/SSE 断开只结束本次观察；Harness 执行与 Operator CRD 继续存在，重连从
+    持久状态恢复。
 
 ## 11. 组件与依赖方向
 

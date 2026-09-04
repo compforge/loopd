@@ -19,10 +19,6 @@ type page[T any] struct {
 	Data []T `json:"data"`
 }
 
-type replyRequest struct {
-	Content string `json:"content"`
-}
-
 type acceptInvocationRequest struct {
 	Resource loopd.ResourceRef `json:"resource"`
 }

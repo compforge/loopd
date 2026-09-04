@@ -37,11 +37,13 @@ func TestMessagesUseUUIDOrderAsCursor(t *testing.T) {
 	}
 	first := model.Message{
 		ID: "01991f3d-1112-7000-8000-000000000000", ConversationID: "01991f3d-1111-7000-8000-000000000000",
-		Kind: "user", Key: "user-1", Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
+		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "user", Key: "user-1",
+		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	second := model.Message{
 		ID: "01991f3d-1113-7000-8000-000000000000", ConversationID: first.ConversationID,
-		Kind: "operator", Key: "operator-1", Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
+		TaskID: first.TaskID, Kind: "operator", Key: "operator-1",
+		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	if _, err := store.CreateMessage(ctx, second); err != nil {
 		t.Fatal(err)
@@ -56,6 +58,40 @@ func TestMessagesUseUUIDOrderAsCursor(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].ID != second.ID {
 		t.Fatalf("messages after %s = %#v", first.ID, messages)
+	}
+}
+
+func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	conversationID := "01991f3d-1111-7000-8000-000000000000"
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: conversationID}); err != nil {
+		t.Fatal(err)
+	}
+	existing := model.Message{
+		ID: "01991f3d-1112-7000-8000-000000000000", ConversationID: conversationID,
+		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "operator", Key: "existing",
+		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
+	}
+	if _, err := store.CreateMessage(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
+	user := model.Message{
+		ID: "01991f3d-1113-7000-8000-000000000000", ConversationID: conversationID,
+		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", Key: "user-1",
+		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
+	}
+	responder := existing
+	responder.TaskID = user.TaskID
+	if _, err := store.CreateChatMessages(ctx, user, responder); err == nil {
+		t.Fatal("CreateChatMessages succeeded with a duplicate responder ID")
+	}
+	messages, err := store.ListMessages(ctx, conversationID, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ID != existing.ID {
+		t.Fatalf("transaction left partial messages: %#v", messages)
 	}
 }
 

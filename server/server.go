@@ -7,16 +7,14 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/route"
-	loopd "github.com/compforge/loopd"
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 )
 
 type Config struct {
-	Database   DatabaseConfig
-	Responders []loopd.Responder
-	Logger     *slog.Logger
+	Database DatabaseConfig
+	Logger   *slog.Logger
 }
 
 type DatabaseConfig struct {
@@ -42,8 +40,13 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	loopService := service.New(store, config.Responders)
-	return &Server{store: store, api: serverapi.New(loopService, config.Logger)}, nil
+	conversations := service.NewConversationService(store, config.Logger)
+	messages := service.NewMessageService(store, config.Logger)
+	chat := service.NewChatService(store, config.Logger)
+	return &Server{
+		store: store,
+		api:   serverapi.New(conversations, messages, chat, config.Logger),
+	}, nil
 }
 
 func (server *Server) Register(engine *route.Engine) { server.api.Register(engine) }
