@@ -14,17 +14,12 @@ Conversation 中的公开角色统一为 `user`、`operator`、`harness`。Agent
 
 ```text
 loopd/
-├── *.go                    # 公共协作模型
 ├── cmd/loop-server/        # 进程配置、依赖组装与生命周期
+├── docs/                   # loopd 稳定内核与跨模块设计
 ├── harness/                # Harness Adapter 公共契约与具体适配
 ├── runtime/                # Operator Reconciler 使用的 Go client
-├── server/                 # loop-server 组件
-│   ├── internal/api/       # Hertz 路由、HTTP DTO 与协议转换
-│   ├── internal/model/     # 数据库模型；一张表一个 Go 文件
-│   ├── internal/repo/      # 按模型拆分的持久化实现
-│   ├── internal/service/   # 用例编排与业务规则
-│   └── docs/               # server 实现文档
-└── docs/kernel.md          # 稳定内核、参与者与 ownership
+├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
+└── *.go                    # 跨 server、runtime 和 harness 的公共协作模型
 ```
 
 ## 关键约定
@@ -38,10 +33,9 @@ loopd/
    message sequence。
 4. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用触发它的主链路 Message。
    v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
-5. server 依赖方向固定为 `api → service → repo/model`。HTTP DTO 和 GORM model 不得穿透 service。
-6. Operator 的 CRD、领域状态、完成条件和外部事实由 Operator 自己拥有；loop-server 不复制这些表。
-7. AgentLedger 后续只承载执行事实、审计和成本记录，不替代 Conversation 与 Message 的业务存储。
-8. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
+5. Operator 的 CRD、领域状态、完成条件和外部事实由 Operator 自己拥有；loop-server 不复制这些表。
+6. AgentLedger 后续只承载执行事实、审计和成本记录，不替代 Conversation 与 Message 的业务存储。
+7. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
 
 ## References
 
