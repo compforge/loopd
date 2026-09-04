@@ -39,6 +39,15 @@ The public conversation roles are always:
 user | harness | operator
 ```
 
+## Runtime stack
+
+This component view shows the ownership and runtime boundaries behind that
+collaboration model. loop-runtime is embedded in an Operator, while
+AgentLedger preserves execution facts across orchestration and Agent
+execution.
+
+![loopd component stack](docs/stack_v1.svg)
+
 ## Long-running execution
 
 A question may run for minutes or days. Its lifecycle is independent from any
