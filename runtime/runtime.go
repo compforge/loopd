@@ -27,6 +27,7 @@ type Loop struct {
 	Chat     Chat
 	Harness  Harness
 	Operator Operator
+	Task     Task
 	client   *client
 }
 
@@ -46,6 +47,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	loop.Chat = Chat{client: c}
 	loop.Harness = Harness{client: c}
 	loop.Operator = Operator{client: c}
+	loop.Task = Task{client: c}
 	return &Runtime{Loop: loop}, nil
 }
 

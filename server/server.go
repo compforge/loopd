@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 type Config struct {
 	Database DatabaseConfig
+	Tasks    TaskClient
 	Logger   *slog.Logger
 }
 
@@ -32,6 +34,9 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	if config.Tasks == nil {
+		return nil, errors.New("task client is required")
+	}
 	store, err := repo.Open(repo.Config{
 		Path: config.Database.Path, OperationTimeout: config.Database.OperationTimeout,
 		MaxOpenConns: config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
@@ -42,10 +47,11 @@ func New(config Config) (*Server, error) {
 	}
 	conversations := service.NewConversationService(store, config.Logger)
 	messages := service.NewMessageService(store, config.Logger)
-	chat := service.NewChatService(store, config.Logger)
+	chat := service.NewChatService(store, config.Tasks, config.Logger)
+	tasks := service.NewTaskService(store, config.Logger)
 	return &Server{
 		store: store,
-		api:   serverapi.New(conversations, messages, chat, config.Logger),
+		api:   serverapi.New(conversations, messages, chat, tasks, config.Logger),
 	}, nil
 }
 

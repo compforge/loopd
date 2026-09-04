@@ -19,6 +19,7 @@ type Server struct {
 	conversations *service.ConversationService
 	messages      *service.MessageService
 	chat          *service.ChatService
+	tasks         *service.TaskService
 	logger        *slog.Logger
 }
 
@@ -26,12 +27,13 @@ func New(
 	conversations *service.ConversationService,
 	messages *service.MessageService,
 	chat *service.ChatService,
+	tasks *service.TaskService,
 	logger *slog.Logger,
 ) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{conversations: conversations, messages: messages, chat: chat, logger: logger}
+	return &Server{conversations: conversations, messages: messages, chat: chat, tasks: tasks, logger: logger}
 }
 
 func (server *Server) Register(engine *route.Engine) {
@@ -46,6 +48,7 @@ func (server *Server) Register(engine *route.Engine) {
 		"/v1/conversations/:conversation_id/messages/:message_id/content",
 		server.adapt(server.updateMessageContent),
 	)
+	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
 }
 
 type handler func(context.Context, *hertzapp.RequestContext) error
@@ -61,17 +64,21 @@ func (server *Server) adapt(next handler) hertzapp.HandlerFunc {
 func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	status := consts.StatusInternalServerError
 	typeName := "internal_error"
+	message := err.Error()
 	switch {
 	case errors.Is(err, service.ErrInvalid):
 		status, typeName = consts.StatusBadRequest, "invalid_request"
 	case errors.Is(err, service.ErrConflict), errors.Is(err, repo.ErrConflict):
 		status, typeName = consts.StatusConflict, "conflict"
+	case errors.Is(err, service.ErrUnavailable):
+		status, typeName = consts.StatusServiceUnavailable, "service_unavailable"
+		message = service.ErrUnavailable.Error()
 	case errors.Is(err, repo.ErrNotFound):
 		status, typeName = consts.StatusNotFound, "not_found"
 	default:
 		server.logger.Error("loop-server request failed", "error", err)
 	}
-	request.JSON(status, errorResponse{Error: apiError{Type: typeName, Message: err.Error()}})
+	request.JSON(status, errorResponse{Error: apiError{Type: typeName, Message: message}})
 }
 
 func decodeBody(request *hertzapp.RequestContext, target any) error {

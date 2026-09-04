@@ -83,7 +83,7 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 	}
 	responder := existing
 	responder.TaskID = user.TaskID
-	if _, err := store.CreateChatMessages(ctx, user, responder); err == nil {
+	if _, err := store.CreateChatMessages(ctx, user, responder, nil); err == nil {
 		t.Fatal("CreateChatMessages succeeded with a duplicate responder ID")
 	}
 	messages, err := store.ListMessages(ctx, conversationID, "", 100)
