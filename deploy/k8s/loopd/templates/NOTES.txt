@@ -1,0 +1,12 @@
+{{- if .Values.web.enabled }}
+loopd Web:
+
+  kubectl -n {{ .Release.Namespace }} port-forward service/{{ include "loopd.webName" . }} 8080:{{ .Values.web.service.port }}
+
+  Open http://127.0.0.1:8080
+{{- end }}
+
+loop-server health:
+
+  kubectl -n {{ .Release.Namespace }} port-forward service/{{ include "loopd.serverName" . }} 8081:{{ .Values.server.service.port }}
+  curl http://127.0.0.1:8081/healthz

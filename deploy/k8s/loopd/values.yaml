@@ -1,0 +1,110 @@
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+
+server:
+  # SQLite is process-local. Keep this at one until loop-server supports a
+  # shared external database.
+  replicaCount: 1
+  image:
+    repository: ghcr.io/compforge/loop-server
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+router:
+  enabled: true
+  image:
+    repository: ghcr.io/compforge/loop-router
+    tag: latest
+    pullPolicy: IfNotPresent
+  model:
+    name: gpt-5-mini
+    # OpenAI-compatible API endpoint. Leave empty to use AgentGo's default.
+    baseURL: ""
+    # Quick Start may set apiKey directly. Production should reference an
+    # existing Secret so the credential is not stored in Helm values.
+    apiKey: ""
+    existingSecret: ""
+    existingSecretKey: api-key
+  maxSubtasks: 4
+  concurrency: 4
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+web:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/compforge/loop-web
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+redis:
+  # Set address to use an external Redis. When empty, enabled must be true and
+  # the Chart installs the Quick Start Redis workload.
+  address: ""
+  enabled: true
+  image:
+    repository: redis
+    tag: "8-alpine"
+    pullPolicy: IfNotPresent
+  existingSecret: ""
+  existingSecretUsernameKey: username
+  existingSecretPasswordKey: password
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: loopd.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []

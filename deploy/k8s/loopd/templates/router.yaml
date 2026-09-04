@@ -1,0 +1,99 @@
+{{- if .Values.router.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "loopd.routerName" . }}
+  labels:
+    {{- include "loopd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "loopd.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router
+  template:
+    metadata:
+      annotations:
+        checksum/model-config: {{ include (print $.Template.BasePath "/router-config.yaml") . | sha256sum }}
+        {{- with .Values.router.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "loopd.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: router
+        {{- with .Values.router.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "loopd.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: router
+          image: "{{ .Values.router.image.repository }}:{{ .Values.router.image.tag }}"
+          imagePullPolicy: {{ .Values.router.image.pullPolicy }}
+          env:
+            - name: LOOP_ROUTER_SERVER_URL
+              value: {{ printf "http://%s:%v" (include "loopd.serverName" .) .Values.server.service.port | quote }}
+            - name: LOOP_ROUTER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOOP_ROUTER_MODEL_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: provider
+            - name: LOOP_ROUTER_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: model
+            - name: LOOP_ROUTER_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: base-url
+            - name: LOOP_ROUTER_MAX_SUBTASKS
+              value: {{ .Values.router.maxSubtasks | quote }}
+            - name: LOOP_ROUTER_CONCURRENCY
+              value: {{ .Values.router.concurrency | quote }}
+            {{- if or .Values.router.model.apiKey .Values.router.model.existingSecret }}
+            - name: LOOP_ROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loopd.routerSecretName" . }}
+                  key: {{ .Values.router.model.existingSecretKey }}
+            {{- end }}
+            {{- with .Values.router.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.router.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.router.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.router.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

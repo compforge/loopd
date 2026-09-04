@@ -16,6 +16,7 @@ Conversation 中的公开角色统一为 `user`、`operator`、`harness`。Agent
 loopd/
 ├── cmd/loop-server/        # 进程配置、依赖组装与生命周期
 ├── config/crd/             # loopd Task CRD 安装清单
+├── deploy/                 # loop-server、Router、Web 镜像与 Kubernetes Helm Chart
 ├── docs/                   # loopd 稳定内核与跨模块设计
 ├── harness/                # runtime 侧 Harness Adapter 契约；agentgo 为进程内 demo
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
@@ -43,12 +44,15 @@ loopd/
    字段可按 Kubernetes API 兼容规则增量演进；领域状态复杂时，Operator 创建并拥有自己的 CRD。
 7. AgentLedger 承载完整执行历史、审计和成本记录，不替代 Conversation 与 Message 的页面业务存储。
 8. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
-9. 修改 `runtime/api/` 下的 CRD 类型后运行 `make generate manifests`，并提交生成的 DeepCopy 与 CRD YAML。
+9. 修改 `runtime/api/` 下的 CRD 类型后运行 `make generate manifests`，并提交生成的 DeepCopy、基础 CRD
+   YAML 与 Helm Chart 中同步的 CRD YAML。
 10. Operator 通过 loop-runtime 调用 Harness；可见 `set/append` 事件由 runtime 发送给任意 loop-server
     实例，再进入共享 Redis Stream。AgentGo Adapter 只用于进程内演示，生产级执行恢复由 agentd 持有。
 
 ## References
 
 - `docs/kernel.md` — loopd 稳定模型、主流程和扩展边界
+- `deploy/docker/README.md` — loop-server、Router 与 Web 镜像构建入口
+- `deploy/k8s/README.md` — Helm Quick Start、组件拓扑与配置边界
 - `server/docs/persistence.md` — Conversation 与 Message 的数据库约束
 - `README.md` — 产品定位与使用入口

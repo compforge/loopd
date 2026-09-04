@@ -1,0 +1,13 @@
+{{- if .Values.router.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "loopd.routerConfigName" . }}
+  labels:
+    {{- include "loopd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+data:
+  provider: "openai"
+  model: {{ .Values.router.model.name | quote }}
+  base-url: {{ .Values.router.model.baseURL | quote }}
+{{- end }}

@@ -1,0 +1,30 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "loopd.webName" . }}
+  labels:
+    {{- include "loopd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      server_name _;
+      root /usr/share/nginx/html;
+
+      location /v1/ {
+        proxy_pass http://{{ include "loopd.serverName" . }}:{{ .Values.server.service.port }};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 7d;
+      }
+
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+    }
+{{- end }}
+

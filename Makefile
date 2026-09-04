@@ -15,6 +15,7 @@ generate: $(CONTROLLER_GEN)
 
 manifests: $(CONTROLLER_GEN)
 	$(CONTROLLER_GEN) crd paths="./runtime/api/..." output:crd:artifacts:config=config/crd/bases
+	cp config/crd/bases/loopd.compforge.io_tasks.yaml deploy/k8s/loopd/crds/loopd.compforge.io_tasks.yaml
 
 test:
 	go test ./...
