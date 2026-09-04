@@ -19,9 +19,9 @@ func (chat Chat) Context(ctx context.Context, invocationID string) (loopd.Invoca
 	return result, err
 }
 
-func (chat Chat) History(ctx context.Context, conversationID string, after int64, limit int) ([]loopd.Message, error) {
+func (chat Chat) History(ctx context.Context, conversationID, after string, limit int) ([]loopd.Message, error) {
 	var result page[loopd.Message]
-	path := "/v1/conversations/" + url.PathEscape(conversationID) + "/messages?after=" + strconv.FormatInt(after, 10) +
+	path := "/v1/conversations/" + url.PathEscape(conversationID) + "/messages?after=" + url.QueryEscape(after) +
 		"&limit=" + strconv.Itoa(limit)
 	err := chat.client.do(ctx, http.MethodGet, path, nil, &result)
 	return result.Data, err

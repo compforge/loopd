@@ -21,40 +21,40 @@ func (phase InvocationPhase) Terminal() bool {
 }
 
 type Conversation struct {
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	ParentMessageID string `json:"parent_message_id,omitempty"`
 	Timestamped
 }
 
 type Message struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	Sequence       int64     `json:"sequence"`
-	Role           Role      `json:"role"`
-	AuthorID       string    `json:"author_id"`
-	Content        string    `json:"content"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string          `json:"id"`
+	ConversationID string          `json:"conversation_id"`
+	Kind           Role            `json:"kind"`
+	Key            string          `json:"key"`
+	Content        json.RawMessage `json:"content"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 type Invocation struct {
-	ID                string          `json:"id"`
-	ConversationID    string          `json:"conversation_id"`
-	InputMessageID    string          `json:"input_message_id"`
-	OutputMessageID   string          `json:"output_message_id,omitempty"`
-	Responder         ResponderRef    `json:"responder"`
-	ContextThroughSeq int64           `json:"context_through_seq"`
-	Phase             InvocationPhase `json:"phase"`
-	Resource          *ResourceRef    `json:"resource,omitempty"`
-	Error             string          `json:"error,omitempty"`
+	ID                      string          `json:"id"`
+	ConversationID          string          `json:"conversation_id"`
+	InputMessageID          string          `json:"input_message_id"`
+	OutputMessageID         string          `json:"output_message_id,omitempty"`
+	Responder               ResponderRef    `json:"responder"`
+	ContextThroughMessageID string          `json:"context_through_message_id"`
+	Phase                   InvocationPhase `json:"phase"`
+	Resource                *ResourceRef    `json:"resource,omitempty"`
+	Error                   string          `json:"error,omitempty"`
 	Timestamped
 }
 
 type InvocationContext struct {
-	Invocation     Invocation `json:"invocation"`
-	Input          Message    `json:"input"`
-	History        []Message  `json:"history"`
-	HistoryFromSeq int64      `json:"history_from_seq,omitempty"`
-	HasEarlier     bool       `json:"has_earlier"`
+	Invocation           Invocation `json:"invocation"`
+	Input                Message    `json:"input"`
+	History              []Message  `json:"history"`
+	HistoryFromMessageID string     `json:"history_from_message_id,omitempty"`
+	HasEarlier           bool       `json:"has_earlier"`
 }
 
 type ActivityPhase string

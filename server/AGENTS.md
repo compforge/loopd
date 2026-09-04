@@ -2,44 +2,40 @@
 
 ## 项目定位与边界
 
-loopd 是 “Loop is a CRD” 在编排层的开源实现，也是 Human、Harness 与 Operator 的协作平台。
-loop-server 持有跨参与者的协作事实，loop-runtime 为 Operator Reconciler 提供 Go API；领域 CRD、
-拆解策略、外部事实与完成条件由各 Operator 自己拥有。
-
-loopd 公共模型统一使用 Harness，不再建立与 Harness 平行的 Agent 概念。外部 Agent、Assistant 或
-Session 产品通过 Adapter 接入后均表现为 Harness。
+server 是 loop-server 组件，当前只拥有 Conversation 与 Message 两类聊天事实。Operator CRD、Harness
+运行状态、执行审计和成本记录不进入这两个模型；它们分别由 Operator、Harness 与 AgentLedger 持有。
 
 ## 代码地图与核心模块
 
 ```text
-├── *.go                    # 根包 loopd：稳定公共协作模型
-├── cmd/loop-server/        # Hertz 服务组装与进程生命周期
-├── harness/                # 可替换 Harness provider 边界
-├── runtime/                # Operator Reconciler 使用的 Go client
-├── server/                 # HTTP 私有 DTO、持久化、AgentUE 投影与 Harness 调度
-│   └── docs/persistence.md # 数据库和恢复语义
-└── docs/kernel.md          # 稳定内核、参与者与 ownership
+server/
+├── server.go               # 组件组装与资源生命周期
+├── internal/api/           # Hertz 路由、HTTP DTO 与错误映射
+├── internal/model/         # GORM model；一张表一个 Go 文件
+│   ├── conversation.go     # conversations
+│   └── message.go          # messages
+├── internal/repo/          # 数据库连接及按表拆分的持久化操作
+│   ├── conversation.go
+│   └── message.go
+├── internal/service/       # UUID、校验、模型转换与用例规则
+│   ├── conversation.go
+│   └── message.go
+└── docs/persistence.md     # 两表 schema 与 UUIDv7 游标约束
 ```
 
 ## 关键约定
 
-1. Conversation History 属于 loop-server，不属于某一个 Operator 或 Harness；同一会话可以切换
-   responder。
-2. loop-server 不保存 Operator 领域表，也不要求拥有自己的 CRD；Operator 只在 Invocation 上绑定
-   自己的 Resource 引用。
-3. `Harness.Prompt` 返回持久 Call handle。同一 `owner UID + effect key` 的重复请求必须恢复同一次
-   执行；参数变化必须冲突。
-4. Invocation 与 Harness Call 可以运行数天，不能依赖 HTTP/SSE 连接存活。SSE 每次连接均从持久
-   snapshot 开始，并以数据库 cursor 继续观察。
-5. Provider 调用必须是短时间、带 timeout 的 ensure/observe；实际 Harness 执行由 provider 持久
-   化。结果不确定时 fail closed，不可盲目重复触发。
-6. Operator 内部 Harness 输出默认只进入 Invocation 详情；只有 Operator 汇总发布的内容才成为主
-   对话回答。
-7. agentledger 仅可作为审计/成本记录 sink，不能替代 Message、Invocation、Interaction 或 Call 的
-   业务存储。
+1. 依赖方向固定为 `api → service → repo/model`；API DTO 与 GORM model 不得跨层泄漏。
+2. `model/` 一张表一个文件，`repo/` 按同名模型拆分；不要重新聚合成巨型 store 文件。
+3. Conversation 使用 `name`。Message 使用 `kind + key + content`：kind 只能是 `user`、`operator`、
+   `harness`，key 是该参与者的稳定标识，content 是可扩展的 AgentUE semantic model JSON，不是纯文本。
+4. 两张表的 `id` 都由 service 使用 go-stdx `uuid.V7()` 生成。消息按 UUIDv7 字典序读取和翻页，不增加
+   `sequence` 字段。
+5. `conversations.parent_message_id` 只用于把 Operator 详情会话挂到主链路 Message。主会话为空，详情
+   会话不可继续嵌套，同一 Message 最多对应一个详情会话。
 
 ## References
 
-- `../docs/kernel.md` — loopd 稳定模型、主流程和扩展边界
-- `docs/persistence.md` — loop-server 表、事务、游标与恢复语义
-- `../README.md` — 产品定位与最短开发入口
+- `../AGENTS.md` — loopd 全局边界与代码地图
+- `docs/persistence.md` — Conversation 与 Message 持久化设计
+- `../docs/kernel.md` — loopd 稳定理念和参与者边界
