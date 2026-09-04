@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
@@ -21,6 +22,21 @@ const taskIDHeader = "X-Loopd-Task-ID"
 
 type Chat struct {
 	client *client
+	state  *chatState
+}
+
+type chatState struct {
+	mu        sync.Mutex
+	sequences map[string]*taskSequence
+}
+
+type taskSequence struct {
+	mu   sync.Mutex
+	next uint64
+}
+
+func newChat(client *client) Chat {
+	return Chat{client: client, state: &chatState{sequences: make(map[string]*taskSequence)}}
 }
 
 type CreateConversationRequest struct {
@@ -33,11 +49,6 @@ type SendMessageRequest struct {
 	UserKey string          `json:"user_key,omitempty"`
 	Target  loopd.ActorRef  `json:"target,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
-}
-
-type ChatEvent struct {
-	Cursor string
-	Data   json.RawMessage
 }
 
 type TaskFailure struct {
@@ -98,10 +109,10 @@ func (chat Chat) Send(
 		return nil, errors.New("loop-server response omitted task ID")
 	}
 	stream := &ChatStream{
-		taskID:  taskID,
-		body:    response.Body,
-		scanner: bufio.NewScanner(response.Body),
-		cursor:  lastEventID,
+		taskID:      taskID,
+		body:        response.Body,
+		scanner:     bufio.NewScanner(response.Body),
+		lastEventID: lastEventID,
 	}
 	stream.scanner.Buffer(make([]byte, 64<<10), 16<<20)
 	return stream, nil
@@ -109,16 +120,16 @@ func (chat Chat) Send(
 
 // ChatStream reads one AgentUE event at a time from the Chat SSE response.
 type ChatStream struct {
-	taskID  string
-	body    io.ReadCloser
-	scanner *bufio.Scanner
-	cursor  string
+	taskID      string
+	body        io.ReadCloser
+	scanner     *bufio.Scanner
+	lastEventID string
 }
 
 func (stream *ChatStream) TaskID() string { return stream.taskID }
 
-func (stream *ChatStream) Next() (ChatEvent, error) {
-	cursor := stream.cursor
+func (stream *ChatStream) Next() (loopd.Event, error) {
+	eventID := stream.lastEventID
 	var data bytes.Buffer
 	for stream.scanner.Scan() {
 		line := stream.scanner.Text()
@@ -127,11 +138,11 @@ func (stream *ChatStream) Next() (ChatEvent, error) {
 				continue
 			}
 			value := bytes.TrimSuffix(data.Bytes(), []byte{'\n'})
-			stream.cursor = cursor
-			return ChatEvent{Cursor: cursor, Data: append(json.RawMessage(nil), value...)}, nil
+			stream.lastEventID = eventID
+			return loopd.Event{ID: eventID, Data: append(json.RawMessage(nil), value...)}, nil
 		}
 		if strings.HasPrefix(line, "id:") {
-			cursor = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+			eventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
@@ -144,9 +155,9 @@ func (stream *ChatStream) Next() (ChatEvent, error) {
 		}
 	}
 	if err := stream.scanner.Err(); err != nil {
-		return ChatEvent{}, err
+		return loopd.Event{}, err
 	}
-	return ChatEvent{}, io.EOF
+	return loopd.Event{}, io.EOF
 }
 
 func (stream *ChatStream) Close() error { return stream.body.Close() }
@@ -164,19 +175,44 @@ func (chat Chat) History(
 	return result.Data, err
 }
 
-// Emit publishes one Operator-produced set or append event for a Task.
-func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (string, error) {
+// Emit publishes one Operator-produced set or append event for a Task. A zero
+// AgentUE seq is assigned from this Runtime's per-Task sequence.
+func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (loopd.Event, error) {
+	sequence := chat.sequence(taskID)
+	sequence.mu.Lock()
+	defer sequence.mu.Unlock()
+	if event.Seq == 0 {
+		event.Seq = sequence.next
+	}
 	data, err := event.Marshal()
 	if err != nil {
-		return "", err
+		return loopd.Event{}, err
 	}
 	var result struct {
-		Cursor string `json:"cursor"`
+		ID string `json:"id"`
 	}
 	err = chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/events", struct {
 		Event json.RawMessage `json:"event"`
 	}{Event: data}, &result)
-	return result.Cursor, err
+	if err != nil {
+		return loopd.Event{}, err
+	}
+	if event.Seq >= sequence.next {
+		sequence.next = event.Seq + 1
+	}
+	return loopd.Event{ID: result.ID, Data: data}, nil
+}
+
+func (chat Chat) sequence(taskID string) *taskSequence {
+	chat.state.mu.Lock()
+	defer chat.state.mu.Unlock()
+	sequence := chat.state.sequences[taskID]
+	if sequence == nil {
+		// loop-server initializes every Task stream with AgentUE seq 1.
+		sequence = &taskSequence{next: 2}
+		chat.state.sequences[taskID] = sequence
+	}
+	return sequence
 }
 
 // Complete persists the latest AgentUE snapshot as the response Message and
@@ -187,7 +223,7 @@ func (chat Chat) Complete(ctx context.Context, taskID string, failure *TaskFailu
 	}{Error: failure}, nil)
 }
 
-func IsEnd(event ChatEvent) (bool, error) {
+func IsEnd(event loopd.Event) (bool, error) {
 	parsed, err := agentueui.Parse(event.Data)
 	if err != nil {
 		return false, err

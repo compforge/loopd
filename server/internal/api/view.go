@@ -36,7 +36,7 @@ type appendTaskEventRequest struct {
 }
 
 type appendTaskEventResponse struct {
-	Cursor string `json:"cursor"`
+	ID string `json:"id"`
 }
 
 type completeTaskRequest struct {

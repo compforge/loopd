@@ -49,6 +49,8 @@ server/
    `make generate manifests`，提交生成的 DeepCopy 和 CRD YAML。
 10. AgentUE 拥有事件协议、Reducer、Redis Stream 与续接；server 拥有 Redis client 生命周期、Task 路由和
     最终 Message 快照。Redis 中的事件是活跃任务投影，不替代 AgentLedger 的完整执行记录。
+11. Task event API 接受 Operator/runtime 发布的 AgentUE `set/append`。返回的 event ID 是 Redis/SSE
+    transport identity，仅用于 `Last-Event-ID` 续接；语义顺序和幂等由 event data 内的 AgentUE `seq` 表达。
 
 ## References
 

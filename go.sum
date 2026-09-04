@@ -25,6 +25,8 @@ github.com/cloudwego/hertz v0.10.4 h1:xJxomApZYR67cROevam6SrtUBDvhcI4ZZhx/WgvpHw
 github.com/cloudwego/hertz v0.10.4/go.mod h1:tZXEi/4o7R0Ho9yw5V2C+k/wVx3S8+wuuiJGDMopnpg=
 github.com/cloudwego/netpoll v0.7.2 h1:4qDBGQ6CG2SvEXhZSDxMdtqt/NLDxjAVk0PC/biKiJo=
 github.com/cloudwego/netpoll v0.7.2/go.mod h1:PI+YrmyS7cIr0+SD4seJz3Eo3ckkXdu2ZVKBLhURLNU=
+github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676 h1:3SrN9Pu/DbKuteFoHT3NJppRyODD7RbfMn++ogiXL8Q=
+github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676/go.mod h1:EXHfA5VXaBoEB0aVUy3latIXgr+nyMJ/nUs06BL4R+Q=
 github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a h1:ZxgLsatqSGYE1WBJ7mUVdEGHN9x6qKw6rIYtXRNIBko=
 github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a/go.mod h1:AH0Je8lE9kGZuG8EtdnwExIsj4EqNWwSDFRG17GwFL8=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

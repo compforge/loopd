@@ -28,7 +28,7 @@ type Failure struct {
 }
 
 type Event struct {
-	Cursor    string
+	ID        string
 	Data      json.RawMessage
 	Persisted bool
 }
@@ -181,7 +181,7 @@ func (coordinator *Coordinator) Stream(
 	}
 	replayer := agentuerunner.Replayer{Bridge: coordinator.events}
 	return replayer.Stream(ctx, taskID, after, func(event agentuerunner.Delivery) error {
-		return deliver(Event{Cursor: event.Cursor, Data: event.Data, Persisted: event.Cursor != ""})
+		return deliver(Event{ID: event.Cursor, Data: event.Data, Persisted: event.Cursor != ""})
 	})
 }
 

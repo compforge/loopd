@@ -23,14 +23,6 @@ type acceptInvocationRequest struct {
 	Resource loopd.ResourceRef `json:"resource"`
 }
 
-type promptRequest struct {
-	OwnerUID  string       `json:"owner_uid"`
-	EffectKey string       `json:"effect_key"`
-	Target    string       `json:"target"`
-	Prompt    string       `json:"prompt"`
-	Tools     []loopd.Tool `json:"tools,omitempty"`
-}
-
 type interactionRequest struct {
 	OwnerUID  string                    `json:"owner_uid"`
 	EffectKey string                    `json:"effect_key"`

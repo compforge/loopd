@@ -36,7 +36,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			if writer == nil {
 				writer = hertzsse.NewWriter(request)
 			}
-			return writer.WriteEvent(event.Cursor, "", event.Data)
+			return writer.WriteEvent(event.ID, "", event.Data)
 		},
 	)
 	if errors.Is(streamErr, context.Canceled) {

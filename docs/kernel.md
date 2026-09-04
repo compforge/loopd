@@ -47,8 +47,8 @@ Conversation 中的公开消息角色相应为：
 user | harness | operator
 ```
 
-这里描述的是 loopd 的协作角色，不是模型协议中的 `user/assistant/system/tool`。Harness Adapter 在调用
-具体实现时负责协议转换，模型协议角色不得反向进入 loopd 的公共模型。
+这里描述的是 loopd 的协作角色，不是模型协议中的 `user/assistant/system/tool`。Harness Adapter 在
+Operator 进程中由 loop-runtime 调用具体实现并负责协议转换，模型协议角色不得反向进入 loopd 的公共模型。
 
 外部系统可能把某个执行目标称为 Agent、Assistant 或 Session；接入 loopd 后统一表现为 Harness。
 loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行的 Agent 概念。
@@ -155,7 +155,7 @@ Operator 内部 Harness 的输出默认属于详情会话或 AgentLedger，不�
 Message。
 
 首次观察与断线续接使用同一个 Chat API：请求不带 `task_id` 时创建问答和 Task，带 `task_id` 时观察已有
-Task；`Last-Event-ID` 只表示客户端已消费的 Redis transport cursor。HTTP 资源模型不额外暴露 Replay
+Task；`Last-Event-ID` 只表示客户端已消费的 Redis transport event ID。HTTP 资源模型不额外暴露 Replay
 接口，续接后的 AgentUE delivery 仍然从重建的完整 `start` 开始。
 
 ## 6. Conversation Context
@@ -195,21 +195,27 @@ Harness.Prompt   以 prompt、tools 和可选 Harness target 发起或恢复一�
 Ask / Confirm    请求 Human 提供信息或确认决定
 ```
 
-`Harness.Prompt` 返回持久 Call handle，而不是等待整个执行完成的普通 RPC：
+`Harness.Prompt` 返回 Call handle，而不是等待整个执行完成的普通 RPC：
 
 ```go
-call, err := r.Loop.Harness.Prompt(ctx, loop.Prompt{
-    Target: harnessRef,
-    Text:   prompt,
-    Tools:  tools,
+call, err := r.Loop.Harness.Prompt(ctx, runtime.Prompt{
+    TaskID:    task.ID,
+    EffectKey: "route-query",
+    Target:    "agentd",
+    Text:      prompt,
+    Tools:     tools,
 })
 ```
 
-调用方可以观察事件、结束当前 Reconcile 后等待状态变化再次唤醒，或在确实只剩结果未返回时等待同一个
-Call。等待方式只改变 caller 的控制流，不能创建第二次 Harness 执行。
+调用方可通过 `call.Stream` 持续观察事件并同时处理其他变化，也可在确实只剩结果未返回时调用
+`call.Wait`。等待方式只改变 caller 的控制流，不能创建第二次 Harness 执行。同一 runtime 内，
+`TaskID + EffectKey` 会复用同一个 Call；生产 Adapter 还必须在 Operator 重启后以同一个
+`IdempotencyKey` 恢复同一外部执行。
 
 Tools 由调用 Harness 的一方选择和提供。Harness Adapter 负责把稳定的 Prompt、Tool、Event 和终态语义
 转换为 agentd 或第三方系统的协议；provider 差异不得进入 Operator 领域逻辑和 loop-server 的协作模型。
+loopd 内置的 AgentGo Adapter 是进程内 demo，不承诺跨进程恢复；生产场景由 agentd 的 Session、事件与
+checkpoint 持有单 Harness 的长期稳定性。
 
 ## 8. Operator 编排 Harness
 
@@ -254,10 +260,12 @@ Activity 只承载跨 Operator 都能理解的处理摘要，更丰富的领域�
 AgentLedger 记录 prompt、模型事件、Harness Call、tool call/result、重试和成本等完整执行事实，用于审计、
 回放和分析；它不承担页面 Conversation History，因此不能替代 loop-server 的两表业务模型。
 
-AgentUE 在 loopd 中定义页面语义模型，并提供不拥有业务任务的 Redis Event Bridge。Operator 通过
-loop-runtime 发布 `set/append`；任意 loop-server 实例都可按 `task_id` 和 transport cursor 重建完整
-`start` 快照并继续输出。loop-server 在完成阶段把最终快照写入 Message。AgentUE 不创建 Task、不调用
-Harness，也不成为 Operator 执行的 owner。
+AgentUE 在 loopd 中定义页面语义模型，并提供不拥有业务任务的 Redis Event Bridge。Operator 与其调用的
+Harness 通过 loop-runtime 向 loop-server 发布 `set/append`；任意 loop-server 实例都可将事件写入共享
+Redis，并按 `task_id` 和 event ID 重建完整 `start` 快照后继续输出。公开 `Event` 的 `ID` 是 Redis/SSE
+transport identity，只用于 `Last-Event-ID` 续接；`Data` 内的 AgentUE `seq` 才表达语义顺序与发布幂等。
+同一 runtime 为一个 Task 的 Operator 与多个 Harness 输出串行分配 `seq`。loop-server 只在完成阶段把最终
+快照写入 Message。AgentUE 不创建 Task、不调用 Harness，也不成为 Operator 执行的 owner。
 
 ## 10. 关键不变量
 
@@ -269,7 +277,7 @@ Harness，也不成为 Operator 执行的 owner。
    回答和 Operator 领域状态。
 4. **领域 CRD 按复杂度引入**：简单 Operator 直接 Reconcile Task；复杂 Operator 自己拥有领域 Resource。
 5. **一次问答有稳定 task identity**：初始 user/response Message 和后续反问、确认共享同一 `task_id`。
-6. **外部动作先获得持久 identity**：同一 owner 与 effect key 的重试必须观察或恢复同一次 Harness Call，
+6. **外部动作先获得稳定 identity**：同一 Task 与 effect key 的重试必须观察或恢复同一次 Harness Call，
    不能重复触发无法证明结果的副作用。
 7. **流式响应与完成正交**：有事件表示 Call 有进展，不表示成功；长时间运行也不能被等同于失联。
 8. **上下文有明确边界**：TaskContext 给出当前输入、回答和 History 水位；复杂 Operator 可以把所需引用
@@ -284,18 +292,18 @@ Harness，也不成为 Operator 执行的 owner。
 ## 11. 组件与依赖方向
 
 ```text
-Human Surface ↔ loop-server ↔ Harness Adapter ↔ Harness
-                    │
-                    ├─ creates loopd Task CRD
-                    │
+Human Surface ↔ loop-server ── creates loopd Task CRD
+                    ↑
+                    │ visible AgentUE events
 Operator Reconciler ┘
           ├─ embeds loop-runtime as its Go client
+          ├─ calls Harness Adapter ↔ Harness
           └─ optionally owns domain CRDs
 ```
 
 Operator 只依赖 loop-runtime 的公共契约，不依赖 loop-server 的数据库模型或私有实现。loop-server 不导入
-Operator CRD，不解释 LongHorizon 或其它领域语义。Harness Adapter 可以替换，Conversation 与 Operator
-不因 provider 变化而改变。
+Operator CRD，不解释 LongHorizon 或其它领域语义，也不执行 Harness Adapter。Harness Adapter 可以替换，
+Conversation 与 Operator 不因 provider 变化而改变。
 
 ## 12. loopd 不是什么
 
