@@ -1,11 +1,9 @@
-// Package service owns loop-server's Conversation and Message rules.
+// Package service owns loop-server's application use cases.
 package service
 
 import (
 	"errors"
-
-	loopd "github.com/compforge/loopd"
-	"github.com/compforge/loopd/server/internal/repo"
+	"log/slog"
 )
 
 var (
@@ -13,23 +11,9 @@ var (
 	ErrConflict = errors.New("conflict")
 )
 
-type Repository interface {
-	repo.ConversationRepository
-	repo.MessageRepository
-}
-
-type Service struct {
-	repo       Repository
-	responders []loopd.Responder
-}
-
-func New(repository Repository, responders []loopd.Responder) *Service {
-	return &Service{
-		repo:       repository,
-		responders: append([]loopd.Responder(nil), responders...),
+func loggerOrDefault(logger *slog.Logger) *slog.Logger {
+	if logger == nil {
+		return slog.Default()
 	}
-}
-
-func (service *Service) Responders() []loopd.Responder {
-	return append([]loopd.Responder(nil), service.responders...)
+	return logger
 }

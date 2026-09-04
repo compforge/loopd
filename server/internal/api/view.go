@@ -24,8 +24,12 @@ type createConversationRequest struct {
 	ParentMessageID string `json:"parent_message_id,omitempty"`
 }
 
-type createMessageRequest struct {
-	Kind    loopd.Role      `json:"kind"`
-	Key     string          `json:"key"`
+type createChatMessagesRequest struct {
+	UserKey   string             `json:"user_key"`
+	Responder loopd.ResponderRef `json:"responder"`
+	Content   json.RawMessage    `json:"content"`
+}
+
+type updateMessageContentRequest struct {
 	Content json.RawMessage `json:"content"`
 }

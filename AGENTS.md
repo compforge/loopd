@@ -26,16 +26,18 @@ loopd/
 
 1. Conversation History 属于 loop-server，不属于某一个 Operator 或 Harness；同一 Conversation 可由
    多个参与者先后协作。
-2. loop-server 的聊天事实只有 Conversation 与 Message。Message 通过 `kind + key + content` 表达
-   Human、Operator 或 Harness 的一条发言；`content` 是 AgentUE semantic model，使用可扩展 blocks
-   同时承载文本、工具调用和产物，不混入执行状态和审计事件。
+2. loop-server 的聊天事实只有 Conversation 与 Message。Message 通过 `task_id + kind + key + content`
+   表达 Human、Operator 或 Harness 的一条页面可见发言；`content` 是 AgentUE semantic model，使用
+   可扩展 blocks 承载文本、可见工具状态和产物，不混入完整执行轨迹。
 3. `conversations` 与 `messages` 均使用 go-stdx 生成的 UUIDv7 `id` 作为主键和游标；不再维护平行的
    message sequence。
-4. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用触发它的主链路 Message。
+4. 一次问答由 user Message 和 responder Message 组成，两者共享 Runner `task_id`；服务端原子创建两条
+   记录并返回 responder Message。
+5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 responder Message。
    v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
-5. Operator 的 CRD、领域状态、完成条件和外部事实由 Operator 自己拥有；loop-server 不复制这些表。
-6. AgentLedger 后续只承载执行事实、审计和成本记录，不替代 Conversation 与 Message 的业务存储。
-7. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
+6. Operator 的 CRD、领域状态、完成条件和外部事实由 Operator 自己拥有；loop-server 不复制这些表。
+7. AgentLedger 承载完整执行历史、审计和成本记录，不替代 Conversation 与 Message 的页面业务存储。
+8. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
 
 ## References
 

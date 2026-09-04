@@ -14,88 +14,114 @@ import (
 
 var uuidV7Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
-func TestConversationMessagesUseUUIDv7AndParticipantIdentity(t *testing.T) {
-	store, err := repo.Open(repo.Config{Path: filepath.Join(t.TempDir(), "loopd.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	service := New(store, nil)
+func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
+	store := openServiceStore(t)
+	conversations := NewConversationService(store, nil)
+	messages := NewMessageService(store, nil)
+	chat := NewChatService(store, nil)
 	ctx := context.Background()
 
-	conversation, err := service.CreateConversation(ctx, "Planning", "")
+	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	question, err := service.CreateMessage(ctx, conversation.ID, loopd.RoleUser, "user-1", textContent("question"))
+	answer, err := chat.Create(ctx, conversation.ID, "user-1", loopd.ResponderRef{
+		Kind: loopd.RoleHarness,
+		Key:  "harness-1",
+	}, textContent("question"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := service.CreateMessage(ctx, conversation.ID, loopd.RoleHarness, "harness-1", richContent())
-	if err != nil {
-		t.Fatal(err)
+	if !uuidV7Pattern.MatchString(conversation.ID) || !uuidV7Pattern.MatchString(answer.ID) ||
+		!uuidV7Pattern.MatchString(answer.TaskID) {
+		t.Fatalf("IDs are not UUIDv7: conversation=%q answer=%q task=%q", conversation.ID, answer.ID, answer.TaskID)
+	}
+	if answer.Kind != loopd.RoleHarness || answer.Key != "harness-1" {
+		t.Fatalf("answer identity = %s/%s", answer.Kind, answer.Key)
 	}
 
-	for _, id := range []string{conversation.ID, question.ID, answer.ID} {
-		if !uuidV7Pattern.MatchString(id) {
-			t.Fatalf("id %q is not UUIDv7", id)
-		}
-	}
-	if !(conversation.ID < question.ID && question.ID < answer.ID) {
-		t.Fatalf("UUIDv7 order = %s, %s, %s", conversation.ID, question.ID, answer.ID)
-	}
-	if question.Kind != loopd.RoleUser || question.Key != "user-1" ||
-		answer.Kind != loopd.RoleHarness || answer.Key != "harness-1" {
-		t.Fatalf("messages = %#v / %#v", question, answer)
-	}
-	var content struct {
-		Blocks []struct {
-			Type string `json:"type"`
-		} `json:"blocks"`
-	}
-	if err := json.Unmarshal(answer.Content, &content); err != nil {
+	history, err := messages.ListMessages(ctx, conversation.ID, "", 100)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(content.Blocks) != 2 || content.Blocks[1].Type != "tool" {
-		t.Fatalf("answer content = %s", answer.Content)
+	if len(history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(history))
+	}
+	question := history[0]
+	if question.Kind != loopd.RoleUser || question.Key != "user-1" {
+		t.Fatalf("question identity = %s/%s", question.Kind, question.Key)
+	}
+	if question.TaskID != answer.TaskID || history[1].ID != answer.ID {
+		t.Fatalf("messages do not share returned task: %#v", history)
+	}
+
+	var initial struct {
+		Meta   map[string]string `json:"meta"`
+		Blocks []json.RawMessage `json:"blocks"`
+	}
+	if err := json.Unmarshal(answer.Content, &initial); err != nil {
+		t.Fatal(err)
+	}
+	if len(initial.Meta) != 0 || len(initial.Blocks) != 0 {
+		t.Fatalf("initial answer content = %s", answer.Content)
+	}
+
+	updated, err := messages.UpdateMessageContent(ctx, conversation.ID, answer.ID, richContent())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != answer.ID || updated.UpdatedAt.Before(answer.UpdatedAt) {
+		t.Fatalf("updated answer = %#v", updated)
 	}
 }
 
-func TestDetailConversationReferencesRootMessage(t *testing.T) {
+func TestDetailConversationReferencesResponderMessage(t *testing.T) {
+	store := openServiceStore(t)
+	conversations := NewConversationService(store, nil)
+	messages := NewMessageService(store, nil)
+	chat := NewChatService(store, nil)
+	ctx := context.Background()
+
+	root, err := conversations.CreateConversation(ctx, "Root", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer, err := chat.Create(ctx, root.ID, "user-1", loopd.ResponderRef{
+		Kind: loopd.RoleOperator,
+		Key:  "operator-1",
+	}, textContent("question"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := conversations.CreateConversation(ctx, "Operator work", answer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.ParentMessageID != answer.ID {
+		t.Fatalf("parent_message_id = %q, want %q", detail.ParentMessageID, answer.ID)
+	}
+	if _, err := conversations.CreateConversation(ctx, "Duplicate", answer.ID); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("duplicate detail error = %v, want %v", err, repo.ErrConflict)
+	}
+	detailMessage, err := messages.CreateMessage(
+		ctx, detail.ID, answer.TaskID, loopd.RoleOperator, "operator-1", textContent("working"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conversations.CreateConversation(ctx, "Nested", detailMessage.ID); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("nested detail error = %v, want %v", err, ErrInvalid)
+	}
+}
+
+func openServiceStore(t *testing.T) *repo.Store {
+	t.Helper()
 	store, err := repo.Open(repo.Config{Path: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := New(store, nil)
-	ctx := context.Background()
-
-	root, err := service.CreateConversation(ctx, "Root", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	question, err := service.CreateMessage(ctx, root.ID, loopd.RoleUser, "user-1", textContent("question"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	detail, err := service.CreateConversation(ctx, "Operator work", question.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.ParentMessageID != question.ID {
-		t.Fatalf("parent_message_id = %q, want %q", detail.ParentMessageID, question.ID)
-	}
-
-	if _, err := service.CreateConversation(ctx, "Duplicate", question.ID); !errors.Is(err, repo.ErrConflict) {
-		t.Fatalf("duplicate detail error = %v, want %v", err, repo.ErrConflict)
-	}
-	detailMessage, err := service.CreateMessage(ctx, detail.ID, loopd.RoleOperator, "operator-1", textContent("working"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.CreateConversation(ctx, "Nested", detailMessage.ID); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("nested detail error = %v, want %v", err, ErrInvalid)
-	}
+	return store
 }
 
 func textContent(text string) json.RawMessage {

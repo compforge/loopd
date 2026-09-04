@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
+	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
@@ -15,33 +17,73 @@ const (
 	maxPageSize     = 500
 )
 
-func (service *Service) CreateMessage(
+type MessageService struct {
+	repo   repo.MessageRepository
+	logger *slog.Logger
+}
+
+func NewMessageService(repository repo.MessageRepository, logger *slog.Logger) *MessageService {
+	return &MessageService{repo: repository, logger: loggerOrDefault(logger)}
+}
+
+func (service *MessageService) CreateMessage(
 	ctx context.Context,
 	conversationID string,
+	taskID string,
 	kind loopd.Role,
 	key string,
 	content json.RawMessage,
 ) (loopd.Message, error) {
-	if !kind.Valid() || strings.TrimSpace(key) == "" || validateContent(content) != nil {
+	if strings.TrimSpace(taskID) == "" || !kind.Valid() || strings.TrimSpace(key) == "" || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
 	message, err := service.repo.CreateMessage(ctx, model.Message{
 		ID:             uuid.V7(),
 		ConversationID: conversationID,
+		TaskID:         strings.TrimSpace(taskID),
 		Kind:           string(kind),
 		Key:            strings.TrimSpace(key),
 		Content:        content,
 	})
+	if err == nil {
+		service.logger.InfoContext(ctx, "message created",
+			"conversation_id", conversationID,
+			"message_id", message.ID,
+			"task_id", message.TaskID,
+			"kind", message.Kind,
+			"key", message.Key,
+		)
+	}
 	return messageFromModel(message), err
 }
 
-func (service *Service) ListMessages(ctx context.Context, conversationID, after string, limit int) ([]loopd.Message, error) {
-	if limit <= 0 {
-		limit = defaultPageSize
+func (service *MessageService) UpdateMessageContent(
+	ctx context.Context,
+	conversationID string,
+	messageID string,
+	content json.RawMessage,
+) (loopd.Message, error) {
+	if validateContent(content) != nil {
+		return loopd.Message{}, ErrInvalid
 	}
-	if limit > maxPageSize {
-		limit = maxPageSize
+	message, err := service.repo.UpdateMessageContent(ctx, conversationID, messageID, content)
+	if err == nil {
+		service.logger.InfoContext(ctx, "message content updated",
+			"conversation_id", conversationID,
+			"message_id", message.ID,
+			"task_id", message.TaskID,
+		)
 	}
+	return messageFromModel(message), err
+}
+
+func (service *MessageService) ListMessages(
+	ctx context.Context,
+	conversationID string,
+	after string,
+	limit int,
+) ([]loopd.Message, error) {
+	limit = pageSize(limit)
 	rows, err := service.repo.ListMessages(ctx, conversationID, after, limit)
 	if err != nil {
 		return nil, err
@@ -55,9 +97,20 @@ func (service *Service) ListMessages(ctx context.Context, conversationID, after 
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
-		ID: value.ID, ConversationID: value.ConversationID,
-		Kind: loopd.Role(value.Kind), Key: value.Key, Content: json.RawMessage(value.Content), CreatedAt: value.CreatedAt,
+		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
+		Kind: loopd.Role(value.Kind), Key: value.Key, Content: json.RawMessage(value.Content),
+		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
+}
+
+func pageSize(limit int) int {
+	if limit <= 0 {
+		return defaultPageSize
+	}
+	if limit > maxPageSize {
+		return maxPageSize
+	}
+	return limit
 }
 
 func validateContent(content json.RawMessage) error {
