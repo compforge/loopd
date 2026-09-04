@@ -61,6 +61,37 @@ func TestMessagesUseUUIDOrderAsCursor(t *testing.T) {
 	}
 }
 
+func TestListConversationsReturnsOnlyRootsNewestFirst(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	first := model.Conversation{ID: "01991f3d-1111-7000-8000-000000000000", Name: "First"}
+	second := model.Conversation{ID: "01991f3d-1112-7000-8000-000000000000", Name: "Second"}
+	parentMessageID := "01991f3d-1113-7000-8000-000000000000"
+	detail := model.Conversation{
+		ID: "01991f3d-1114-7000-8000-000000000000", Name: "Detail", ParentMessageID: &parentMessageID,
+	}
+	for _, conversation := range []model.Conversation{first, second, detail} {
+		if _, err := store.CreateConversation(ctx, conversation); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	conversations, err := store.ListConversations(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversations) != 2 || conversations[0].ID != second.ID || conversations[1].ID != first.ID {
+		t.Fatalf("conversations = %#v", conversations)
+	}
+	before, err := store.ListConversations(ctx, second.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || before[0].ID != first.ID {
+		t.Fatalf("conversations before %s = %#v", second.ID, before)
+	}
+}
+
 func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()

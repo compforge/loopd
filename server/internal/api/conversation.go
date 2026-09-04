@@ -5,6 +5,7 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	loopd "github.com/compforge/loopd"
 )
 
 func (server *Server) createConversation(ctx context.Context, request *hertzapp.RequestContext) error {
@@ -26,5 +27,18 @@ func (server *Server) getConversation(ctx context.Context, request *hertzapp.Req
 		return err
 	}
 	request.JSON(consts.StatusOK, conversation)
+	return nil
+}
+
+func (server *Server) listConversations(ctx context.Context, request *hertzapp.RequestContext) error {
+	limit, err := queryLimit(request)
+	if err != nil {
+		return err
+	}
+	conversations, err := server.conversations.ListConversations(ctx, string(request.Query("before")), limit)
+	if err != nil {
+		return err
+	}
+	request.JSON(consts.StatusOK, page[loopd.Conversation]{Data: conversations})
 	return nil
 }

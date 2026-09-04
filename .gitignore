@@ -5,3 +5,5 @@
 /loopd.db
 /loopd.db-shm
 /loopd.db-wal
+/web/node_modules/
+/web/dist/
