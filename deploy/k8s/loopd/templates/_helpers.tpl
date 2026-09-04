@@ -34,6 +34,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "loopd.fullname" . }}-server
 {{- end }}
 
+{{- define "loopd.databaseSecretName" -}}
+{{- default (printf "%s-database" (include "loopd.serverName" .)) .Values.database.mysql.existingSecret -}}
+{{- end }}
+
 {{- define "loopd.webName" -}}
 {{ include "loopd.fullname" . }}-web
 {{- end }}

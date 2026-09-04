@@ -25,7 +25,8 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	Path             string
+	MySQLDSN         string
+	SQLitePath       string
 	OperationTimeout time.Duration
 	MaxOpenConns     int
 	MaxIdleConns     int
@@ -44,8 +45,9 @@ func New(config Config) (*Server, error) {
 		return nil, errors.New("task client is required")
 	}
 	store, err := repo.Open(repo.Config{
-		Path: config.Database.Path, OperationTimeout: config.Database.OperationTimeout,
-		MaxOpenConns: config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
+		MySQLDSN: config.Database.MySQLDSN, SQLitePath: config.Database.SQLitePath,
+		OperationTimeout: config.Database.OperationTimeout,
+		MaxOpenConns:     config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
 		ConnMaxLifetime: config.Database.ConnMaxLifetime, ConnMaxIdleTime: config.Database.ConnMaxIdleTime,
 	})
 	if err != nil {

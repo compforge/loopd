@@ -27,7 +27,8 @@ func main() {
 
 func run() error {
 	address := envOr("LOOP_SERVER_ADDR", ":8080")
-	databasePath := envOr("LOOP_SERVER_DB", "loopd.db")
+	mysqlDSN := os.Getenv("LOOP_SERVER_MYSQL_DSN")
+	sqlitePath := envOr("LOOP_SERVER_SQLITE_PATH", "loopd.db")
 	redisAddress := envOr("LOOP_SERVER_REDIS_ADDR", "127.0.0.1:6379")
 	taskNamespace := envOr("LOOP_SERVER_TASK_NAMESPACE", "default")
 	tasks, err := newTaskClient(taskNamespace)
@@ -35,7 +36,7 @@ func run() error {
 		return err
 	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{Path: databasePath},
+		Database: server.DatabaseConfig{MySQLDSN: mysqlDSN, SQLitePath: sqlitePath},
 		Redis: server.RedisConfig{
 			Address:  redisAddress,
 			Username: os.Getenv("LOOP_SERVER_REDIS_USERNAME"),
@@ -67,9 +68,13 @@ func run() error {
 	go loopServer.Run(processCtx)
 	serveErr := make(chan error, 1)
 	go func() {
+		databaseBackend := "sqlite"
+		if mysqlDSN != "" {
+			databaseBackend = "mysql"
+		}
 		logger.Info("loop-server listening",
 			"address", address,
-			"database", databasePath,
+			"database_backend", databaseBackend,
 			"redis_address", redisAddress,
 			"task_namespace", taskNamespace,
 		)

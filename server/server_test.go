@@ -12,7 +12,7 @@ import (
 func TestNewConnectsConfiguredRedis(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	server, err := New(Config{
-		Database: DatabaseConfig{Path: filepath.Join(t.TempDir(), "loopd.db")},
+		Database: DatabaseConfig{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")},
 		Redis:    RedisConfig{Address: redisServer.Addr()},
 		Tasks:    testTaskClient{},
 	})

@@ -17,7 +17,7 @@ import (
 
 func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	ctx := context.Background()
-	store, err := repo.Open(repo.Config{Path: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := repo.Open(repo.Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

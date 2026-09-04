@@ -11,8 +11,7 @@ rbac:
   create: true
 
 server:
-  # SQLite is process-local. Keep this at one until loop-server supports a
-  # shared external database.
+  # v1 keeps one server replica even when an external MySQL is configured.
   replicaCount: 1
   image:
     repository: ghcr.io/compforge/loop-server
@@ -21,11 +20,6 @@ server:
   service:
     type: ClusterIP
     port: 8080
-  persistence:
-    enabled: true
-    size: 1Gi
-    storageClass: ""
-    accessModes: [ReadWriteOnce]
   resources: {}
   podAnnotations: {}
   podLabels: {}
@@ -33,6 +27,14 @@ server:
   tolerations: []
   affinity: {}
   extraEnv: []
+
+database:
+  # When neither field is set, loop-server uses ephemeral SQLite for the
+  # Quick Start. Set dsn or existingSecret to use an external MySQL.
+  mysql:
+    dsn: ""
+    existingSecret: ""
+    existingSecretKey: dsn
 
 router:
   enabled: true
@@ -88,11 +90,6 @@ redis:
   existingSecret: ""
   existingSecretUsernameKey: username
   existingSecretPasswordKey: password
-  persistence:
-    enabled: true
-    size: 2Gi
-    storageClass: ""
-    accessModes: [ReadWriteOnce]
   resources: {}
   nodeSelector: {}
   tolerations: []

@@ -21,7 +21,7 @@ import (
 )
 
 func TestChatHTTPFlow(t *testing.T) {
-	store, err := repo.Open(repo.Config{Path: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := repo.Open(repo.Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

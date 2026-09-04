@@ -4,6 +4,11 @@ loop-server 数据库只持久化 Conversation 与 Message 两类页面可见的
 问答对应的 Task 是 Kubernetes CRD；AgentLedger 保存完整运行轨迹、审计和成本事实，不替代页面聊天
 记录。
 
+loop-server 在配置 MySQL DSN 时使用外部 MySQL，否则回退到本地 SQLite。Helm Quick Start 的 SQLite
+位于临时卷，适合零依赖体验；需要跨 Pod 重建保留聊天记录时，由部署方提供外部 MySQL，loopd 不创建
+或管理数据库实例。Redis 只承载运行中的页面事件与断线续读，不是聊天事实源，因此内置 Redis 使用
+内存存储。
+
 ## Conversation
 
 `conversations` 表包含：
@@ -63,7 +68,7 @@ Task CRD 只承担活跃问答的持久唤醒职责。完成时，loop-server �
 ## UUIDv7 游标
 
 消息列表使用 `id > after ORDER BY id` 翻页，不维护额外 sequence。go-stdx 的 `uuid.V7()` 在当前
-loop-server 单实例进程内提供单调的时间有序 ID，适合 SQLite v1。
+loop-server 单实例进程内提供单调的时间有序 ID。
 
 UUIDv7 的时间顺序不等于多节点数据库的全局提交顺序。引入多实例写入前必须重新确认游标语义；不能
 仅凭不同进程生成的 UUIDv7 推断严格的全局先后关系。

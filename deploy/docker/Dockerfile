@@ -6,6 +6,9 @@ ARG NODE_VERSION=22
 FROM golang:${GO_VERSION}-bookworm AS go-builder
 WORKDIR /src
 
+ARG GOPROXY
+ARG GOSUMDB
+
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -34,4 +37,3 @@ ENTRYPOINT ["/usr/local/bin/router"]
 
 FROM nginxinc/nginx-unprivileged:stable-alpine AS web
 COPY --from=web-builder /src/web/dist/ /usr/share/nginx/html/
-
