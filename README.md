@@ -23,8 +23,10 @@ execution history belongs to the Harness and AgentLedger.
 - **loop-runtime** is a Go client embedded in an Operator. It exposes stable
   conversation and message capabilities through `r.Loop.Chat`, and lets a
   Reconciler watch and resolve Tasks through `r.Loop.Task`.
-- **Harness adapters** connect loop-server to agentd or another intelligent
-  execution service without leaking provider vocabulary into the public model.
+- **Harness adapters** let an Operator invoke agentd or another intelligent
+  execution service through loop-runtime without leaking provider vocabulary
+  into the public model. The bundled AgentGo adapter is an in-process demo;
+  production durability belongs to agentd.
 
 AgentUE supplies the page-visible event model and Redis bridge. AgentLedger records complete
 prompts, model events, tool calls, retries, and costs; it is not the chat database.
@@ -47,9 +49,11 @@ HTTP request or browser connection:
 3. a complex Operator may create a domain CRD, while a simple Operator handles
    the shared Task directly;
 4. visible progress flows through the AgentUE Redis event bridge while full events enter AgentLedger;
-5. clients may reconnect to any server instance with the same `task_id` and continue from their last event cursor;
+5. clients may reconnect to any server instance with the same `task_id` and continue from their last event ID;
 6. completion folds visible events into the selected Actor's response Message.
 
-`Harness.Prompt` returns a handle. A Reconciler can inspect it and return, or
-call `Wait` when waiting is genuinely the only remaining work. Both paths use
-the same `(owner UID, effect key)` and therefore the same external execution.
+`Harness.Prompt` returns a handle. A Reconciler can consume its stream while
+doing other work, or call `Wait` when the Harness result is the only remaining
+dependency. Repeated calls use the same `(task ID, effect key)`; the AgentGo
+demo reuses the Call for the lifetime of one runtime, while a production agentd
+adapter must make that identity durable across Operator restarts.

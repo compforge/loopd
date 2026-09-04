@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/cloudwego/hertz v0.10.4
+	github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676
 	github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a
 	github.com/qiankunli/go-stdx v0.0.4-0.20260824051808-f7f6d7c53de2
 	github.com/redis/go-redis/v9 v9.22.0

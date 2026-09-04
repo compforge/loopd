@@ -8,21 +8,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/compforge/loopd/harness"
 )
 
 type Options struct {
 	HTTPClient     *http.Client
 	PollInterval   time.Duration
 	RequestTimeout time.Duration
+	Harnesses      map[string]harness.Adapter
+	Logger         *slog.Logger
 }
 
 type Runtime struct {
-	Loop Loop
+	Loop   Loop
+	cancel context.CancelFunc
 }
 
 type Loop struct {
@@ -54,16 +60,30 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	if options.RequestTimeout <= 0 {
 		options.RequestTimeout = 30 * time.Second
 	}
+	if options.Logger == nil {
+		options.Logger = slog.Default()
+	}
 	c := &client{
 		baseURL: parsed, http: options.HTTPClient,
 		pollInterval: options.PollInterval, requestTimeout: options.RequestTimeout,
 	}
+	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{client: c}
-	loop.Chat = Chat{client: c}
-	loop.Harness = Harness{client: c}
+	loop.Chat = newChat(c)
+	loop.Harness = newHarness(runCtx, options.Harnesses, options.Logger)
+	loop.Harness.chat = loop.Chat
 	loop.Operator = Operator{client: c}
 	loop.Task = Task{client: c}
-	return &Runtime{Loop: loop}, nil
+	return &Runtime{Loop: loop, cancel: cancel}, nil
+}
+
+// Close stops process-local Harness executions. A durable Adapter remains
+// resumable through its Harness service; the demo agentgo Adapter does not.
+func (runtime *Runtime) Close() error {
+	if runtime.cancel != nil {
+		runtime.cancel()
+	}
+	return nil
 }
 
 type client struct {

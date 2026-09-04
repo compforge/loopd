@@ -2,127 +2,294 @@ package runtime
 
 import (
 	"context"
-	"net/http"
-	"net/url"
-	"strconv"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 
+	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
+	provider "github.com/compforge/loopd/harness"
+	"github.com/qiankunli/go-stdx/uuid"
 )
 
+var ErrCallConflict = errors.New("harness call conflicts with an existing effect")
+
 type Harness struct {
-	client *client
+	chat  Chat
+	state *harnessState
+}
+
+type harnessState struct {
+	ctx      context.Context
+	adapters map[string]provider.Adapter
+	logger   *slog.Logger
+	mu       sync.Mutex
+	calls    map[string]*Call
 }
 
 type Prompt struct {
-	InvocationID string
-	OwnerUID     string
-	EffectKey    string
-	Target       string
-	Text         string
-	Tools        []loopd.Tool
+	TaskID    string
+	EffectKey string
+	Target    string
+	Text      string
+	Tools     []loopd.Tool
 }
 
+func newHarness(ctx context.Context, adapters map[string]provider.Adapter, logger *slog.Logger) Harness {
+	values := make(map[string]provider.Adapter, len(adapters))
+	for key, adapter := range adapters {
+		values[key] = adapter
+	}
+	return Harness{state: &harnessState{
+		ctx: ctx, adapters: values, logger: logger,
+		calls: make(map[string]*Call),
+	}}
+}
+
+// Prompt starts or resumes one process-local Call. The effect identity avoids
+// duplicate starts while this Runtime is alive. A production Adapter such as
+// agentd must additionally make IdempotencyKey durable across process restarts.
 func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error) {
-	var result loopd.HarnessCall
-	err := service.client.do(ctx, http.MethodPost,
-		"/v1/invocations/"+url.PathEscape(prompt.InvocationID)+"/harness-calls",
-		promptRequest{
-			OwnerUID: prompt.OwnerUID, EffectKey: prompt.EffectKey,
-			Target: prompt.Target, Prompt: prompt.Text, Tools: prompt.Tools,
-		}, &result)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if prompt.TaskID == "" || prompt.EffectKey == "" || prompt.Target == "" || prompt.Text == "" {
+		return nil, errors.New("task ID, effect key, Harness target, and prompt are required")
+	}
+	adapter := service.state.adapters[prompt.Target]
+	if adapter == nil {
+		return nil, fmt.Errorf("harness target %q is not configured", prompt.Target)
+	}
+	fingerprint, err := promptFingerprint(prompt)
 	if err != nil {
 		return nil, err
 	}
-	return &Call{client: service.client, value: result}, nil
+	effectID := prompt.TaskID + "\x00" + prompt.EffectKey
+
+	service.state.mu.Lock()
+	if existing := service.state.calls[effectID]; existing != nil {
+		service.state.mu.Unlock()
+		if existing.fingerprint != fingerprint {
+			return nil, fmt.Errorf("%w: task %q effect %q", ErrCallConflict, prompt.TaskID, prompt.EffectKey)
+		}
+		return existing, nil
+	}
+	callID := uuid.V7()
+	request := provider.Request{
+		CallID: callID, TaskID: prompt.TaskID,
+		IdempotencyKey: prompt.TaskID + "/" + prompt.EffectKey,
+		Prompt:         prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
+	}
+	providerCall, err := adapter.Prompt(service.state.ctx, request)
+	if err != nil {
+		service.state.mu.Unlock()
+		return nil, fmt.Errorf("start harness %q: %w", prompt.Target, err)
+	}
+	if providerCall == nil || providerCall.ID() == "" {
+		service.state.mu.Unlock()
+		return nil, fmt.Errorf("start harness %q: adapter returned a call without an ID", prompt.Target)
+	}
+	now := time.Now().UTC()
+	call := &Call{
+		value: loopd.HarnessCall{
+			ID: providerCall.ID(), TaskID: prompt.TaskID, EffectKey: prompt.EffectKey,
+			Target: prompt.Target, Phase: loopd.CallRunning,
+			Timestamped: loopd.Timestamped{CreatedAt: now, UpdatedAt: now},
+		},
+		fingerprint: fingerprint,
+		changed:     make(chan struct{}),
+		done:        make(chan struct{}),
+	}
+	service.state.calls[effectID] = call
+	service.state.mu.Unlock()
+	service.state.logger.InfoContext(ctx, "harness call started",
+		"task_id", prompt.TaskID,
+		"effect_key", prompt.EffectKey,
+		"target", prompt.Target,
+		"call_id", providerCall.ID(),
+	)
+
+	go call.follow(service.state.ctx, providerCall, service.chat, prompt.TaskID, service.state.logger)
+	return call, nil
+}
+
+func promptFingerprint(prompt Prompt) ([32]byte, error) {
+	encoded, err := json.Marshal(struct {
+		Target string       `json:"target"`
+		Text   string       `json:"text"`
+		Tools  []loopd.Tool `json:"tools,omitempty"`
+	}{Target: prompt.Target, Text: prompt.Text, Tools: prompt.Tools})
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("encode Harness prompt: %w", err)
+	}
+	return sha256.Sum256(encoded), nil
 }
 
 type Call struct {
-	client *client
-	value  loopd.HarnessCall
+	mu          sync.Mutex
+	value       loopd.HarnessCall
+	fingerprint [32]byte
+	events      []loopd.Event
+	changed     chan struct{}
+	done        chan struct{}
+	terminalErr error
 }
 
-func (call *Call) Value() loopd.HarnessCall { return call.value }
-
-func (call *Call) Refresh(ctx context.Context) (loopd.HarnessCall, error) {
-	var result loopd.HarnessCall
-	err := call.client.do(ctx, http.MethodGet, "/v1/harness-calls/"+url.PathEscape(call.value.ID), nil, &result)
-	if err == nil {
-		call.value = result
-	}
-	return result, err
+func (call *Call) Value() loopd.HarnessCall {
+	call.mu.Lock()
+	defer call.mu.Unlock()
+	return call.value
 }
 
 func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
-	if call.value.Phase.Terminal() {
-		return call.value, nil
-	}
-	ticker := time.NewTicker(call.client.pollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return call.value, ctx.Err()
-		case <-ticker.C:
-			value, err := call.Refresh(ctx)
-			if err != nil {
-				return call.value, err
-			}
-			if value.Phase.Terminal() {
-				return value, nil
-			}
-		}
+	select {
+	case <-ctx.Done():
+		return call.Value(), ctx.Err()
+	case <-call.done:
+		call.mu.Lock()
+		defer call.mu.Unlock()
+		return call.value, call.terminalErr
 	}
 }
 
-// Stream polls persisted Harness Events. The stream can be recreated with the
-// last cursor after process or network interruption; it does not own the Call.
-func (call *Call) Stream(ctx context.Context, after uint64) (<-chan loopd.HarnessEvent, <-chan error) {
-	events := make(chan loopd.HarnessEvent)
+// Stream replays locally observed deliveries after afterEventID and follows
+// the Call until completion. Durable page replay uses Chat.Send and SSE
+// Last-Event-ID; this process-local view is a convenience for the Reconciler.
+func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd.Event, <-chan error) {
+	events := make(chan loopd.Event)
 	errors := make(chan error, 1)
 	go func() {
 		defer close(events)
 		defer close(errors)
-		cursor := after
-		ticker := time.NewTicker(call.client.pollInterval)
-		defer ticker.Stop()
+		index, err := call.eventIndex(afterEventID)
+		if err != nil {
+			errors <- err
+			return
+		}
 		for {
-			page, err := call.events(ctx, cursor)
-			if err != nil {
-				errors <- err
-				return
-			}
-			for _, event := range page {
+			call.mu.Lock()
+			pending := append([]loopd.Event(nil), call.events[index:]...)
+			index = len(call.events)
+			changed := call.changed
+			terminal := call.value.Phase.Terminal()
+			call.mu.Unlock()
+			for _, event := range pending {
 				select {
 				case <-ctx.Done():
 					errors <- ctx.Err()
 					return
 				case events <- event:
-					cursor = event.Cursor
 				}
 			}
-			value, err := call.Refresh(ctx)
-			if err != nil {
-				errors <- err
-				return
-			}
-			if value.Phase.Terminal() && len(page) == 0 {
+			if terminal {
 				return
 			}
 			select {
 			case <-ctx.Done():
 				errors <- ctx.Err()
 				return
-			case <-ticker.C:
+			case <-changed:
 			}
 		}
 	}()
 	return events, errors
 }
 
-func (call *Call) events(ctx context.Context, after uint64) ([]loopd.HarnessEvent, error) {
-	var result page[loopd.HarnessEvent]
-	path := "/v1/harness-calls/" + url.PathEscape(call.value.ID) + "/events?after=" + strconv.FormatUint(after, 10)
-	err := call.client.do(ctx, http.MethodGet, path, nil, &result)
-	return result.Data, err
+func (call *Call) eventIndex(afterEventID string) (int, error) {
+	if afterEventID == "" {
+		return 0, nil
+	}
+	call.mu.Lock()
+	defer call.mu.Unlock()
+	for index, event := range call.events {
+		if event.ID == afterEventID {
+			return index + 1, nil
+		}
+	}
+	return 0, fmt.Errorf("event ID %q does not belong to Call %q", afterEventID, call.value.ID)
+}
+
+func (call *Call) follow(
+	ctx context.Context,
+	providerCall provider.Call,
+	chat Chat,
+	taskID string,
+	logger *slog.Logger,
+) {
+	var publishErr error
+	for event := range providerCall.Events() {
+		if publishErr != nil {
+			continue
+		}
+		value, err := agentueui.Parse(event.Data)
+		if err != nil {
+			publishErr = fmt.Errorf("decode harness AgentUE event: %w", err)
+			continue
+		}
+		if value.Op != agentueui.OpSet && value.Op != agentueui.OpAppend {
+			publishErr = fmt.Errorf("harness may only publish AgentUE set or append events, got %q", value.Op)
+			continue
+		}
+		value.Seq = 0
+		published, err := chat.Emit(ctx, taskID, value)
+		if err != nil {
+			publishErr = err
+			continue
+		}
+		call.appendEvent(published)
+	}
+	result, waitErr := providerCall.Wait(ctx)
+	err := errors.Join(publishErr, waitErr)
+	phase := loopd.CallSucceeded
+	if err != nil {
+		phase = loopd.CallFailed
+	}
+	call.finish(phase, result.Text, err)
+	value := call.Value()
+	logContext := context.WithoutCancel(ctx)
+	if err != nil {
+		logger.ErrorContext(logContext, "harness call failed",
+			"task_id", taskID,
+			"effect_key", value.EffectKey,
+			"target", value.Target,
+			"call_id", providerCall.ID(),
+			"error", err,
+		)
+		return
+	}
+	logger.InfoContext(logContext, "harness call completed",
+		"task_id", taskID,
+		"effect_key", value.EffectKey,
+		"target", value.Target,
+		"call_id", providerCall.ID(),
+	)
+}
+
+func (call *Call) appendEvent(event loopd.Event) {
+	call.mu.Lock()
+	call.events = append(call.events, event)
+	now := time.Now().UTC()
+	call.value.LastActivityAt = &now
+	call.value.UpdatedAt = now
+	close(call.changed)
+	call.changed = make(chan struct{})
+	call.mu.Unlock()
+}
+
+func (call *Call) finish(phase loopd.CallPhase, result string, err error) {
+	call.mu.Lock()
+	call.value.Phase = phase
+	call.value.Result = result
+	if err != nil {
+		call.value.Error = err.Error()
+		call.terminalErr = err
+	}
+	call.value.UpdatedAt = time.Now().UTC()
+	close(call.changed)
+	close(call.done)
+	call.mu.Unlock()
 }

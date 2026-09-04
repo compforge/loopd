@@ -123,10 +123,10 @@ func (completedChatRunner) Stream(
 	_ string,
 	deliver func(delivery.Event) error,
 ) error {
-	if err := deliver(delivery.Event{Cursor: "1-0", Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`), Persisted: true}); err != nil {
+	if err := deliver(delivery.Event{ID: "1-0", Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`), Persisted: true}); err != nil {
 		return err
 	}
-	return deliver(delivery.Event{Cursor: "2-0", Data: json.RawMessage(`{"op":"end","seq":2}`), Persisted: true})
+	return deliver(delivery.Event{ID: "2-0", Data: json.RawMessage(`{"op":"end","seq":2}`), Persisted: true})
 }
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {

@@ -54,7 +54,7 @@ func TestChatSendStartsAndResumesOneTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Cursor != "2-0" || parsed.Op != agentueui.OpStart {
+	if first.ID != "2-0" || parsed.Op != agentueui.OpStart {
 		t.Fatalf("first event = %#v, parsed=%#v", first, parsed)
 	}
 	last, err := stream.Next()
@@ -77,7 +77,7 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 		case strings.HasSuffix(request.URL.Path, "/events"):
 			published = true
 			response.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(response, `{"cursor":"2-0"}`)
+			_, _ = io.WriteString(response, `{"id":"2-0"}`)
 		case strings.HasSuffix(request.URL.Path, "/complete"):
 			completed = true
 			response.WriteHeader(http.StatusNoContent)
@@ -91,12 +91,12 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cursor, err := runtime.Loop.Chat.Emit(context.Background(), "task-1", agentueui.Event{
+	event, err := runtime.Loop.Chat.Emit(context.Background(), "task-1", agentueui.Event{
 		Op: agentueui.OpSet, Seq: 2,
 		Block: map[string]any{"id": "answer", "type": "text", "content": "done"},
 	})
-	if err != nil || cursor != "2-0" {
-		t.Fatalf("Emit cursor=%q error=%v", cursor, err)
+	if err != nil || event.ID != "2-0" {
+		t.Fatalf("Emit event=%#v error=%v", event, err)
 	}
 	if err := runtime.Loop.Chat.Complete(context.Background(), "task-1", nil); err != nil {
 		t.Fatal(err)

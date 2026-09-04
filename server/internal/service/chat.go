@@ -179,11 +179,11 @@ func (service *ChatService) Emit(ctx context.Context, taskID string, event json.
 	if taskID == "" {
 		return "", ErrInvalid
 	}
-	cursor, err := service.delivery.Emit(ctx, taskID, event)
+	eventID, err := service.delivery.Emit(ctx, taskID, event)
 	if err == nil {
-		service.logger.DebugContext(ctx, "chat event published", "task_id", taskID, "cursor", cursor)
+		service.logger.DebugContext(ctx, "chat event published", "task_id", taskID, "event_id", eventID)
 	}
-	return cursor, mapDeliveryError(err)
+	return eventID, mapDeliveryError(err)
 }
 
 func (service *ChatService) Complete(ctx context.Context, taskID string, failure *delivery.Failure) error {

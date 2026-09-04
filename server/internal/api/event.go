@@ -13,11 +13,11 @@ func (server *Server) appendTaskEvent(ctx context.Context, request *hertzapp.Req
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
-	cursor, err := server.chat.Emit(ctx, request.Param("task_id"), input.Event)
+	eventID, err := server.chat.Emit(ctx, request.Param("task_id"), input.Event)
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusAccepted, appendTaskEventResponse{Cursor: cursor})
+	request.JSON(consts.StatusAccepted, appendTaskEventResponse{ID: eventID})
 	return nil
 }
 

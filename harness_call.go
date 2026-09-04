@@ -34,28 +34,21 @@ type Tool struct {
 }
 
 type HarnessCall struct {
-	ID              string     `json:"id"`
-	InvocationID    string     `json:"invocation_id"`
-	OwnerUID        string     `json:"owner_uid"`
-	EffectKey       string     `json:"effect_key"`
-	Target          string     `json:"target"`
-	Phase           CallPhase  `json:"phase"`
-	ExternalRef     string     `json:"external_ref,omitempty"`
-	ProviderCursor  string     `json:"provider_cursor,omitempty"`
-	LastEventCursor uint64     `json:"last_event_cursor,omitempty"`
-	StreamText      string     `json:"stream_text,omitempty"`
-	Result          string     `json:"result,omitempty"`
-	Error           string     `json:"error,omitempty"`
-	LastActivityAt  *time.Time `json:"last_activity_at,omitempty"`
+	ID             string     `json:"id"`
+	TaskID         string     `json:"task_id"`
+	EffectKey      string     `json:"effect_key"`
+	Target         string     `json:"target"`
+	Phase          CallPhase  `json:"phase"`
+	Result         string     `json:"result,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 	Timestamped
 }
 
-type HarnessEvent struct {
-	Cursor         uint64          `json:"cursor"`
-	ProviderCursor string          `json:"provider_cursor,omitempty"`
-	CallID         string          `json:"call_id"`
-	InvocationID   string          `json:"invocation_id"`
-	Kind           string          `json:"kind"`
-	Data           json.RawMessage `json:"data"`
-	CreatedAt      time.Time       `json:"created_at"`
+// Event is one event accepted by loop-server's delivery stream. ID is the
+// transport event identity used by SSE Last-Event-ID; Data is an AgentUE event
+// whose seq owns semantic ordering and publish idempotency.
+type Event struct {
+	ID   string          `json:"id"`
+	Data json.RawMessage `json:"data"`
 }

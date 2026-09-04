@@ -1,12 +1,9 @@
-// Package harness defines the provider boundary used by loop-server.
+// Package harness defines the intelligent execution boundary used by loop-runtime.
 package harness
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"time"
 
 	loopd "github.com/compforge/loopd"
 )
@@ -14,59 +11,31 @@ import (
 type Request struct {
 	CallID         string
 	IdempotencyKey string
-	ExternalRef    string
-	Cursor         string
-	Target         string
+	TaskID         string
 	Prompt         string
 	Tools          []loopd.Tool
 }
 
-type Observation struct {
-	Phase       loopd.CallPhase
-	ExternalRef string
-	Cursor      string
-	ActivityAt  time.Time
-	Result      string
-	Error       string
-}
-
 type Event struct {
-	// Cursor is the provider's durable event identity, not loopd's event cursor.
-	// Replayed events with the same non-empty cursor are projected only once.
-	Cursor string
-	Kind   string
-	Data   json.RawMessage
+	// Data is an AgentUE set or append event. The Adapter describes visible
+	// Harness progress; loop-runtime assigns seq and publishes it to loop-server.
+	Data json.RawMessage
 }
 
-const (
-	// EventMessageDelta appends {"content":"..."} to the current Harness answer.
-	EventMessageDelta = "message.delta"
-)
+type Result struct {
+	Text string
+}
 
-type Emit func(context.Context, Event) error
+// Call is a Harness-owned execution handle. Events closes after the execution
+// reaches a terminal state; Wait returns the same terminal result.
+type Call interface {
+	ID() string
+	Events() <-chan Event
+	Wait(context.Context) (Result, error)
+}
 
-// Adapter connects one addressable Harness to its provider. Ensure must return
-// the same external execution for repeated requests with one IdempotencyKey.
-// Ensure and Observe are bounded observations: a long Harness execution remains
-// provider-owned while each call emits the events available within its context.
+// Adapter connects one addressable Harness to loop-runtime. Prompt returns
+// promptly with a Call handle; the Harness remains the execution owner.
 type Adapter interface {
-	Ensure(context.Context, Request, Emit) (Observation, error)
-	Observe(context.Context, Request, Emit) (Observation, error)
-}
-
-// OutcomeUnknownError means the provider may have accepted the action but its
-// result cannot be proved. loop-server fails closed instead of starting again.
-type OutcomeUnknownError struct {
-	Err error
-}
-
-func (err *OutcomeUnknownError) Error() string {
-	return fmt.Sprintf("Harness outcome is unknown: %v", err.Err)
-}
-
-func (err *OutcomeUnknownError) Unwrap() error { return err.Err }
-
-func IsOutcomeUnknown(err error) bool {
-	var target *OutcomeUnknownError
-	return errors.As(err, &target)
+	Prompt(context.Context, Request) (Call, error)
 }
