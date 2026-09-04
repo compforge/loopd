@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/server/internal/model"
-	"gorm.io/driver/sqlite"
+	drivermysql "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
+	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -21,7 +23,8 @@ var (
 )
 
 type Config struct {
-	Path             string
+	MySQLDSN         string
+	SQLitePath       string
 	OperationTimeout time.Duration
 	MaxOpenConns     int
 	MaxIdleConns     int
@@ -35,17 +38,8 @@ type Store struct {
 }
 
 func Open(config Config) (*Store, error) {
-	if config.Path == "" {
-		config.Path = "loopd.db"
-	}
 	if config.OperationTimeout <= 0 {
 		config.OperationTimeout = defaultOperationTimeout
-	}
-	if config.MaxOpenConns <= 0 {
-		config.MaxOpenConns = 1
-	}
-	if config.MaxIdleConns <= 0 {
-		config.MaxIdleConns = 1
 	}
 	if config.ConnMaxLifetime <= 0 {
 		config.ConnMaxLifetime = 30 * time.Minute
@@ -54,12 +48,32 @@ func Open(config Config) (*Store, error) {
 		config.ConnMaxIdleTime = 5 * time.Minute
 	}
 
-	db, err := gorm.Open(sqlite.Open(config.Path), &gorm.Config{
+	dialector, backend, err := databaseDialector(config)
+	if err != nil {
+		return nil, err
+	}
+	if config.MaxOpenConns <= 0 {
+		config.MaxOpenConns = 32
+	}
+	if config.MaxIdleConns <= 0 {
+		config.MaxIdleConns = 8
+	}
+	if backend == "sqlite" {
+		// SQLite is the single-process Quick Start backend. One connection
+		// serializes transactions and avoids avoidable database-locked errors.
+		config.MaxOpenConns = 1
+		config.MaxIdleConns = 1
+	}
+	if config.MaxIdleConns > config.MaxOpenConns {
+		return nil, errors.New("database max idle connections exceeds max open connections")
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
 		TranslateError: true,
 		Logger:         logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("open loopd database: %w", err)
+		return nil, fmt.Errorf("open loopd %s database: %w", backend, err)
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -73,11 +87,40 @@ func Open(config Config) (*Store, error) {
 	store := &Store{db: db, operationTimeout: config.OperationTimeout}
 	ctx, cancel := store.withTimeout(context.Background())
 	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("ping loopd %s database: %w", backend, err)
+	}
 	if err := db.WithContext(ctx).AutoMigrate(&model.Conversation{}, &model.Message{}); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd database: %w", err)
 	}
 	return store, nil
+}
+
+func databaseDialector(config Config) (gorm.Dialector, string, error) {
+	if config.MySQLDSN == "" {
+		if config.SQLitePath == "" {
+			config.SQLitePath = "loopd.db"
+		}
+		return gormsqlite.Open(config.SQLitePath), "sqlite", nil
+	}
+	dsn, err := drivermysql.ParseDSN(config.MySQLDSN)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse loopd MySQL DSN: %w", err)
+	}
+	dsn.ParseTime = true
+	dsn.Loc = time.UTC
+	dsn.Timeout = config.OperationTimeout
+	dsn.ReadTimeout = config.OperationTimeout
+	dsn.WriteTimeout = config.OperationTimeout
+	if dsn.Params == nil {
+		dsn.Params = map[string]string{}
+	}
+	if dsn.Params["charset"] == "" {
+		dsn.Params["charset"] = "utf8mb4"
+	}
+	return gormmysql.Open(dsn.FormatDSN()), "mysql", nil
 }
 
 func (store *Store) Close() error {

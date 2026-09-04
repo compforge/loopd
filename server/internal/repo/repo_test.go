@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/compforge/loopd/server/internal/model"
@@ -26,6 +27,16 @@ func TestOpenCreatesOnlyConversationAndMessageTables(t *testing.T) {
 	}
 	for _, table := range tables {
 		assertPrimaryKey(t, store, table, "id")
+	}
+}
+
+func TestOpenRejectsInvalidMySQLDSN(t *testing.T) {
+	_, err := Open(Config{MySQLDSN: "://invalid"})
+	if err == nil {
+		t.Fatal("Open succeeded with an invalid MySQL DSN")
+	}
+	if !strings.Contains(err.Error(), "parse loopd MySQL DSN") {
+		t.Fatalf("Open error = %v, want MySQL DSN parse error", err)
 	}
 }
 
@@ -128,7 +139,7 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(Config{Path: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := Open(Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

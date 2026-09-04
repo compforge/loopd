@@ -15,25 +15,6 @@ spec:
       port: 6379
       targetPort: redis
 ---
-{{- if .Values.redis.persistence.enabled }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "loopd.redisName" . }}
-  labels:
-    {{- include "loopd.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis
-spec:
-  accessModes:
-    {{- toYaml .Values.redis.persistence.accessModes | nindent 4 }}
-  {{- if .Values.redis.persistence.storageClass }}
-  storageClassName: {{ .Values.redis.persistence.storageClass | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.redis.persistence.size }}
----
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,7 +44,7 @@ spec:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
           imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
-          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
           ports:
             - name: redis
               containerPort: 6379
@@ -77,19 +58,8 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          volumeMounts:
-            - name: data
-              mountPath: /data
           resources:
             {{- toYaml .Values.redis.resources | nindent 12 }}
-      volumes:
-        - name: data
-          {{- if .Values.redis.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "loopd.redisName" . }}
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
       {{- with .Values.redis.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -103,4 +73,3 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 {{- end }}
-

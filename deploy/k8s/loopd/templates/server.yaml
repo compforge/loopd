@@ -1,5 +1,9 @@
+{{- $mysqlEnabled := or .Values.database.mysql.dsn .Values.database.mysql.existingSecret -}}
 {{- if ne (int .Values.server.replicaCount) 1 }}
-{{- fail "server.replicaCount must be 1 while loop-server uses SQLite" }}
+{{- fail "server.replicaCount must be 1 in loopd v1" }}
+{{- end }}
+{{- if and .Values.database.mysql.dsn .Values.database.mysql.existingSecret }}
+{{- fail "database.mysql.dsn and database.mysql.existingSecret are mutually exclusive" }}
 {{- end }}
 {{- if and (not .Values.redis.address) (not .Values.redis.enabled) }}
 {{- fail "redis.address or redis.enabled is required for the AgentUE event bridge" }}
@@ -25,25 +29,6 @@ spec:
       targetPort: http
       protocol: TCP
 ---
-{{- if .Values.server.persistence.enabled }}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "loopd.serverName" . }}
-  labels:
-    {{- include "loopd.labels" . | nindent 4 }}
-    app.kubernetes.io/component: server
-spec:
-  accessModes:
-    {{- toYaml .Values.server.persistence.accessModes | nindent 4 }}
-  {{- if .Values.server.persistence.storageClass }}
-  storageClassName: {{ .Values.server.persistence.storageClass | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.server.persistence.size }}
----
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,7 +37,7 @@ metadata:
     {{- include "loopd.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  replicas: 1
+  replicas: {{ .Values.server.replicaCount }}
   strategy:
     type: Recreate
   selector:
@@ -61,16 +46,17 @@ spec:
       app.kubernetes.io/component: server
   template:
     metadata:
+      annotations:
+        checksum/database-secret: {{ include (print $.Template.BasePath "/database-secret.yaml") . | sha256sum }}
+        {{- with .Values.server.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "loopd.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
         {{- with .Values.server.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.server.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
     spec:
       serviceAccountName: {{ include "loopd.serviceAccountName" . }}
       securityContext:
@@ -87,8 +73,16 @@ spec:
           env:
             - name: LOOP_SERVER_ADDR
               value: :8080
-            - name: LOOP_SERVER_DB
+            {{- if $mysqlEnabled }}
+            - name: LOOP_SERVER_MYSQL_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "loopd.databaseSecretName" . }}
+                  key: {{ .Values.database.mysql.existingSecretKey | quote }}
+            {{- else }}
+            - name: LOOP_SERVER_SQLITE_PATH
               value: /var/lib/loopd/loopd.db
+            {{- end }}
             - name: LOOP_SERVER_REDIS_ADDR
               value: {{ include "loopd.redisAddress" . | quote }}
             - name: LOOP_SERVER_TASK_NAMESPACE
@@ -128,20 +122,19 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            {{- if not $mysqlEnabled }}
             - name: data
               mountPath: /var/lib/loopd
+            {{- end }}
             - name: tmp
               mountPath: /tmp
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
       volumes:
+        {{- if not $mysqlEnabled }}
         - name: data
-          {{- if .Values.server.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "loopd.serverName" . }}
-          {{- else }}
           emptyDir: {}
-          {{- end }}
+        {{- end }}
         - name: tmp
           emptyDir: {}
       {{- with .Values.server.nodeSelector }}
