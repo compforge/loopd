@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
   <title id="title">loopd component stack and runtime boundaries</title>
-  <desc id="desc">AgentUE and loop-server form the interface. Domain Operators sit above agentd. The embedded loop-runtime connects Operators to collaboration and Agent execution. AgentLedger records execution facts across orchestration and Agent execution. Models, sandboxes, hosts, Kubernetes, and CRDs form the infrastructure.</desc>
+  <desc id="desc">AgentUE and loop-server form the interface. Domain Operators sit above agentd. The embedded loop-runtime connects Operators to collaboration and Agent execution. AgentLedger records execution facts across orchestration and Agent execution. Models, sandboxes, Hostel, Kubernetes, and CRDs form the infrastructure.</desc>
 
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -150,7 +150,7 @@
   <text x="355" y="955" font-size="14" fill="#4b5563" text-anchor="middle">provider / serving</text>
 
   <rect class="card" x="480" y="880" width="330" height="105" rx="19" fill="#f4f5f7"/>
-  <text x="645" y="926" font-size="23" font-weight="700" text-anchor="middle">Sandbox / Host</text>
+  <text x="645" y="926" font-size="23" font-weight="700" text-anchor="middle">Sandbox / Hostel</text>
   <text x="645" y="955" font-size="14" fill="#4b5563" text-anchor="middle">files · tools · compute</text>
 
   <rect class="card" x="830" y="880" width="300" height="105" rx="19" fill="#f4f5f7"/>
