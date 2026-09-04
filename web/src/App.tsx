@@ -9,15 +9,19 @@ import {
 } from "@compforge/agentue/ui";
 import {
   createConversation,
+  listActors,
   listConversations,
   listMessages,
   streamMessage,
+  type Actor,
   type Conversation,
   type Message,
 } from "./api";
 
 const activeTasksKey = "loopd.active-tasks";
+const selectedActorKey = "loopd.selected-actor";
 const selectedConversationKey = "loopd.selected-conversation";
+const legacyRouter: Pick<Actor, "kind" | "key"> = { kind: "operator", key: "router" };
 
 type RunStatus = "connecting" | "running" | "reconnecting" | "completed" | "failed";
 
@@ -27,15 +31,19 @@ interface LiveTask {
   lastEventID: string;
   snapshot: Snapshot;
   status: RunStatus;
+  target: Pick<Actor, "kind" | "key">;
 }
 
 interface StoredTask {
   taskID: string;
   lastEventID: string;
+  target?: Pick<Actor, "kind" | "key">;
 }
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [actors, setActors] = useState<Actor[]>([]);
+  const [selectedActorID, setSelectedActorID] = useState<string>();
   const [selectedConversationID, setSelectedConversationID] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedTaskID, setSelectedTaskID] = useState<string>();
@@ -47,10 +55,11 @@ export function App() {
   const streamingConversation = useRef<string | undefined>(undefined);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
+  const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
   const operatorMessages = messages.filter((message) => message.kind === "operator");
   const selectedOperatorMessage = operatorMessages.find((message) => message.task_id === selectedTaskID);
   const detailModel = useMemo(() => {
-    if (liveTask && liveTask.taskID === selectedTaskID) return toUIModel(liveTask.snapshot);
+    if (liveTask?.target.kind === "operator" && liveTask.taskID === selectedTaskID) return toUIModel(liveTask.snapshot);
     return selectedOperatorMessage ? safeModel(selectedOperatorMessage.content) : undefined;
   }, [liveTask, selectedOperatorMessage, selectedTaskID]);
 
@@ -68,6 +77,32 @@ export function App() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => {
+      void listActors(controller.signal)
+        .then((items) => {
+          setActors(items);
+          setSelectedActorID((current) => {
+            const saved = current ?? localStorage.getItem(selectedActorKey) ?? undefined;
+            const next = items.find((actor) => actorIdentity(actor) === saved) ?? items[0];
+            if (next) localStorage.setItem(selectedActorKey, actorIdentity(next));
+            else localStorage.removeItem(selectedActorKey);
+            return next ? actorIdentity(next) : undefined;
+          });
+        })
+        .catch((cause: unknown) => {
+          if (!isAbort(cause)) setError(errorMessage(cause));
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 10_000);
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -123,7 +158,7 @@ export function App() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const text = draft.trim();
-    if (!text || liveTask && !isTerminal(liveTask.status)) return;
+    if (!text || !selectedActor || liveTask && !isTerminal(liveTask.status)) return;
     setDraft("");
     setError(undefined);
 
@@ -155,10 +190,15 @@ export function App() {
         updated_at: new Date().toISOString(),
       },
     ]);
-    await observeTask(conversationID, undefined, text);
+    await observeTask(conversationID, undefined, text, selectedActor);
   }
 
-  async function observeTask(conversationID: string, stored?: StoredTask, text?: string) {
+  async function observeTask(
+    conversationID: string,
+    stored?: StoredTask,
+    text?: string,
+    requestedTarget?: Pick<Actor, "kind" | "key">,
+  ) {
     streamAbort.current?.abort();
     const controller = new AbortController();
     streamAbort.current = controller;
@@ -167,8 +207,9 @@ export function App() {
     let lastEventID = stored?.lastEventID ?? "";
     let snapshot: Snapshot = {};
     let failed = false;
+    const target = requestedTarget ?? stored?.target ?? legacyRouter;
 
-    setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting" });
+    setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting", target });
     try {
       for (;;) {
         let ended = false;
@@ -178,26 +219,27 @@ export function App() {
             taskID: taskID || undefined,
             lastEventID: lastEventID || undefined,
             text,
-            target: { kind: "operator", key: "router" },
+            target,
             signal: controller.signal,
             onTaskID: (value) => {
               taskID = value;
-              setSelectedTaskID(value);
-              writeActiveTask(conversationID, { taskID, lastEventID });
-              setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "running" });
+              if (target.kind === "operator") setSelectedTaskID(value);
+              writeActiveTask(conversationID, { taskID, lastEventID, target });
+              setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "running", target });
             },
             onEvent: ({ event: patch, eventId }) => {
               snapshot = applyPatch(structuredClone(snapshot), patch);
               if (eventId) lastEventID = eventId;
               if (patch.op === PatchOp.ERROR) failed = true;
               if (patch.op === PatchOp.END) ended = true;
-              writeActiveTask(conversationID, { taskID, lastEventID });
+              writeActiveTask(conversationID, { taskID, lastEventID, target });
               setLiveTask({
                 conversationID,
                 taskID,
                 lastEventID,
                 snapshot: structuredClone(snapshot),
                 status: ended ? (failed ? "failed" : "completed") : "running",
+                target,
               });
             },
           });
@@ -212,6 +254,7 @@ export function App() {
             lastEventID,
             snapshot: structuredClone(snapshot),
             status: "reconnecting",
+            target,
           });
           await delay(1_500, controller.signal);
         }
@@ -219,8 +262,8 @@ export function App() {
 
       removeActiveTask(conversationID);
       const items = await refreshMessages(conversationID, controller.signal);
-      const answer = items.find((message) => message.task_id === taskID && message.kind === "operator");
-      if (answer) setSelectedTaskID(answer.task_id);
+      const answer = items.find((message) => message.task_id === taskID && message.kind === target.kind);
+      if (answer?.kind === "operator") setSelectedTaskID(answer.task_id);
       const refreshed = await listConversations(controller.signal);
       setConversations(refreshed);
     } catch (cause) {
@@ -239,8 +282,8 @@ export function App() {
         id: `live-${liveTask.taskID}`,
         conversation_id: liveTask.conversationID,
         task_id: liveTask.taskID,
-        kind: "operator",
-        key: "router",
+        kind: liveTask.target.kind,
+        key: liveTask.target.key,
         content: toUIModel(liveTask.snapshot) ?? emptyModel(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -286,14 +329,6 @@ export function App() {
             <span className="eyebrow">CONVERSATION</span>
             <h1>{selectedConversation?.name || "新对话"}</h1>
           </div>
-          <div className="actor-select" aria-label="Selected actor">
-            <span className="actor-dot" />
-            <div>
-              <small>发送给</small>
-              <strong>Operator · Router</strong>
-            </div>
-            <span className="chevron">⌄</span>
-          </div>
         </header>
 
         <section className="messages" aria-live="polite">
@@ -301,11 +336,11 @@ export function App() {
             <div className="welcome">
               <div className="welcome-symbol">↻</div>
               <h2>从一个问题开始</h2>
-              <p>Router 会判断问题复杂度，临时组织 Harness 执行，并汇总为一个回答。</p>
+              <p>{selectedActor?.description || "选择一个可用的 Operator 或 Harness，然后开始对话。"}</p>
             </div>
           )}
           {renderedMessages.map((message) => {
-            const isLive = liveTask?.taskID === message.task_id && message.kind === "operator";
+            const isLive = liveTask?.taskID === message.task_id && message.kind !== "user";
             const model = isLive ? toUIModel(liveTask.snapshot) : safeModel(message.content);
             const text = messageText(model, message.kind);
             const active = message.kind === "operator" && selectedTaskID === message.task_id;
@@ -331,7 +366,7 @@ export function App() {
         <form className="composer" onSubmit={submit}>
           <textarea
             aria-label="Message"
-            placeholder="给 Router 发一个问题…"
+            placeholder={selectedActor ? `给 ${actorName(selectedActor)} 发一个问题…` : "当前没有可用的 Actor"}
             rows={1}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -344,15 +379,43 @@ export function App() {
           />
           <button
             className="send-button"
-            disabled={!draft.trim() || Boolean(liveTask && !isTerminal(liveTask.status))}
+            disabled={!draft.trim() || !selectedActor || Boolean(liveTask && !isTerminal(liveTask.status))}
             type="submit"
             aria-label="Send"
           >
             ↑
           </button>
           <div className="composer-meta">
+            <label className="actor-picker">
+              <span className="actor-dot" />
+              <span>发送给</span>
+              <select
+                aria-label="选择 Actor"
+                disabled={Boolean(liveTask && !isTerminal(liveTask.status)) || actors.length === 0}
+                value={selectedActorID ?? ""}
+                onChange={(event) => {
+                  setSelectedActorID(event.target.value);
+                  localStorage.setItem(selectedActorKey, event.target.value);
+                }}
+              >
+                {actors.length === 0 && <option value="">暂无可用 Actor</option>}
+                {actors.filter((actor) => actor.kind === "operator").length > 0 && (
+                  <optgroup label="Operators">
+                    {actors.filter((actor) => actor.kind === "operator").map((actor) => (
+                      <option key={actorIdentity(actor)} value={actorIdentity(actor)}>{actorLabel(actor)}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {actors.filter((actor) => actor.kind === "harness").length > 0 && (
+                  <optgroup label="Harnesses">
+                    {actors.filter((actor) => actor.kind === "harness").map((actor) => (
+                      <option key={actorIdentity(actor)} value={actorIdentity(actor)}>{actorLabel(actor)}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
             <span>Enter 发送 · Shift + Enter 换行</span>
-            <span>回答由 Operator 汇总</span>
           </div>
         </form>
       </main>
@@ -486,6 +549,19 @@ function emptyModel(): UIModel {
 function conversationName(text: string): string {
   const compact = text.replace(/\s+/g, " ").trim();
   return compact.length > 32 ? `${compact.slice(0, 32)}…` : compact;
+}
+
+function actorIdentity(actor: Pick<Actor, "kind" | "key">): string {
+  return `${actor.kind}:${actor.key}`;
+}
+
+function actorName(actor: Actor): string {
+  return actor.display_name || actor.key;
+}
+
+function actorLabel(actor: Actor): string {
+  const kind = actor.kind === "operator" ? "Operator" : "Harness";
+  return `${kind} · ${actorName(actor)}`;
 }
 
 function shortID(value: string): string {

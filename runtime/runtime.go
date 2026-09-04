@@ -19,10 +19,11 @@ import (
 )
 
 type Options struct {
-	HTTPClient     *http.Client
-	RequestTimeout time.Duration
-	Harnesses      map[string]harness.Adapter
-	Logger         *slog.Logger
+	HTTPClient         *http.Client
+	RequestTimeout     time.Duration
+	ActorLeaseDuration time.Duration
+	Harnesses          map[string]harness.Adapter
+	Logger             *slog.Logger
 }
 
 type Runtime struct {
@@ -31,6 +32,7 @@ type Runtime struct {
 }
 
 type Loop struct {
+	Actor   Actor
 	Chat    Chat
 	Harness Harness
 	Task    Task
@@ -63,6 +65,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
+	loop.Actor = newActor(runCtx, c, options.ActorLeaseDuration, options.Logger)
 	loop.Chat = newChat(c)
 	loop.Harness = newHarness(runCtx, options.Harnesses, options.Logger)
 	loop.Harness.chat = loop.Chat

@@ -1,6 +1,14 @@
 import { decodeSse, type SseMessage, type UIModel } from "@compforge/agentue/ui";
 
 export type ActorKind = "user" | "operator" | "harness";
+export type TargetActorKind = Exclude<ActorKind, "user">;
+
+export interface Actor {
+  kind: TargetActorKind;
+  key: string;
+  display_name?: string;
+  description?: string;
+}
 
 export interface Conversation {
   id: string;
@@ -19,6 +27,11 @@ export interface Message {
   content: UIModel;
   created_at: string;
   updated_at: string;
+}
+
+export async function listActors(signal?: AbortSignal): Promise<Actor[]> {
+  const page = await requestJSON<Page<Actor>>("/v1/actors", { signal });
+  return page.data;
 }
 
 interface Page<T> {
@@ -56,7 +69,7 @@ export interface StreamRequest {
   taskID?: string;
   lastEventID?: string;
   text?: string;
-  target?: { kind: "operator" | "harness"; key: string };
+  target?: Pick<Actor, "kind" | "key">;
   signal?: AbortSignal;
   onTaskID(taskID: string): void;
   onEvent(message: SseMessage): void;

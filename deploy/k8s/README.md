@@ -28,7 +28,7 @@ helm upgrade --install loopd deploy/k8s/loopd \
 `redis.address` 与 `redis.existingSecret` 接入独立运维的 Redis。
 
 需要持久化聊天记录时，配置外部 MySQL。Chart 不创建或管理 MySQL；生产环境应通过已有 Secret 提供
-DSN：
+DSN。Chart 对 loop-server 统一设置 `DATABASE_DRIVER=mysql` 与 `DATABASE_DSN=<secret value>`：
 
 ```yaml
 database:

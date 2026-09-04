@@ -1,13 +1,31 @@
 # loop-server Persistence
 
-loop-server 数据库只持久化 Conversation 与 Message 两类页面可见的聊天事实，不建立 `tasks` 表。每次
-问答对应的 Task 是 Kubernetes CRD；AgentLedger 保存完整运行轨迹、审计和成本事实，不替代页面聊天
-记录。
+loop-server 数据库持久化 Conversation 与 Message 两类页面可见的聊天事实，并用 Operator/Harness
+注册表支持在线 Actor 发现，但不建立 `tasks` 表。每次问答对应的 Task 是 Kubernetes CRD；AgentLedger
+保存完整运行轨迹、审计和成本事实，不替代页面聊天记录。
 
 loop-server 在配置 MySQL DSN 时使用外部 MySQL，否则回退到本地 SQLite。Helm Quick Start 的 SQLite
 位于临时卷，适合零依赖体验；需要跨 Pod 重建保留聊天记录时，由部署方提供外部 MySQL，loopd 不创建
 或管理数据库实例。Redis 只承载运行中的页面事件与断线续读，不是聊天事实源，因此内置 Redis 使用
 内存存储。
+
+数据库配置统一为 `DATABASE_DRIVER` 与 `DATABASE_DSN`。SQLite/MySQL 的 GORM Dialector 选择只发生在
+repo 层，service 与 API 不感知数据库类型。
+
+## Actor Registry
+
+`operators` 与 `harnesses` 表结构相同：
+
+- `id`：UUIDv7 主键；
+- `key`：逻辑 Actor 的唯一稳定标识；
+- `display_name`、`description`：面向 Human 的发现信息；
+- `expires_at`：本次注册的租约终点；
+- `created_at`、`updated_at`：记录时间。
+
+Operator 或可直接接收 Task 的 Harness 通过 loop-runtime 注册，并按租期三分之一的间隔续租。多个副本
+使用相同 `key` 续租同一逻辑记录；进程退出时不主动删除，避免一个副本误删其他副本的可用性。
+`GET /v1/actors` 只聚合 `expires_at` 晚于当前时间的 Operator 与 Harness，不返回 Human。过期记录保留供
+后续续租复用，但不会再出现在选择列表中。Operator 内部按请求临时创建的 Harness 不登记为可直聊 Actor。
 
 ## Conversation
 

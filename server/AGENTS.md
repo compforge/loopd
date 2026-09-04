@@ -2,20 +2,22 @@
 
 ## 项目定位与边界
 
-server 是 loop-server 组件，数据库只拥有 Conversation 与 Message 两类聊天事实。每次问答还会创建一个
-通用 Task CRD 作为 Reconcile 入口；Operator 领域状态、Harness 运行状态、执行审计和成本记录不进入
-聊天模型。
+server 是 loop-server 组件，数据库拥有 Conversation 与 Message 两类聊天事实，以及 Operator/Harness
+在线注册。每次问答还会创建一个通用 Task CRD 作为 Reconcile 入口；Operator 领域状态、Harness 执行
+状态、执行审计和成本记录不进入聊天模型。
 
 ## 代码地图与核心模块
 
 ```text
 server/
 ├── server.go               # 组件组装与资源生命周期
-├── internal/api/           # Hertz 适配；Conversation、Message、Chat、Task handler 分文件
+├── internal/api/           # Hertz 适配；Actor、Conversation、Message、Chat、Task handler 分文件
 ├── internal/delivery/      # loopd 完成语义；借助 AgentUE Bridge 续接事件并固化 Message
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
-│   └── message.go          # messages
+│   ├── message.go          # messages
+│   ├── operator.go         # operators 在线注册
+│   └── harness.go          # harnesses 在线注册
 ├── internal/repo/          # 数据库连接及按表拆分的持久化操作
 │   ├── conversation.go
 │   └── message.go
@@ -23,9 +25,10 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
+│   ├── actor.go            # Actor 在线注册与发现
 │   ├── chat.go             # ChatService；Message 与 Task CRD 的提交边界
 │   └── task.go             # TaskService；按 task_id 组装 Operator 上下文
-└── docs/persistence.md     # 两表 schema 与 UUIDv7 游标约束
+└── docs/persistence.md     # 聊天事实、Actor 注册与 UUIDv7 游标约束
 ```
 
 ## 关键约定
@@ -35,7 +38,7 @@ server/
 3. Conversation 使用 `name`。Message 使用 `task_id + kind + key + content`：kind 只能是 `user`、
    `operator`、`harness`，key 是该参与者的稳定标识，content 是页面可见的 AgentUE semantic model JSON，
    不是完整执行日志。
-4. 两张表的 `id` 都由 service 使用 go-stdx `uuid.V7()` 生成。消息按 UUIDv7 字典序读取和翻页，不增加
+4. 所有表的 `id` 都由 service 使用 go-stdx `uuid.V7()` 生成。消息按 UUIDv7 字典序读取和翻页，不增加
    `sequence` 字段。
 5. 一次 Chat 请求由 `ChatService` 在数据库事务中创建 user Message 和目标 Actor 的空 response Message，再以
    `task_id` 初始化 AgentUE Redis Stream 并创建 Task CRD；任一步失败则事务回滚。外部资源创建成功但 DB
@@ -52,6 +55,8 @@ server/
     最终 Message 快照。Redis 中的事件是活跃任务投影，不替代 AgentLedger 的完整执行记录。
 11. Task event API 接受 Operator/runtime 发布的 AgentUE `set/append`。返回的 event ID 是 Redis/SSE
     transport identity，仅用于 `Last-Event-ID` 续接；语义顺序和幂等由 event data 内的 AgentUE `seq` 表达。
+12. `operators` 与 `harnesses` 各以 `key` 唯一标识一个逻辑 Actor，并通过 `expires_at` 表达在线租约。
+    `/v1/actors` 只聚合未过期项；当前 Router 只注册自身，不注册内部临时 AgentGo Harness。
 
 ## References
 

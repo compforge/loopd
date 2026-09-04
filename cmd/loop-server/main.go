@@ -26,21 +26,20 @@ func main() {
 }
 
 func run() error {
-	address := envOr("LOOP_SERVER_ADDR", ":8080")
-	mysqlDSN := os.Getenv("LOOP_SERVER_MYSQL_DSN")
-	sqlitePath := envOr("LOOP_SERVER_SQLITE_PATH", "loopd.db")
-	redisAddress := envOr("LOOP_SERVER_REDIS_ADDR", "127.0.0.1:6379")
-	taskNamespace := envOr("LOOP_SERVER_TASK_NAMESPACE", "default")
-	tasks, err := newTaskClient(taskNamespace)
+	config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	tasks, err := newTaskClient(config.taskNamespace, config.taskClientTimeout)
 	if err != nil {
 		return err
 	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{MySQLDSN: mysqlDSN, SQLitePath: sqlitePath},
+		Database: server.DatabaseConfig{Driver: config.databaseDriver, DSN: config.databaseDSN},
 		Redis: server.RedisConfig{
-			Address:  redisAddress,
-			Username: os.Getenv("LOOP_SERVER_REDIS_USERNAME"),
-			Password: os.Getenv("LOOP_SERVER_REDIS_PASSWORD"),
+			Address:  config.redisAddress,
+			Username: config.redisUsername,
+			Password: config.redisPassword,
 		},
 		Tasks: tasks, Logger: slog.Default(),
 	})
@@ -51,13 +50,13 @@ func run() error {
 
 	logger := slog.Default()
 	httpServer := hertzserver.Default(
-		hertzserver.WithHostPorts(address),
+		hertzserver.WithHostPorts(config.address),
 		hertzserver.WithTransport(standard.NewTransporter),
-		hertzserver.WithReadTimeout(30*time.Second),
+		hertzserver.WithReadTimeout(config.readTimeout),
 		// A page may observe one task for hours, but its Operator or Harness
 		// execution continues independently when the connection disappears.
 		hertzserver.WithWriteTimeout(0),
-		hertzserver.WithIdleTimeout(90*time.Second),
+		hertzserver.WithIdleTimeout(config.idleTimeout),
 		hertzserver.WithMaxRequestBodySize(1<<20),
 		hertzserver.WithSenseClientDisconnection(true),
 	)
@@ -68,15 +67,11 @@ func run() error {
 	go loopServer.Run(processCtx)
 	serveErr := make(chan error, 1)
 	go func() {
-		databaseBackend := "sqlite"
-		if mysqlDSN != "" {
-			databaseBackend = "mysql"
-		}
 		logger.Info("loop-server listening",
-			"address", address,
-			"database_backend", databaseBackend,
-			"redis_address", redisAddress,
-			"task_namespace", taskNamespace,
+			"address", config.address,
+			"database_driver", config.databaseDriver,
+			"redis_address", config.redisAddress,
+			"task_namespace", config.taskNamespace,
 		)
 		serveErr <- httpServer.Run()
 	}()
@@ -87,31 +82,24 @@ func run() error {
 		}
 		return nil
 	case <-processCtx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), config.shutdownTimeout)
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
 }
 
-func newTaskClient(namespace string) (server.TaskClient, error) {
+func newTaskClient(namespace string, requestTimeout time.Duration) (server.TaskClient, error) {
 	scheme := runtime.NewScheme()
 	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("register loopd Task scheme: %w", err)
 	}
-	config, err := kubeconfig.GetConfig()
+	kubeConfig, err := kubeconfig.GetConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load Kubernetes config: %w", err)
 	}
-	kubeClient, err := client.New(config, client.Options{Scheme: scheme})
+	kubeClient, err := client.New(kubeConfig, client.Options{Scheme: scheme})
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	return server.NewKubernetesTaskClient(kubeClient, namespace, 10*time.Second), nil
-}
-
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	return fallback
+	return server.NewKubernetesTaskClient(kubeClient, namespace, requestTimeout), nil
 }

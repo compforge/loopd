@@ -67,6 +67,7 @@ loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行�
 | **Task** | loop-server 为一次问答创建的通用 CRD；只保存目标 Actor 路由与唤醒版本，名称即 Message 使用的 `task_id` |
 | **Operator Resource** | 复杂 Operator 按需创建并拥有的领域 CRD；记录该领域独有的目标、状态和完成条件 |
 | **Harness Execution** | Harness 自己拥有的执行；可耗时、流式返回，完整轨迹由 AgentLedger 记录 |
+| **Actor Registration** | loop-server 保存的在线发现租约；只描述可直接接收 Task 的 Operator/Harness，不保存执行状态 |
 
 Activity、Artifact 和各种流式事件是这些对象的过程记录或投影，不与它们平级：
 
@@ -184,6 +185,7 @@ loop-runtime 向 Operator 暴露少量 typed capability，使领域 Reconcile �
 Human interaction 的控制骨架：
 
 ```text
+Actor.Register     注册并持续续租当前 Operator 或可直聊 Harness
 Chat.Conversation 读取 Conversation
 Chat.History     显式读取 Conversation 的增量历史
 Chat.Send        首次请求创建两条 Message 与 Task CRD；带 task_id 时续接同一 AgentUE 事件流
@@ -222,8 +224,9 @@ checkpoint 持有单 Harness 的长期稳定性。
 
 Operator 可以拥有一组对它可见的 Harness 引用。可见性和角色映射属于 Operator 配置或 CRD，不属于
 loop-server 的领域表。候选 Harness 可以来自静态配置，也可以由 Operator 为单次请求临时创建 Call；当
-Harness 注册与发现能力可用时，Operator 还可以从已登记的候选中选择、转发或分发，策略仍由 Operator
-拥有。
+Operator 与可直接接收 Task 的 Harness 通过 lease 注册到 loop-server；发现接口只返回未过期项。Operator
+还可以从已登记的 Harness 候选中选择、转发或分发，策略仍由 Operator 拥有。按请求临时创建、只能由
+Operator 内部调用的 Harness 不进入注册表。
 
 一个意图识别 Operator 可以用同一套内核表达不同复杂度的处理：
 
@@ -261,7 +264,7 @@ Activity 只承载跨 Operator 都能理解的处理摘要，更丰富的领域�
 专用 View 扩展展示。
 
 AgentLedger 记录 prompt、模型事件、Harness Call、tool call/result、重试和成本等完整执行事实，用于审计、
-回放和分析；它不承担页面 Conversation History，因此不能替代 loop-server 的两表业务模型。
+回放和分析；它不承担页面 Conversation History，因此不能替代 loop-server 的 Conversation/Message 模型。
 
 AgentUE 在 loopd 中定义页面语义模型，并提供不拥有业务任务的 Redis Event Bridge。Operator 与其调用的
 Harness 通过 loop-runtime 向 loop-server 发布 `set/append`；任意 loop-server 实例都可将事件写入共享

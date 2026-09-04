@@ -30,7 +30,8 @@ loopd/
 
 1. Conversation History 属于 loop-server，不属于某一个 Operator 或 Harness；同一 Conversation 可由
    多个参与者先后协作。
-2. loop-server 的聊天事实只有 Conversation 与 Message。Message 通过 `task_id + kind + key + content`
+2. loop-server 的聊天事实只有 Conversation 与 Message；Operator/Harness 表只承载带过期时间的在线注册，
+   不属于聊天或 Operator 领域事实。Message 通过 `task_id + kind + key + content`
    表达 Human、Operator 或 Harness 的一条页面可见发言；`content` 是 AgentUE semantic model，使用
    可扩展 blocks 承载文本、可见工具状态和产物，不混入完整执行轨迹。
 3. `conversations` 与 `messages` 均使用 go-stdx 生成的 UUIDv7 `id` 作为主键和游标；不再维护平行的
@@ -50,6 +51,8 @@ loopd/
     实例，再进入共享 Redis Stream。AgentGo Adapter 只用于进程内演示，生产级执行恢复由 agentd 持有。
 11. 根目录 `VERSION` 是 loopd 当前版本，使用 SemVer。任何代码改动都必须在同一变更中递增
     `VERSION`；初始版本为 `0.0.1`。
+12. Operator 与可直聊 Harness 通过 loop-runtime 定期续租；`/v1/actors` 只发现未过期的注册。Operator
+    内部临时 Harness 不注册为可直接接收 Task 的 Actor。
 
 ## References
 

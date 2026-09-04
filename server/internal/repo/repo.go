@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/compforge/loopd/server/internal/model"
@@ -23,8 +24,8 @@ var (
 )
 
 type Config struct {
-	MySQLDSN         string
-	SQLitePath       string
+	Driver           string
+	DSN              string
 	OperationTimeout time.Duration
 	MaxOpenConns     int
 	MaxIdleConns     int
@@ -91,7 +92,12 @@ func Open(config Config) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping loopd %s database: %w", backend, err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.Conversation{}, &model.Message{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(
+		&model.Conversation{},
+		&model.Message{},
+		&model.Operator{},
+		&model.Harness{},
+	); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd database: %w", err)
 	}
@@ -99,28 +105,36 @@ func Open(config Config) (*Store, error) {
 }
 
 func databaseDialector(config Config) (gorm.Dialector, string, error) {
-	if config.MySQLDSN == "" {
-		if config.SQLitePath == "" {
-			config.SQLitePath = "loopd.db"
+	driver := strings.ToLower(strings.TrimSpace(config.Driver))
+	if driver == "" {
+		driver = "sqlite"
+	}
+	switch driver {
+	case "sqlite":
+		if config.DSN == "" {
+			config.DSN = "loopd.db"
 		}
-		return gormsqlite.Open(config.SQLitePath), "sqlite", nil
+		return gormsqlite.Open(config.DSN), driver, nil
+	case "mysql":
+		dsn, err := drivermysql.ParseDSN(config.DSN)
+		if err != nil {
+			return nil, "", fmt.Errorf("parse loopd MySQL DSN: %w", err)
+		}
+		dsn.ParseTime = true
+		dsn.Loc = time.UTC
+		dsn.Timeout = config.OperationTimeout
+		dsn.ReadTimeout = config.OperationTimeout
+		dsn.WriteTimeout = config.OperationTimeout
+		if dsn.Params == nil {
+			dsn.Params = map[string]string{}
+		}
+		if dsn.Params["charset"] == "" {
+			dsn.Params["charset"] = "utf8mb4"
+		}
+		return gormmysql.Open(dsn.FormatDSN()), driver, nil
+	default:
+		return nil, "", fmt.Errorf("unsupported database driver %q", config.Driver)
 	}
-	dsn, err := drivermysql.ParseDSN(config.MySQLDSN)
-	if err != nil {
-		return nil, "", fmt.Errorf("parse loopd MySQL DSN: %w", err)
-	}
-	dsn.ParseTime = true
-	dsn.Loc = time.UTC
-	dsn.Timeout = config.OperationTimeout
-	dsn.ReadTimeout = config.OperationTimeout
-	dsn.WriteTimeout = config.OperationTimeout
-	if dsn.Params == nil {
-		dsn.Params = map[string]string{}
-	}
-	if dsn.Params["charset"] == "" {
-		dsn.Params["charset"] = "utf8mb4"
-	}
-	return gormmysql.Open(dsn.FormatDSN()), "mysql", nil
 }
 
 func (store *Store) Close() error {

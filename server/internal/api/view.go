@@ -24,6 +24,12 @@ type createConversationRequest struct {
 	ParentMessageID string `json:"parent_message_id,omitempty"`
 }
 
+type registerActorRequest struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	Description  string `json:"description,omitempty"`
+	LeaseSeconds int    `json:"lease_seconds,omitempty"`
+}
+
 type createChatMessagesRequest struct {
 	TaskID  string          `json:"task_id,omitempty"`
 	UserKey string          `json:"user_key,omitempty"`
