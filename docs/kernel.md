@@ -221,7 +221,9 @@ checkpoint 持有单 Harness 的长期稳定性。
 ## 8. Operator 编排 Harness
 
 Operator 可以拥有一组对它可见的 Harness 引用。可见性和角色映射属于 Operator 配置或 CRD，不属于
-loop-server 的领域表。
+loop-server 的领域表。候选 Harness 可以来自静态配置，也可以由 Operator 为单次请求临时创建 Call；当
+Harness 注册与发现能力可用时，Operator 还可以从已登记的候选中选择、转发或分发，策略仍由 Operator
+拥有。
 
 一个意图识别 Operator 可以用同一套内核表达不同复杂度的处理：
 
