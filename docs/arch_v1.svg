@@ -107,35 +107,29 @@
   <text x="545" y="323" font-size="13" font-weight="650" text-anchor="middle">Task → plan → fan-out → answer</text>
 
   <rect class="operator-card" x="735" y="168" width="615" height="198" rx="18"/>
-  <text class="actor-title" x="1042" y="208">LoopHorizon · Long-running loop</text>
-  <text class="actor-detail" x="1042" y="235">Manager · Executor · Auditor</text>
+  <text class="actor-title" x="1042" y="205">LoopHorizon · Long-running loop</text>
+  <text class="actor-detail" x="1042" y="231">one loop · three focused responsibilities</text>
 
-  <rect class="operator-node" x="765" y="253" width="180" height="34" rx="17"/>
-  <text x="855" y="276" font-size="14" font-weight="650" text-anchor="middle">Resource · spec/status</text>
-  <line class="operator-flow" x1="950" y1="270" x2="972" y2="270"/>
+  <rect class="operator-node" x="770" y="250" width="160" height="50" rx="15"/>
+  <text x="850" y="271" font-size="16" font-weight="700" text-anchor="middle">Manager</text>
+  <text x="850" y="290" font-size="12" fill="#4b5563" text-anchor="middle">plan next step</text>
+  <line class="operator-flow" x1="935" y1="275" x2="965" y2="275"/>
 
-  <rect class="operator-node" x="980" y="253" width="125" height="34" rx="17"/>
-  <text x="1042" y="276" font-size="14" font-weight="650" text-anchor="middle">reconcile</text>
-  <line class="operator-flow" x1="1110" y1="270" x2="1132" y2="270"/>
+  <rect class="operator-node" x="970" y="250" width="160" height="50" rx="15"/>
+  <text x="1050" y="271" font-size="16" font-weight="700" text-anchor="middle">Executor</text>
+  <text x="1050" y="290" font-size="12" fill="#4b5563" text-anchor="middle">one bounded action</text>
+  <line class="operator-flow" x1="1135" y1="275" x2="1165" y2="275"/>
 
-  <rect class="operator-node" x="1140" y="253" width="180" height="34" rx="17"/>
-  <text x="1230" y="276" font-size="14" font-weight="650" text-anchor="middle">Connector</text>
+  <rect class="operator-node" x="1170" y="250" width="150" height="50" rx="15"/>
+  <text x="1245" y="271" font-size="16" font-weight="700" text-anchor="middle">Auditor</text>
+  <text x="1245" y="290" font-size="12" fill="#4b5563" text-anchor="middle">read-only verify</text>
 
-  <rect class="effect-pill" x="850" y="305" width="155" height="34" rx="17"/>
-  <text x="927" y="328" font-size="14" font-weight="650" text-anchor="middle">Ask / Confirm</text>
-  <rect class="effect-pill" x="1025" y="305" width="205" height="34" rx="17"/>
-  <text x="1127" y="328" font-size="14" font-weight="650" text-anchor="middle">Harness.Prompt</text>
-  <line class="operator-flow" x1="1022" y1="289" x2="940" y2="302"/>
-  <line class="operator-flow" x1="1062" y1="289" x2="1122" y2="302"/>
-  <text x="1042" y="357" font-size="13" fill="#4b5563" text-anchor="middle">observe → compare → act → update status</text>
+  <line class="operator-flow" x1="1245" y1="303" x2="1245" y2="315"/>
+  <rect class="effect-pill" x="835" y="318" width="410" height="32" rx="16"/>
+  <text x="1040" y="340" font-size="13" font-weight="650" text-anchor="middle">verified progress / failure evidence → next round</text>
+  <path class="operator-flow" d="M 835 334 C 790 334, 790 312, 846 303"/>
 
   <text x="868" y="398" font-size="15" fill="#4b5563" text-anchor="middle">业务定义 Resource、判断逻辑与完成条件；loopd 不内建固定 Workflow 或 Agent Team。</text>
-
-  <line class="port-line" x1="1355" y1="270" x2="1480" y2="270"/>
-  <text x="1418" y="248" font-size="14" fill="#4b5563" font-weight="650" text-anchor="middle">observe · act</text>
-  <rect class="actor" x="1490" y="222" width="250" height="96" rx="42" fill="#eee7ff"/>
-  <text x="1615" y="260" font-size="21" font-weight="700" text-anchor="middle">External systems</text>
-  <text x="1615" y="288" font-size="15" fill="#4b5563" text-anchor="middle">deployment · test · data</text>
 
   <!-- Task and Effect are the two stable boundaries between domain Operators and loopd. -->
   <line class="port-line" x1="600" y1="419" x2="600" y2="530"/>
@@ -147,7 +141,7 @@
   <text class="port-label" x="1130" y="473">Effects · results</text>
 
   <!-- loopd owns collaboration and shared orchestration mechanics, not domain semantics. -->
-  <rect x="400" y="530" width="1000" height="365" rx="28" fill="#edf3fc" stroke="#111827" stroke-width="3" filter="url(#shadow)"/>
+  <rect x="400" y="530" width="1000" height="305" rx="28" fill="#edf3fc" stroke="#111827" stroke-width="3" filter="url(#shadow)"/>
   <text x="900" y="582" font-size="31" font-weight="750" text-anchor="middle">loopd · Collaboration &amp; Runtime</text>
   <text x="900" y="613" font-size="17" fill="#4b5563" text-anchor="middle">公共能力沉淀在平台，领域判断留给 Operator</text>
 
@@ -167,15 +161,16 @@
   <text x="1070" y="753" font-size="13" font-weight="650" text-anchor="middle">observe Task</text>
   <text x="1070" y="770" font-size="13" font-weight="650" text-anchor="middle">read context</text>
   <rect class="core-pill" x="1165" y="732" width="155" height="46" rx="14"/>
-  <text x="1242" y="753" font-size="13" font-weight="650" text-anchor="middle">Human · Harness</text>
-  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">External Effects</text>
+  <text x="1242" y="753" font-size="13" font-weight="650" text-anchor="middle">Chat · Harness</text>
+  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">recoverable Effects</text>
 
   <line class="port-line" x1="844" y1="728" x2="956" y2="728"/>
   <rect class="port-pill" x="848" y="681" width="104" height="34" rx="17"/>
   <text x="900" y="704" font-size="13" font-weight="650" text-anchor="middle">typed API</text>
 
-  <rect x="450" y="835" width="900" height="42" rx="15" fill="#dff3f8" stroke="#4c8a9c" stroke-width="1.8"/>
-  <text x="900" y="862" font-size="16" font-weight="650" text-anchor="middle">AgentUE · 可见进展、处理详情与断线续接</text>
+  <!-- AgentUE is the page-visible projection boundary between Human/UI and loopd. -->
+  <rect x="355" y="620" width="40" height="194" rx="16" fill="#dff3f8" stroke="#4c8a9c" stroke-width="1.8"/>
+  <text x="375" y="756" font-size="17" font-weight="700" text-anchor="middle" transform="rotate(-90 375 750)">AgentUE</text>
 
   <!-- Human and Harness are peers connected by loopd's collaboration boundary. -->
   <rect class="actor" x="55" y="620" width="295" height="155" rx="22" fill="#eef3fb"/>
