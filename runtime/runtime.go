@@ -20,7 +20,6 @@ import (
 
 type Options struct {
 	HTTPClient     *http.Client
-	PollInterval   time.Duration
 	RequestTimeout time.Duration
 	Harnesses      map[string]harness.Adapter
 	Logger         *slog.Logger
@@ -32,11 +31,9 @@ type Runtime struct {
 }
 
 type Loop struct {
-	Chat     Chat
-	Harness  Harness
-	Operator Operator
-	Task     Task
-	client   *client
+	Chat    Chat
+	Harness Harness
+	Task    Task
 }
 
 func New(baseURL string, options Options) (*Runtime, error) {
@@ -54,9 +51,6 @@ func New(baseURL string, options Options) (*Runtime, error) {
 		transport.MaxIdleConnsPerHost = 20
 		options.HTTPClient = &http.Client{Transport: transport}
 	}
-	if options.PollInterval <= 0 {
-		options.PollInterval = time.Second
-	}
 	if options.RequestTimeout <= 0 {
 		options.RequestTimeout = 30 * time.Second
 	}
@@ -65,14 +59,13 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	}
 	c := &client{
 		baseURL: parsed, http: options.HTTPClient,
-		pollInterval: options.PollInterval, requestTimeout: options.RequestTimeout,
+		requestTimeout: options.RequestTimeout,
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-	loop := Loop{client: c}
+	loop := Loop{}
 	loop.Chat = newChat(c)
 	loop.Harness = newHarness(runCtx, options.Harnesses, options.Logger)
 	loop.Harness.chat = loop.Chat
-	loop.Operator = Operator{client: c}
 	loop.Task = Task{client: c}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }
@@ -89,7 +82,6 @@ func (runtime *Runtime) Close() error {
 type client struct {
 	baseURL        *url.URL
 	http           *http.Client
-	pollInterval   time.Duration
 	requestTimeout time.Duration
 }
 

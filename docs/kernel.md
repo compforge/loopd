@@ -22,7 +22,7 @@ loopd 的定位分为三个维度：
 loopd 在四层 Agent 技术体系中的位置如下：
 
 ```text
-Interface       loop-server 的 Chat API、Web 页面、Activity 详情与 Interaction
+Interface       loop-server 的 Chat API、Web 页面、Activity 详情与 Human 输入
 Orchestrator    loop-server、loop-runtime，以及 Operator 与 Harness 的协调边界
 Agent Loop      由 loopd 外部接入的 Harness 承载
 Infrastructure  模型、Sandbox、文件与计算环境
@@ -37,7 +37,7 @@ loopd 的公开协作角色只有三类：
 
 | 参与者 | 职责 |
 |---|---|
-| **Human** | 提出目标、选择 Actor、补充上下文、回答 Interaction，并判断结果是否满足需要 |
+| **Human** | 提出目标、选择 Actor、补充上下文、回答追问或确认，并判断结果是否满足需要 |
 | **Harness** | 接受 prompt 与 tools，执行一次可流式观察的智能任务；既可直接回答 Human，也可被 Operator 调用 |
 | **Operator** | Reconcile loopd Task，读取外部事实并决定何时调用 Harness、询问 Human、等待或结束；复杂业务可以拥有领域 CRD |
 
@@ -77,9 +77,9 @@ Activity、Artifact 和各种流式事件是这些对象的过程记录或投影
 `loop-server` 和 `loop-runtime` 是平台组件，不是新的协作角色。前者拥有服务端协作状态，后者是供
 Operator Reconciler 使用的 Go API，不单独拥有业务事实。
 
-一次问答任务可能持续几十分钟乃至数天。Task CRD 提供独立于 HTTP request、SSE 连接、浏览器页面或
-某一个 loop-server 进程的持久 Reconcile 入口；复杂领域的长期状态由 Operator Resource 持有，完整智能
-执行状态由 Harness 持有。
+一次问答任务可能持续几十分钟乃至数天。Task CRD 在问答活跃期间提供独立于 HTTP request、SSE 连接、
+浏览器页面或某一个 loop-server 进程的持久 Reconcile 入口；回答固化后删除这个 marker。复杂领域的长期
+状态由 Operator Resource 持有，完整智能执行状态由 Harness 持有。
 
 ## 4. Loop is a CRD
 
@@ -192,8 +192,9 @@ Chat.Complete    折叠事件并固化 response Message，然后结束事件流
 Task.Get         按 Task ID 读取当前 input、response 与 Conversation History
 Task.Watch       为指定 Actor 注册 Task Reconciler
 Harness.Prompt   以 prompt、tools 和可选 Harness target 发起或恢复一次 Call
-Ask / Confirm    请求 Human 提供信息或确认决定
 ```
+
+Ask / Confirm 通过同一 Task 下的 Conversation Message 请求 Human 输入，不另设独立任务资源或轮询 API。
 
 `Harness.Prompt` 返回 Call handle，而不是等待整个执行完成的普通 RPC：
 
@@ -240,8 +241,8 @@ loop-server 的领域表。
 ```
 
 拆解策略、串并行关系、中间结果和完成条件由该 Operator 的 Reconcile 表达；复杂度需要时再落入其领域
-Resource。loopd 只提供 Task、Call identity、观察、Interaction 和 Chat 投影，不把某种 Agent Team、DAG
-或固定角色分工写入 Core。
+Resource。loopd 只提供 Task、Call identity、观察、Conversation 中的 Human 输入和 Chat 投影，不把某种
+Agent Team、DAG 或固定角色分工写入 Core。
 
 ## 9. 状态与投影边界
 
@@ -288,6 +289,8 @@ transport identity，只用于 `Last-Event-ID` 续接；`Data` 内的 AgentUE `s
 11. **Harness 差异止于 Adapter**：新增 agentd 或第三方 Harness 不应要求修改 Conversation 或 Operator 模型。
 12. **连接不拥有执行**：HTTP/SSE 断开只结束本次观察；Task、Harness 执行与可选的领域 CRD 继续存在，
     重连从持久状态恢复。
+13. **Task 只标记活跃工作**：完成顺序是固化 Message、终结 Event Stream、删除 Task；已完成问答不会在
+    Operator 重启后因旧 marker 被再次处理。
 
 ## 11. 组件与依赖方向
 

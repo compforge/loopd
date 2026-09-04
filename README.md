@@ -50,7 +50,8 @@ HTTP request or browser connection:
    the shared Task directly;
 4. visible progress flows through the AgentUE Redis event bridge while full events enter AgentLedger;
 5. clients may reconnect to any server instance with the same `task_id` and continue from their last event ID;
-6. completion folds visible events into the selected Actor's response Message.
+6. completion folds visible events into the selected Actor's response Message,
+   marks the stream terminal, and removes the Task marker.
 
 `Harness.Prompt` returns a handle. A Reconciler can consume its stream while
 doing other work, or call `Wait` when the Harness result is the only remaining

@@ -34,6 +34,7 @@ loopd/
    message sequence。
 4. 一次问答由 user Message、目标 Actor 的 response Message 和同 ID 的 Task CRD 组成。服务端在数据库事务提交前
    初始化 AgentUE Redis Stream 并创建 CRD；任一步失败则回滚两条 Message，并尽力删除已创建的外部资源。
+   回答完成并固化后删除 Task marker，避免 Operator 重启时再次处理已经结束的工作。
 5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 response Message。
    v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
 6. v1alpha1 Task CRD 当前保存路由和唤醒信息，详细上下文由 runtime 按 Task ID 向 server 查询。公共协调
