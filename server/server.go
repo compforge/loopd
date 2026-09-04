@@ -15,7 +15,7 @@ import (
 
 type Config struct {
 	Database DatabaseConfig
-	Tasks    TaskMarker
+	Tasks    TaskClient
 	Logger   *slog.Logger
 }
 
@@ -35,7 +35,7 @@ type Server struct {
 
 func New(config Config) (*Server, error) {
 	if config.Tasks == nil {
-		return nil, errors.New("task marker is required")
+		return nil, errors.New("task client is required")
 	}
 	store, err := repo.Open(repo.Config{
 		Path: config.Database.Path, OperationTimeout: config.Database.OperationTimeout,

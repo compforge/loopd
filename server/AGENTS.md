@@ -3,7 +3,7 @@
 ## 项目定位与边界
 
 server 是 loop-server 组件，数据库只拥有 Conversation 与 Message 两类聊天事实。每次问答还会创建一个
-通用 Task CRD 作为 Reconcile 标记；Operator 领域状态、Harness 运行状态、执行审计和成本记录不进入
+通用 Task CRD 作为 Reconcile 入口；Operator 领域状态、Harness 运行状态、执行审计和成本记录不进入
 聊天模型。
 
 ## 代码地图与核心模块
@@ -18,7 +18,7 @@ server/
 ├── internal/repo/          # 数据库连接及按表拆分的持久化操作
 │   ├── conversation.go
 │   └── message.go
-├── internal/task/          # server 侧 Task CRD Create/Delete Adapter
+├── internal/task/          # server 侧 Task CRD Kubernetes Client
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
@@ -44,6 +44,8 @@ server/
 7. 页面不可见的 prompt、tool call/result、重试和成本等完整轨迹进入 AgentLedger，不扩张 Message schema。
 8. Task 查询是基于主 Conversation Message 的实时视图，不增加 `tasks` 表；详情 Conversation 中共享
    `task_id` 的内部消息不得覆盖主链路的 input/response。
+9. `runtime/api/` 是公共 CRD API，字段按 Kubernetes API 兼容规则增量演进；修改类型后运行
+   `make generate manifests`，提交生成的 DeepCopy 和 CRD YAML。
 
 ## References
 

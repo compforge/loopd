@@ -40,7 +40,8 @@ func (task Task) Watch(mgr manager.Manager, target loopd.ResponderRef, reconcile
 	}
 	matchingTarget := predicate.NewPredicateFuncs(func(object controllerclient.Object) bool {
 		value, ok := object.(*taskv1alpha1.Task)
-		return ok && value.Spec.Target == target
+		return ok && value.Spec.Target.Kind == taskv1alpha1.TaskTargetKind(target.Kind) &&
+			value.Spec.Target.Key == target.Key
 	})
 	return builder.ControllerManagedBy(mgr).
 		Named("loopd-task").

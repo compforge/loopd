@@ -91,7 +91,7 @@ Loop = Resource(spec + status) + Reconcile
 - Reconciler 每次读取最新目标、状态和外部事实，判断应该继续、等待、重试、询问 Human 还是结束；
 - Event 只提示事实可能变化，不能代替 Reconciler 重新读取权威状态。
 
-loopd 拥有一个通用 Task CRD。它不是业务 Task 模型，只是一次问答的持久标识、路由与唤醒载体：
+loopd 拥有一个通用 Task CRD。v1alpha1 先以一次问答的持久标识、路由与唤醒载体起步：
 
 ```yaml
 metadata:
@@ -103,7 +103,8 @@ spec:
   revision: 1
 ```
 
-Query、Conversation History 和回答不复制进 CRD。Reconciler 从 `metadata.name` 取得 Task ID，再通过
+后续可以按 Kubernetes API 兼容规则增加通用协调字段，但 Query、Conversation History 和回答不复制进
+CRD，Operator 领域状态也不进入通用 Task。Reconciler 从 `metadata.name` 取得 Task ID，再通过
 loop-runtime 向 loop-server 获取当前 input、response 和有界 History。
 
 简单 Operator 直接 Reconcile 通用 Task。复杂 Operator 收到 Task 后可以创建自己的领域 CRD，由领域
@@ -153,7 +154,7 @@ Message。
 Conversation History 是 loop-server 的事实，不属于任何 Operator 或 Harness。同一 Conversation 可以先后
 由不同 Operator 和 Harness 参与，它们都可以在授权范围内读取已有历史。
 
-通用 Task CRD 不复制完整对话，只保存 responder 路由与唤醒版本。loop-server 根据 Task ID 从主
+v1alpha1 Task CRD 不复制完整对话，当前保存 responder 路由与唤醒版本。loop-server 根据 Task ID 从主
 Conversation Message 即时组装上下文：
 
 ```text
@@ -234,7 +235,7 @@ loop-server 是页面协作事实和 Task 分发的 owner：
 - Message 是页面可见对话历史的事实来源；
 - 同一次问答的 user、responder 及后续可见交互共享 `task_id`；
 - Message content 可以投影 Activity、Artifact 等页面需要展示的内容。
-- Task CRD 以同一个 `task_id` 命名，只承载 responder 路由与可推进版本。
+- Task CRD 以同一个 `task_id` 命名；v1alpha1 当前承载 responder 路由与可推进版本。
 
 loop-server 不建立 `tasks` 表，也不保存 Operator 领域表。Task 查询是基于 Message 的实时视图；通用
 Activity 只承载跨 Operator 都能理解的处理摘要，更丰富的领域详情留在 Operator Resource，必要时通过
@@ -253,7 +254,8 @@ v1 只复用 AgentUE 的页面模型，不把 AgentUE Runner 作为 loopd 的执
    扩散到 loopd Core。
 2. **Conversation 独立于 responder**：历史属于 Human 持有的 Conversation，不因切换 Operator 或 Harness
    被复制或切断。
-3. **Task 只负责分发和唤醒**：Query、History、回答和领域状态不复制进 loopd Task CRD。
+3. **Task 从分发和唤醒起步**：v1alpha1 保持最小；后续只增加通用协调字段，不复制 Query、History、
+   回答和 Operator 领域状态。
 4. **领域 CRD 按复杂度引入**：简单 Operator 直接 Reconcile Task；复杂 Operator 自己拥有领域 Resource。
 5. **一次问答有稳定 task identity**：初始 user/responder Message 和后续反问、确认共享同一 `task_id`。
 6. **外部动作先获得持久 identity**：同一 owner 与 effect key 的重试必须观察或恢复同一次 Harness Call，

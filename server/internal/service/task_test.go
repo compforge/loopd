@@ -10,7 +10,7 @@ import (
 func TestTaskContextComesFromMessages(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
-	chat := NewChatService(store, nopTaskMarker{}, nil)
+	chat := NewChatService(store, nopTaskClient{}, nil)
 	tasks := NewTaskService(store, nil)
 	ctx := context.Background()
 

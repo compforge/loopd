@@ -36,10 +36,11 @@ loopd/
    创建 CRD；创建失败则回滚两条 Message 并向 Human 返回错误。
 5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 responder Message。
    v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
-6. 通用 Task CRD 只保存路由和唤醒信息，详细上下文由 runtime 按 Task ID 向 server 查询。简单 Operator
-   直接 Reconcile Task；领域状态、完成条件和外部事实复杂时，Operator 再创建并拥有自己的 CRD。
+6. v1alpha1 Task CRD 当前保存路由和唤醒信息，详细上下文由 runtime 按 Task ID 向 server 查询。公共协调
+   字段可按 Kubernetes API 兼容规则增量演进；领域状态复杂时，Operator 创建并拥有自己的 CRD。
 7. AgentLedger 承载完整执行历史、审计和成本记录，不替代 Conversation 与 Message 的页面业务存储。
 8. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
+9. 修改 `runtime/api/` 下的 CRD 类型后运行 `make generate manifests`，并提交生成的 DeepCopy 与 CRD YAML。
 
 ## References
 

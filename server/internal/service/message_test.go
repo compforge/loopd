@@ -19,8 +19,8 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	marker := &recordingTaskMarker{}
-	chat := NewChatService(store, marker, nil)
+	tasks := &recordingTaskClient{}
+	chat := NewChatService(store, tasks, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
@@ -41,11 +41,11 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	if answer.Kind != loopd.RoleHarness || answer.Key != "harness-1" {
 		t.Fatalf("answer identity = %s/%s", answer.Kind, answer.Key)
 	}
-	if marker.createdTaskID != answer.TaskID || marker.createdTarget != (loopd.ResponderRef{
+	if tasks.createdTaskID != answer.TaskID || tasks.createdTarget != (loopd.ResponderRef{
 		Kind: loopd.RoleHarness,
 		Key:  "harness-1",
 	}) {
-		t.Fatalf("created Task marker = %q %#v", marker.createdTaskID, marker.createdTarget)
+		t.Fatalf("created Task CRD = %q %#v", tasks.createdTaskID, tasks.createdTarget)
 	}
 
 	history, err := messages.ListMessages(ctx, conversation.ID, "", 100)
@@ -83,11 +83,11 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	}
 }
 
-func TestChatRollsBackMessagesWhenTaskMarkerFails(t *testing.T) {
+func TestChatRollsBackMessagesWhenTaskCreationFails(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, &recordingTaskMarker{createErr: errors.New("api unavailable")}, nil)
+	chat := NewChatService(store, &recordingTaskClient{createErr: errors.New("api unavailable")}, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
@@ -106,13 +106,13 @@ func TestChatRollsBackMessagesWhenTaskMarkerFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(history) != 0 {
-		t.Fatalf("task marker failure left messages: %#v", history)
+		t.Fatalf("Task creation failure left messages: %#v", history)
 	}
 }
 
-func TestChatDeletesTaskMarkerWhenDatabaseCommitFails(t *testing.T) {
-	marker := &recordingTaskMarker{}
-	chat := NewChatService(failingCommitRepository{}, marker, nil)
+func TestChatDeletesTaskWhenDatabaseCommitFails(t *testing.T) {
+	tasks := &recordingTaskClient{}
+	chat := NewChatService(failingCommitRepository{}, tasks, nil)
 
 	_, err := chat.Create(context.Background(), "conversation-1", "user-1", loopd.ResponderRef{
 		Kind: loopd.RoleOperator,
@@ -121,8 +121,8 @@ func TestChatDeletesTaskMarkerWhenDatabaseCommitFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("Create succeeded when database commit failed")
 	}
-	if marker.createdTaskID == "" || marker.deletedTaskID != marker.createdTaskID {
-		t.Fatalf("created Task %q, deleted Task %q", marker.createdTaskID, marker.deletedTaskID)
+	if tasks.createdTaskID == "" || tasks.deletedTaskID != tasks.createdTaskID {
+		t.Fatalf("created Task %q, deleted Task %q", tasks.createdTaskID, tasks.deletedTaskID)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestDetailConversationReferencesResponderMessage(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, nopTaskMarker{}, nil)
+	chat := NewChatService(store, nopTaskClient{}, nil)
 	ctx := context.Background()
 
 	root, err := conversations.CreateConversation(ctx, "Root", "")
@@ -165,26 +165,26 @@ func TestDetailConversationReferencesResponderMessage(t *testing.T) {
 	}
 }
 
-type nopTaskMarker struct{}
+type nopTaskClient struct{}
 
-func (nopTaskMarker) Create(context.Context, string, loopd.ResponderRef) error { return nil }
-func (nopTaskMarker) Delete(context.Context, string) error                     { return nil }
+func (nopTaskClient) Create(context.Context, string, loopd.ResponderRef) error { return nil }
+func (nopTaskClient) Delete(context.Context, string) error                     { return nil }
 
-type recordingTaskMarker struct {
+type recordingTaskClient struct {
 	createdTaskID string
 	createdTarget loopd.ResponderRef
 	deletedTaskID string
 	createErr     error
 }
 
-func (marker *recordingTaskMarker) Create(_ context.Context, taskID string, target loopd.ResponderRef) error {
-	marker.createdTaskID = taskID
-	marker.createdTarget = target
-	return marker.createErr
+func (client *recordingTaskClient) Create(_ context.Context, taskID string, target loopd.ResponderRef) error {
+	client.createdTaskID = taskID
+	client.createdTarget = target
+	return client.createErr
 }
 
-func (marker *recordingTaskMarker) Delete(_ context.Context, taskID string) error {
-	marker.deletedTaskID = taskID
+func (client *recordingTaskClient) Delete(_ context.Context, taskID string) error {
+	client.deletedTaskID = taskID
 	return nil
 }
 

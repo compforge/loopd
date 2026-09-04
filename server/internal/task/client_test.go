@@ -11,16 +11,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestKubernetesMarkerLifecycle(t *testing.T) {
+func TestClientLifecycle(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	kubeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	marker := NewKubernetesMarker(kubeClient, "loopd-system", 0)
+	tasks := NewClient(kubeClient, "loopd-system", 0)
 	target := loopd.ResponderRef{Kind: loopd.RoleOperator, Key: "operator-1"}
 
-	if err := marker.Create(context.Background(), "01991f3d-1110-7000-8000-000000000000", target); err != nil {
+	if err := tasks.Create(context.Background(), "01991f3d-1110-7000-8000-000000000000", target); err != nil {
 		t.Fatal(err)
 	}
 	var created taskv1alpha1.Task
@@ -28,10 +28,11 @@ func TestKubernetesMarkerLifecycle(t *testing.T) {
 	if err := kubeClient.Get(context.Background(), key, &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Spec.Target != target || created.Spec.Revision != 1 {
+	if created.Spec.Target.Kind != taskv1alpha1.TaskTargetKind(target.Kind) ||
+		created.Spec.Target.Key != target.Key || created.Spec.Revision != 1 {
 		t.Fatalf("created Task = %#v", created.Spec)
 	}
-	if err := marker.Delete(context.Background(), created.Name); err != nil {
+	if err := tasks.Delete(context.Background(), created.Name); err != nil {
 		t.Fatal(err)
 	}
 	if err := kubeClient.Get(context.Background(), key, &created); client.IgnoreNotFound(err) != nil || err == nil {

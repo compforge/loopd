@@ -25,7 +25,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	server := New(
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
-		service.NewChatService(store, nopTaskMarker{}, nil),
+		service.NewChatService(store, nopTaskClient{}, nil),
 		service.NewTaskService(store, nil),
 		nil,
 	)
@@ -84,10 +84,10 @@ func TestChatHTTPFlow(t *testing.T) {
 	}
 }
 
-type nopTaskMarker struct{}
+type nopTaskClient struct{}
 
-func (nopTaskMarker) Create(context.Context, string, loopd.ResponderRef) error { return nil }
-func (nopTaskMarker) Delete(context.Context, string) error                     { return nil }
+func (nopTaskClient) Create(context.Context, string, loopd.ResponderRef) error { return nil }
+func (nopTaskClient) Delete(context.Context, string) error                     { return nil }
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {
 	t.Helper()

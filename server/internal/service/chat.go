@@ -16,7 +16,7 @@ type ChatRepository interface {
 	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 }
 
-type TaskMarker interface {
+type TaskClient interface {
 	Create(context.Context, string, loopd.ResponderRef) error
 	Delete(context.Context, string) error
 }
@@ -25,13 +25,13 @@ type TaskMarker interface {
 // the visible message pair, creates the same-ID Task CRD before commit, and
 // returns the responder message that will be updated as work progresses.
 type ChatService struct {
-	repo       ChatRepository
-	taskMarker TaskMarker
-	logger     *slog.Logger
+	repo   ChatRepository
+	tasks  TaskClient
+	logger *slog.Logger
 }
 
-func NewChatService(repository ChatRepository, taskMarker TaskMarker, logger *slog.Logger) *ChatService {
-	return &ChatService{repo: repository, taskMarker: taskMarker, logger: loggerOrDefault(logger)}
+func NewChatService(repository ChatRepository, tasks TaskClient, logger *slog.Logger) *ChatService {
+	return &ChatService{repo: repository, tasks: tasks, logger: loggerOrDefault(logger)}
 }
 
 func (service *ChatService) Create(
@@ -46,7 +46,7 @@ func (service *ChatService) Create(
 	if userKey == "" || !responder.Valid() || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
-	if service.taskMarker == nil {
+	if service.tasks == nil {
 		return loopd.Message{}, ErrUnavailable
 	}
 
@@ -66,8 +66,8 @@ func (service *ChatService) Create(
 			Kind: string(responder.Kind), Key: responder.Key, Content: responderContent,
 		},
 		func(txCtx context.Context) error {
-			if err := service.taskMarker.Create(txCtx, taskID, responder); err != nil {
-				service.logger.ErrorContext(ctx, "create task marker failed",
+			if err := service.tasks.Create(txCtx, taskID, responder); err != nil {
+				service.logger.ErrorContext(ctx, "create task CRD failed",
 					"conversation_id", conversationID,
 					"task_id", taskID,
 					"responder_kind", responder.Kind,
@@ -84,14 +84,14 @@ func (service *ChatService) Create(
 	// the CRD was created but the database commit fails, compensate so an
 	// Operator cannot later reconcile a task whose visible chat state vanished.
 	if err != nil && taskCreated {
-		if cleanupErr := service.taskMarker.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
-			service.logger.ErrorContext(ctx, "delete rolled back task marker failed",
+		if cleanupErr := service.tasks.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
+			service.logger.ErrorContext(ctx, "delete rolled back task CRD failed",
 				"conversation_id", conversationID,
 				"task_id", taskID,
 				"error", cleanupErr,
 			)
 		} else {
-			service.logger.InfoContext(ctx, "rolled back task marker",
+			service.logger.InfoContext(ctx, "rolled back task CRD",
 				"conversation_id", conversationID,
 				"task_id", taskID,
 			)

@@ -29,12 +29,12 @@ func run() error {
 	address := envOr("LOOP_SERVER_ADDR", ":8080")
 	databasePath := envOr("LOOP_SERVER_DB", "loopd.db")
 	taskNamespace := envOr("LOOP_SERVER_TASK_NAMESPACE", "default")
-	taskMarker, err := newTaskMarker(taskNamespace)
+	tasks, err := newTaskClient(taskNamespace)
 	if err != nil {
 		return err
 	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{Path: databasePath}, Tasks: taskMarker, Logger: slog.Default(),
+		Database: server.DatabaseConfig{Path: databasePath}, Tasks: tasks, Logger: slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func run() error {
 	}
 }
 
-func newTaskMarker(namespace string) (server.TaskMarker, error) {
+func newTaskClient(namespace string) (server.TaskClient, error) {
 	scheme := runtime.NewScheme()
 	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("register loopd Task scheme: %w", err)
@@ -93,7 +93,7 @@ func newTaskMarker(namespace string) (server.TaskMarker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	return server.NewKubernetesTaskMarker(kubeClient, namespace, 10*time.Second), nil
+	return server.NewKubernetesTaskClient(kubeClient, namespace, 10*time.Second), nil
 }
 
 func envOr(name, fallback string) string {

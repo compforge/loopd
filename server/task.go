@@ -9,14 +9,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TaskMarker is the loop-server boundary for creating and compensating Task
-// CRDs inside the chat submission work unit.
-type TaskMarker interface {
+// TaskClient is the loop-server boundary for managing Task CRDs inside the
+// chat submission work unit.
+type TaskClient interface {
 	Create(context.Context, string, loopd.ResponderRef) error
 	Delete(context.Context, string) error
 }
 
-// NewKubernetesTaskMarker creates the loop-server Task CRD adapter.
-func NewKubernetesTaskMarker(kubeClient client.Client, namespace string, timeout time.Duration) TaskMarker {
-	return servertask.NewKubernetesMarker(kubeClient, namespace, timeout)
+// NewKubernetesTaskClient creates the loop-server Task CRD client.
+func NewKubernetesTaskClient(kubeClient client.Client, namespace string, timeout time.Duration) TaskClient {
+	return servertask.NewClient(kubeClient, namespace, timeout)
 }
