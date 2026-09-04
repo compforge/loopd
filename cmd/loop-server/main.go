@@ -30,14 +30,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	store, err := server.OpenStore(server.StoreConfig{Path: databasePath})
+	loopServer, err := server.New(server.Config{
+		Database: server.DatabaseConfig{Path: databasePath}, Responders: responders, Logger: slog.Default(),
+	})
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer loopServer.Close()
 
 	logger := slog.Default()
-	loopServer := server.New(store, server.Config{Responders: responders, Logger: logger})
 	httpServer := hertzserver.Default(
 		hertzserver.WithHostPorts(address),
 		hertzserver.WithTransport(standard.NewTransporter),

@@ -60,7 +60,7 @@ loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行�
 | 概念 | 语义与 owner |
 |---|---|
 | **Conversation** | loop-server 拥有的持久协作空间；历史属于 Conversation，不属于某个 Operator 或 Harness |
-| **Message** | Conversation 中一次有序表达；author role 为 `user`、`operator` 或 `harness` |
+| **Message** | Conversation 中一次有序表达；`kind + key` 标识发送者，content 保存 AgentUE semantic model 快照 |
 | **Invocation** | 一条用户 Message 请求某个 Operator 或 Harness 作答的处理实例；连接输入、过程和最终回答 |
 | **Harness Call** | 一次可恢复、可流式观察的 Harness 执行；直接问答通常有一个 Call，Operator 可以拥有零到多个 Call |
 | **Interaction** | Operator 或 Harness 等待 Human 给出 typed answer/confirmation 的持久协作对象 |
@@ -149,11 +149,11 @@ spec:
     invocationID: inv-123
     conversationID: conv-123
     inputMessageID: msg-456
-    contextThroughSeq: 17
+    contextThroughMessageID: 01991f3d-1112-7000-8000-000000000000
 ```
 
 Reconciler 通过 loop-runtime 读取 Invocation Context。默认 Context 固定在 Invocation 创建时的
-`contextThroughSeq`，使同一次 Reconcile 在重试时看到稳定输入，而不是被后来进入 Conversation 的消息
+`contextThroughMessageID`，使同一次 Reconcile 在重试时看到稳定输入，而不是被后来进入 Conversation 的消息
 悄悄改变语义。
 
 Operator 如果确实需要后续消息，应显式读取水位之后的 History。Ask/Confirm 的回答由 Interaction identity

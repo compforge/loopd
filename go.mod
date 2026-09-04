@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/cloudwego/hertz v0.10.4
+	github.com/qiankunli/go-stdx v0.0.4-0.20260824051808-f7f6d7c53de2
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -16,6 +17,7 @@ require (
 	github.com/cloudwego/gopkg v0.1.4 // indirect
 	github.com/cloudwego/netpoll v0.7.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
