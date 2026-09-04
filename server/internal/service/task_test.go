@@ -10,7 +10,7 @@ import (
 func TestTaskContextComesFromMessages(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
-	chat := NewChatService(store, nopTaskClient{}, nil)
+	chat := NewChatService(store, nopTaskClient{}, nopChatRunner{}, nil)
 	tasks := NewTaskService(store, nil)
 	ctx := context.Background()
 
@@ -18,7 +18,7 @@ func TestTaskContextComesFromMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := chat.Create(ctx, conversation.ID, "user-1", loopd.ResponderRef{
+	answer, err := chat.Create(ctx, conversation.ID, "user-1", loopd.ActorRef{
 		Kind: loopd.RoleOperator,
 		Key:  "operator-1",
 	}, textContent("question"))

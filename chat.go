@@ -42,7 +42,7 @@ type Invocation struct {
 	ConversationID          string          `json:"conversation_id"`
 	InputMessageID          string          `json:"input_message_id"`
 	OutputMessageID         string          `json:"output_message_id,omitempty"`
-	Responder               ResponderRef    `json:"responder"`
+	Target                  ActorRef        `json:"target"`
 	ContextThroughMessageID string          `json:"context_through_message_id"`
 	Phase                   InvocationPhase `json:"phase"`
 	Resource                *ResourceRef    `json:"resource,omitempty"`
@@ -72,7 +72,7 @@ type Activity struct {
 	InvocationID string        `json:"invocation_id"`
 	Key          string        `json:"key"`
 	ParentID     string        `json:"parent_id,omitempty"`
-	Actor        ResponderRef  `json:"actor"`
+	Actor        ActorRef      `json:"actor"`
 	Kind         string        `json:"kind"`
 	Title        string        `json:"title"`
 	Detail       string        `json:"detail,omitempty"`
@@ -97,7 +97,7 @@ type OperatorEvent struct {
 type ActivityUpdate struct {
 	Key      string        `json:"key"`
 	ParentID string        `json:"parent_id,omitempty"`
-	Actor    ResponderRef  `json:"actor"`
+	Actor    ActorRef      `json:"actor"`
 	Kind     string        `json:"kind"`
 	Title    string        `json:"title"`
 	Detail   string        `json:"detail,omitempty"`

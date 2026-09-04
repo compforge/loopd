@@ -32,7 +32,7 @@ type Interaction struct {
 	InvocationID string              `json:"invocation_id"`
 	OwnerUID     string              `json:"owner_uid"`
 	EffectKey    string              `json:"effect_key"`
-	Requester    ResponderRef        `json:"requester"`
+	Requester    ActorRef            `json:"requester"`
 	Kind         InteractionKind     `json:"kind"`
 	Title        string              `json:"title,omitempty"`
 	Prompt       string              `json:"prompt"`

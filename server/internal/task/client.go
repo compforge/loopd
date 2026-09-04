@@ -29,7 +29,7 @@ func NewClient(kubeClient controllerclient.Client, namespace string, timeout tim
 	return &Client{kubeClient: kubeClient, namespace: namespace, timeout: timeout}
 }
 
-func (client *Client) Create(ctx context.Context, taskID string, target loopd.ResponderRef) error {
+func (client *Client) Create(ctx context.Context, taskID string, target loopd.ActorRef) error {
 	ctx, cancel := context.WithTimeout(ctx, client.timeout)
 	defer cancel()
 

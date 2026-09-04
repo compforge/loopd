@@ -18,7 +18,7 @@ func TestClientLifecycle(t *testing.T) {
 	}
 	kubeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	tasks := NewClient(kubeClient, "loopd-system", 0)
-	target := loopd.ResponderRef{Kind: loopd.RoleOperator, Key: "operator-1"}
+	target := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator-1"}
 
 	if err := tasks.Create(context.Background(), "01991f3d-1110-7000-8000-000000000000", target); err != nil {
 		t.Fatal(err)

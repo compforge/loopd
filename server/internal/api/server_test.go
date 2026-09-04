@@ -1,17 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/cloudwego/hertz/pkg/route/param"
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 )
@@ -25,7 +29,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	server := New(
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
-		service.NewChatService(store, nopTaskClient{}, nil),
+		service.NewChatService(store, nopTaskClient{}, completedChatRunner{}, nil),
 		service.NewTaskService(store, nil),
 		nil,
 	)
@@ -41,22 +45,18 @@ func TestChatHTTPFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sent := performJSON(t, engine, "POST", "/v1/conversations/"+conversation.ID+"/messages", `{
+	taskID, stream := performChat(t, server, conversation.ID, `{
 		"user_key":"user-1",
-		"responder":{"kind":"operator","key":"intent"},
+		"target":{"kind":"operator","key":"intent"},
 		"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}
 	}`)
-	if sent.StatusCode() != 201 {
-		t.Fatalf("send status=%d body=%s", sent.StatusCode(), sent.Body())
+	if !strings.Contains(stream, `"op":"start"`) || !strings.Contains(stream, `"op":"end"`) {
+		t.Fatalf("send body=%s, want AgentUE start and end events", stream)
 	}
-	var answer loopd.Message
-	if err := json.Unmarshal(sent.Body(), &answer); err != nil {
-		t.Fatal(err)
+	if taskID == "" {
+		t.Fatal("send response omitted task ID header")
 	}
-	if answer.Kind != loopd.RoleOperator || answer.Key != "intent" || answer.TaskID == "" {
-		t.Fatalf("answer = %#v", answer)
-	}
-	taskResponse := ut.PerformRequest(engine, "GET", "/v1/tasks/"+answer.TaskID, nil).Result()
+	taskResponse := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID, nil).Result()
 	if taskResponse.StatusCode() != 200 {
 		t.Fatalf("task status=%d body=%s", taskResponse.StatusCode(), taskResponse.Body())
 	}
@@ -64,7 +64,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(taskResponse.Body(), &task); err != nil {
 		t.Fatal(err)
 	}
-	if task.ID != answer.TaskID || task.Input.Kind != loopd.RoleUser || task.Response.ID != answer.ID {
+	if task.ID != taskID || task.Input.Kind != loopd.RoleUser || task.Response.Kind != loopd.RoleOperator {
 		t.Fatalf("task = %#v", task)
 	}
 
@@ -76,18 +76,58 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(history.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data) != 2 || result.Data[0].TaskID != answer.TaskID || result.Data[1].ID != answer.ID {
+	if len(result.Data) != 2 || result.Data[0].TaskID != taskID || result.Data[1].ID != task.Response.ID {
 		t.Fatalf("history = %#v", result.Data)
 	}
-	if response := ut.PerformRequest(engine, "GET", "/v1/responders", nil).Result(); response.StatusCode() != 404 {
-		t.Fatalf("responders status=%d, want 404", response.StatusCode())
+	if response := ut.PerformRequest(engine, "GET", "/v1/actors", nil).Result(); response.StatusCode() != 404 {
+		t.Fatalf("actors status=%d, want 404", response.StatusCode())
 	}
 }
 
 type nopTaskClient struct{}
 
-func (nopTaskClient) Create(context.Context, string, loopd.ResponderRef) error { return nil }
-func (nopTaskClient) Delete(context.Context, string) error                     { return nil }
+func (nopTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
+func (nopTaskClient) Delete(context.Context, string) error                 { return nil }
+
+type completedChatRunner struct{}
+
+func (completedChatRunner) Initialize(context.Context, string, json.RawMessage) error { return nil }
+func (completedChatRunner) Delete(context.Context, string) error                      { return nil }
+func (completedChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
+	return "", nil
+}
+
+type streamWriter struct{ bytes.Buffer }
+
+func (writer *streamWriter) Flush() error    { return nil }
+func (writer *streamWriter) Finalize() error { return nil }
+
+func performChat(t *testing.T, server *Server, conversationID, body string) (string, string) {
+	t.Helper()
+	request := hertzapp.NewContext(1)
+	request.Params = param.Params{{Key: "conversation_id", Value: conversationID}}
+	request.Request.SetBodyString(body)
+	request.Request.Header.Set("Content-Type", "application/json")
+	writer := &streamWriter{}
+	request.Response.HijackWriter(writer)
+	if err := server.createChatMessages(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	return string(request.Response.Header.Peek(taskIDHeader)), writer.String()
+}
+func (completedChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
+func (completedChatRunner) Stream(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ string,
+	deliver func(delivery.Event) error,
+) error {
+	if err := deliver(delivery.Event{Cursor: "1-0", Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`), Persisted: true}); err != nil {
+		return err
+	}
+	return deliver(delivery.Event{Cursor: "2-0", Data: json.RawMessage(`{"op":"end","seq":2}`), Persisted: true})
+}
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {
 	t.Helper()

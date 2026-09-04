@@ -28,13 +28,20 @@ func main() {
 func run() error {
 	address := envOr("LOOP_SERVER_ADDR", ":8080")
 	databasePath := envOr("LOOP_SERVER_DB", "loopd.db")
+	redisAddress := envOr("LOOP_SERVER_REDIS_ADDR", "127.0.0.1:6379")
 	taskNamespace := envOr("LOOP_SERVER_TASK_NAMESPACE", "default")
 	tasks, err := newTaskClient(taskNamespace)
 	if err != nil {
 		return err
 	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{Path: databasePath}, Tasks: tasks, Logger: slog.Default(),
+		Database: server.DatabaseConfig{Path: databasePath},
+		Redis: server.RedisConfig{
+			Address:  redisAddress,
+			Username: os.Getenv("LOOP_SERVER_REDIS_USERNAME"),
+			Password: os.Getenv("LOOP_SERVER_REDIS_PASSWORD"),
+		},
+		Tasks: tasks, Logger: slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -63,6 +70,7 @@ func run() error {
 		logger.Info("loop-server listening",
 			"address", address,
 			"database", databasePath,
+			"redis_address", redisAddress,
 			"task_namespace", taskNamespace,
 		)
 		serveErr <- httpServer.Run()

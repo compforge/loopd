@@ -17,7 +17,7 @@ loopd 的定位分为三个维度：
 一句话概括：
 
 > Human 在持久 Conversation 中向 Harness 或 Operator 提出目标；loop-server 创建 Task CRD 唤醒
-> responder，Operator 按需建立领域 CRD、调用 Harness，并把过程与结果带回同一 Conversation。
+> 选定的 Actor，Operator 按需建立领域 CRD、调用 Harness，并把过程与结果带回同一 Conversation。
 
 loopd 在四层 Agent 技术体系中的位置如下：
 
@@ -37,7 +37,7 @@ loopd 的公开协作角色只有三类：
 
 | 参与者 | 职责 |
 |---|---|
-| **Human** | 提出目标、选择 responder、补充上下文、回答 Interaction，并判断结果是否满足需要 |
+| **Human** | 提出目标、选择 Actor、补充上下文、回答 Interaction，并判断结果是否满足需要 |
 | **Harness** | 接受 prompt 与 tools，执行一次可流式观察的智能任务；既可直接回答 Human，也可被 Operator 调用 |
 | **Operator** | Reconcile loopd Task，读取外部事实并决定何时调用 Harness、询问 Human、等待或结束；复杂业务可以拥有领域 CRD |
 
@@ -53,6 +53,9 @@ user | harness | operator
 外部系统可能把某个执行目标称为 Agent、Assistant 或 Session；接入 loopd 后统一表现为 Harness。
 loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行的 Agent 概念。
 
+公共类型用 `ActorRef {kind, key}` 表达参与者身份，用 `target` 表达本次请求选中的执行目标。`Member` 留给
+未来真实存在的 Operator 团队或可见性成员关系，避免把“能参与一次对话”和“隶属于某个集合”混为一谈。
+
 ## 3. 核心协作对象
 
 三类参与者通过少量具有稳定身份和生命周期的对象协作：
@@ -61,7 +64,7 @@ loopd Core、公共 API、数据库和 UI 不再建立一套与 Harness 平行�
 |---|---|
 | **Conversation** | loop-server 拥有的持久协作空间；历史属于 Conversation，不属于某个 Operator 或 Harness |
 | **Message** | Conversation 中一次页面可见表达；`task_id + kind + key` 标识问答任务与发送者，content 保存 AgentUE semantic model 快照 |
-| **Task** | loop-server 为一次问答创建的通用 CRD；只保存 responder 路由与唤醒版本，名称即 Message 使用的 `task_id` |
+| **Task** | loop-server 为一次问答创建的通用 CRD；只保存目标 Actor 路由与唤醒版本，名称即 Message 使用的 `task_id` |
 | **Operator Resource** | 复杂 Operator 按需创建并拥有的领域 CRD；记录该领域独有的目标、状态和完成条件 |
 | **Harness Execution** | Harness 自己拥有的执行；可耗时、流式返回，完整轨迹由 AgentLedger 记录 |
 
@@ -99,7 +102,7 @@ metadata:
 spec:
   target:
     kind: operator | harness
-    key: <responder-key>
+    key: <actor-key>
   revision: 1
 ```
 
@@ -118,6 +121,7 @@ Auditor，其他 Operator 可以采用完全不同的 Resource；这些领域概
 ```text
 Human
   → create user Message + empty harness Message (same task_id)
+  → initialize the same-ID AgentUE event stream
   → create same-ID Task CRD before the database commit
   → Harness starts or resumes its execution
   → project visible stream into the harness Message
@@ -133,6 +137,7 @@ Harness 的流式文本可以直接构成主回答，可见工具状态可以投
 ```text
 Human
   → create user Message + empty operator Message (same task_id)
+  → initialize the same-ID AgentUE event stream
   → create same-ID Task CRD before the database commit
   → Operator Reconciler resolves Conversation context through loop-runtime
   → optionally create or update an Operator-owned domain CRD
@@ -149,12 +154,16 @@ Operator 内部 Harness 的输出默认属于详情会话或 AgentLedger，不�
 内容才成为 `operator` 角色的最终回答；Operator 也可以选择把某个 Harness 结果显式公开为 Conversation
 Message。
 
+首次观察与断线续接使用同一个 Chat API：请求不带 `task_id` 时创建问答和 Task，带 `task_id` 时观察已有
+Task；`Last-Event-ID` 只表示客户端已消费的 Redis transport cursor。HTTP 资源模型不额外暴露 Replay
+接口，续接后的 AgentUE delivery 仍然从重建的完整 `start` 开始。
+
 ## 6. Conversation Context
 
 Conversation History 是 loop-server 的事实，不属于任何 Operator 或 Harness。同一 Conversation 可以先后
 由不同 Operator 和 Harness 参与，它们都可以在授权范围内读取已有历史。
 
-v1alpha1 Task CRD 不复制完整对话，当前保存 responder 路由与唤醒版本。loop-server 根据 Task ID 从主
+v1alpha1 Task CRD 不复制完整对话，当前保存目标 Actor 路由与唤醒版本。loop-server 根据 Task ID 从主
 Conversation Message 即时组装上下文：
 
 ```text
@@ -177,10 +186,11 @@ Human interaction 的控制骨架：
 ```text
 Chat.Conversation 读取 Conversation
 Chat.History     显式读取 Conversation 的增量历史
-Chat.Send        创建 user、responder Message 与 Task CRD，并返回 responder Message
-Chat.Update      更新 responder Message 的可见语义快照
+Chat.Send        首次请求创建两条 Message 与 Task CRD；带 task_id 时续接同一 AgentUE 事件流
+Chat.Emit        Operator 发布 set/append 页面事件
+Chat.Complete    折叠事件并固化 response Message，然后结束事件流
 Task.Get         按 Task ID 读取当前 input、response 与 Conversation History
-Task.Watch       为指定 responder 注册 Task Reconciler
+Task.Watch       为指定 Actor 注册 Task Reconciler
 Harness.Prompt   以 prompt、tools 和可选 Harness target 发起或恢复一次 Call
 Ask / Confirm    请求 Human 提供信息或确认决定
 ```
@@ -233,9 +243,9 @@ loop-server 是页面协作事实和 Task 分发的 owner：
 
 - Conversation 代表一个对话框；
 - Message 是页面可见对话历史的事实来源；
-- 同一次问答的 user、responder 及后续可见交互共享 `task_id`；
+- 同一次问答的 user、response 及后续可见交互共享 `task_id`；
 - Message content 可以投影 Activity、Artifact 等页面需要展示的内容。
-- Task CRD 以同一个 `task_id` 命名；v1alpha1 当前承载 responder 路由与可推进版本。
+- Task CRD 以同一个 `task_id` 命名；v1alpha1 当前承载目标 Actor 路由与可推进版本。
 
 loop-server 不建立 `tasks` 表，也不保存 Operator 领域表。Task 查询是基于 Message 的实时视图；通用
 Activity 只承载跨 Operator 都能理解的处理摘要，更丰富的领域详情留在 Operator Resource，必要时通过
@@ -244,26 +254,27 @@ Activity 只承载跨 Operator 都能理解的处理摘要，更丰富的领域�
 AgentLedger 记录 prompt、模型事件、Harness Call、tool call/result、重试和成本等完整执行事实，用于审计、
 回放和分析；它不承担页面 Conversation History，因此不能替代 loop-server 的两表业务模型。
 
-AgentUE 在 loopd 中定义页面语义模型。AgentUE Runner 当前负责 Python 后台任务、Redis 事件桥和 heartbeat
-recovery；直接把它嵌入 Go loop-server 会与 Harness provider、Task 和领域 CRD 形成多个执行 owner。因此
-v1 只复用 AgentUE 的页面模型，不把 AgentUE Runner 作为 loopd 的执行 owner。
+AgentUE 在 loopd 中定义页面语义模型，并提供不拥有业务任务的 Redis Event Bridge。Operator 通过
+loop-runtime 发布 `set/append`；任意 loop-server 实例都可按 `task_id` 和 transport cursor 重建完整
+`start` 快照并继续输出。loop-server 在完成阶段把最终快照写入 Message。AgentUE 不创建 Task、不调用
+Harness，也不成为 Operator 执行的 owner。
 
 ## 10. 关键不变量
 
 1. **公开角色只有三种**：Conversation 中只使用 `user`、`harness`、`operator`；外部 provider 的术语不
    扩散到 loopd Core。
-2. **Conversation 独立于 responder**：历史属于 Human 持有的 Conversation，不因切换 Operator 或 Harness
+2. **Conversation 独立于 Actor**：历史属于 Human 持有的 Conversation，不因切换 Operator 或 Harness
    被复制或切断。
 3. **Task 从分发和唤醒起步**：v1alpha1 保持最小；后续只增加通用协调字段，不复制 Query、History、
    回答和 Operator 领域状态。
 4. **领域 CRD 按复杂度引入**：简单 Operator 直接 Reconcile Task；复杂 Operator 自己拥有领域 Resource。
-5. **一次问答有稳定 task identity**：初始 user/responder Message 和后续反问、确认共享同一 `task_id`。
+5. **一次问答有稳定 task identity**：初始 user/response Message 和后续反问、确认共享同一 `task_id`。
 6. **外部动作先获得持久 identity**：同一 owner 与 effect key 的重试必须观察或恢复同一次 Harness Call，
    不能重复触发无法证明结果的副作用。
 7. **流式响应与完成正交**：有事件表示 Call 有进展，不表示成功；长时间运行也不能被等同于失联。
 8. **上下文有明确边界**：TaskContext 给出当前输入、回答和 History 水位；复杂 Operator 可以把所需引用
    保存到自己的 Resource。
-9. **最终回答由 responder 收口**：直连 Harness 由 Harness 回答；Operator 内部可以调用多个 Harness，但由
+9. **最终回答由目标 Actor 收口**：直连 Harness 由 Harness 回答；Operator 内部可以调用多个 Harness，但由
    Operator 汇总并回答。
 10. **可见历史与完整轨迹分层**：Message 只保存页面可见快照，AgentLedger 保存完整执行轨迹。
 11. **Harness 差异止于 Adapter**：新增 agentd 或第三方 Harness 不应要求修改 Conversation 或 Operator 模型。

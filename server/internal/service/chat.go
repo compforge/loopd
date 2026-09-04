@@ -3,12 +3,16 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
+	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
@@ -17,63 +21,91 @@ type ChatRepository interface {
 }
 
 type TaskClient interface {
-	Create(context.Context, string, loopd.ResponderRef) error
+	Create(context.Context, string, loopd.ActorRef) error
 	Delete(context.Context, string) error
+}
+
+type ChatDelivery interface {
+	Initialize(context.Context, string, json.RawMessage) error
+	Delete(context.Context, string) error
+	Emit(context.Context, string, json.RawMessage) (string, error)
+	Complete(context.Context, string, *delivery.Failure) error
+	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
 // ChatService owns the transaction boundary for one user question. It writes
 // the visible message pair, creates the same-ID Task CRD before commit, and
-// returns the responder message that will be updated as work progresses.
+// returns the selected Actor's message that will be updated as work progresses.
 type ChatService struct {
-	repo   ChatRepository
-	tasks  TaskClient
-	logger *slog.Logger
+	repo     ChatRepository
+	tasks    TaskClient
+	delivery ChatDelivery
+	logger   *slog.Logger
 }
 
-func NewChatService(repository ChatRepository, tasks TaskClient, logger *slog.Logger) *ChatService {
-	return &ChatService{repo: repository, tasks: tasks, logger: loggerOrDefault(logger)}
+func NewChatService(repository ChatRepository, tasks TaskClient, chatDelivery ChatDelivery, logger *slog.Logger) *ChatService {
+	return &ChatService{repo: repository, tasks: tasks, delivery: chatDelivery, logger: loggerOrDefault(logger)}
 }
 
 func (service *ChatService) Create(
 	ctx context.Context,
 	conversationID string,
 	userKey string,
-	responder loopd.ResponderRef,
+	target loopd.ActorRef,
 	content json.RawMessage,
 ) (loopd.Message, error) {
 	userKey = strings.TrimSpace(userKey)
-	responder.Key = strings.TrimSpace(responder.Key)
-	if userKey == "" || !responder.Valid() || validateContent(content) != nil {
+	target.Key = strings.TrimSpace(target.Key)
+	if userKey == "" || !target.ValidTarget() || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
-	if service.tasks == nil {
+	if service.tasks == nil || service.delivery == nil {
 		return loopd.Message{}, ErrUnavailable
 	}
 
 	taskID := uuid.V7()
-	responderContent, err := emptyContent(content)
+	responseContent, err := emptyContent(content)
 	if err != nil {
 		return loopd.Message{}, ErrInvalid
 	}
+	userMessage := model.Message{
+		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
+		Kind: string(loopd.RoleUser), Key: userKey, Content: content,
+	}
+	responseMessage := model.Message{
+		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
+		Kind: string(target.Kind), Key: target.Key, Content: responseContent,
+	}
 	taskCreated := false
+	streamCreated := false
 	message, err := service.repo.CreateChatMessages(ctx,
-		model.Message{
-			ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-			Kind: string(loopd.RoleUser), Key: userKey, Content: content,
-		},
-		model.Message{
-			ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-			Kind: string(responder.Kind), Key: responder.Key, Content: responderContent,
-		},
+		userMessage,
+		responseMessage,
 		func(txCtx context.Context) error {
-			if err := service.tasks.Create(txCtx, taskID, responder); err != nil {
+			if err := service.delivery.Initialize(txCtx, taskID, responseContent); err != nil {
+				service.logger.ErrorContext(ctx, "initialize chat event stream failed",
+					"conversation_id", conversationID,
+					"task_id", taskID,
+					"error", err,
+				)
+				return fmt.Errorf("%w: %v", ErrUnavailable, err)
+			}
+			streamCreated = true
+			if err := service.tasks.Create(txCtx, taskID, target); err != nil {
 				service.logger.ErrorContext(ctx, "create task CRD failed",
 					"conversation_id", conversationID,
 					"task_id", taskID,
-					"responder_kind", responder.Kind,
-					"responder_key", responder.Key,
+					"target_kind", target.Kind,
+					"target_key", target.Key,
 					"error", err,
 				)
+				if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
+					service.logger.ErrorContext(ctx, "delete rolled back chat event stream failed",
+						"task_id", taskID,
+						"error", cleanupErr,
+					)
+				}
+				streamCreated = false
 				return fmt.Errorf("%w: %v", ErrUnavailable, err)
 			}
 			taskCreated = true
@@ -97,16 +129,84 @@ func (service *ChatService) Create(
 			)
 		}
 	}
+	if err != nil && streamCreated {
+		if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
+			service.logger.ErrorContext(ctx, "delete rolled back chat event stream failed",
+				"task_id", taskID,
+				"error", cleanupErr,
+			)
+		}
+	}
 	if err == nil {
 		service.logger.InfoContext(ctx, "chat task created",
 			"conversation_id", conversationID,
 			"task_id", taskID,
-			"responder_message_id", message.ID,
-			"responder_kind", responder.Kind,
-			"responder_key", responder.Key,
+			"actor_message_id", message.ID,
+			"target_kind", target.Kind,
+			"target_key", target.Key,
 		)
 	}
 	return messageFromModel(message), err
+}
+
+func (service *ChatService) Stream(
+	ctx context.Context,
+	conversationID string,
+	taskID string,
+	after string,
+	deliver func(delivery.Event) error,
+) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return ErrInvalid
+	}
+	service.logger.InfoContext(ctx, "chat stream opened",
+		"conversation_id", conversationID,
+		"task_id", taskID,
+		"after", after,
+	)
+	err := mapDeliveryError(service.delivery.Stream(ctx, taskID, conversationID, after, deliver))
+	service.logger.InfoContext(ctx, "chat stream closed",
+		"conversation_id", conversationID,
+		"task_id", taskID,
+		"error", err,
+	)
+	return err
+}
+
+func (service *ChatService) Emit(ctx context.Context, taskID string, event json.RawMessage) (string, error) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return "", ErrInvalid
+	}
+	cursor, err := service.delivery.Emit(ctx, taskID, event)
+	if err == nil {
+		service.logger.DebugContext(ctx, "chat event published", "task_id", taskID, "cursor", cursor)
+	}
+	return cursor, mapDeliveryError(err)
+}
+
+func (service *ChatService) Complete(ctx context.Context, taskID string, failure *delivery.Failure) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return ErrInvalid
+	}
+	return mapDeliveryError(service.delivery.Complete(ctx, taskID, failure))
+}
+
+func mapDeliveryError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, agentuerunner.ErrNotFound):
+		return repo.ErrNotFound
+	case errors.Is(err, agentuerunner.ErrConflict):
+		return ErrConflict
+	case errors.Is(err, delivery.ErrInvalidEvent):
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	default:
+		return err
+	}
 }
 
 func emptyContent(content json.RawMessage) (json.RawMessage, error) {

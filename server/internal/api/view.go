@@ -25,11 +25,25 @@ type createConversationRequest struct {
 }
 
 type createChatMessagesRequest struct {
-	UserKey   string             `json:"user_key"`
-	Responder loopd.ResponderRef `json:"responder"`
-	Content   json.RawMessage    `json:"content"`
+	TaskID  string          `json:"task_id,omitempty"`
+	UserKey string          `json:"user_key,omitempty"`
+	Target  loopd.ActorRef  `json:"target,omitempty"`
+	Content json.RawMessage `json:"content,omitempty"`
 }
 
-type updateMessageContentRequest struct {
-	Content json.RawMessage `json:"content"`
+type appendTaskEventRequest struct {
+	Event json.RawMessage `json:"event"`
+}
+
+type appendTaskEventResponse struct {
+	Cursor string `json:"cursor"`
+}
+
+type completeTaskRequest struct {
+	Error *taskFailure `json:"error,omitempty"`
+}
+
+type taskFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }

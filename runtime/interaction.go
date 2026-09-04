@@ -13,7 +13,7 @@ type InteractionPrompt struct {
 	InvocationID string
 	OwnerUID     string
 	EffectKey    string
-	Requester    loopd.ResponderRef
+	Requester    loopd.ActorRef
 	Title        string
 	Text         string
 	Options      []loopd.InteractionOption
