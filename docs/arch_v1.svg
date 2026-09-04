@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980" role="img" aria-labelledby="title desc">
+  <title id="title">loopd Agent orchestration architecture</title>
+  <desc id="desc">Human uses loop-server conversations. A Task CRD wakes an Operator, which owns its domain Resource and reconciles through loop-runtime Effects. Harness adapters connect agentd and other Harnesses. AgentUE carries visible progress while AgentLedger stores complete execution facts.</desc>
+
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#111827" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+    <marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+    <style>
+      text {
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+        fill: #111827;
+      }
+      .actor {
+        stroke: #111827;
+        stroke-width: 2.5;
+        filter: url(#shadow);
+      }
+      .actor-title {
+        font-size: 27px;
+        font-weight: 720;
+        text-anchor: middle;
+      }
+      .actor-detail {
+        font-size: 16px;
+        fill: #4b5563;
+        text-anchor: middle;
+      }
+      .port-line {
+        stroke: #374151;
+        stroke-width: 3;
+        marker-start: url(#arrow-start);
+        marker-end: url(#arrow);
+      }
+      .port-pill {
+        fill: #ffffff;
+        stroke: #9ca3af;
+        stroke-width: 1.5;
+      }
+      .port-label {
+        font-size: 15px;
+        font-weight: 650;
+        text-anchor: middle;
+      }
+      .operator-card {
+        fill: #ffffff;
+        stroke: #3f7650;
+        stroke-width: 2;
+      }
+      .operator-node {
+        fill: #edf8f0;
+        stroke: #8bb498;
+        stroke-width: 1.5;
+      }
+      .operator-flow {
+        fill: none;
+        stroke: #3f7650;
+        stroke-width: 2.2;
+        marker-end: url(#arrow);
+      }
+      .effect-pill {
+        fill: #fff7da;
+        stroke: #b28b24;
+        stroke-width: 1.5;
+      }
+      .core-card {
+        fill: #ffffff;
+        stroke: #6080b8;
+        stroke-width: 2;
+      }
+      .core-pill {
+        fill: #f7faff;
+        stroke: #8da7d3;
+        stroke-width: 1.5;
+      }
+      .ledger-line {
+        fill: none;
+        stroke: #8c6b3f;
+        stroke-width: 2.2;
+        stroke-dasharray: 8 7;
+        marker-end: url(#arrow);
+      }
+    </style>
+  </defs>
+
+  <rect width="1800" height="980" fill="#fbfcfe"/>
+
+  <text x="70" y="54" font-size="36" font-weight="760">loopd</text>
+  <text x="70" y="88" font-size="19" fill="#6b7280">一个面向 Human · Operator · Harness 的服务端 Agent 编排平台</text>
+
+  <!-- Business-owned Operators share one stable loopd runtime. -->
+  <rect x="350" y="115" width="1035" height="300" rx="26" fill="#e7f5eb" stroke="#3f7650" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="385" y="158" font-size="26" font-weight="720">Operators · 业务编排层</text>
+  <text x="1345" y="158" font-size="16" fill="#3f7650" font-weight="650" text-anchor="end">one biz domain = one Operator</text>
+
+  <rect class="operator-card" x="385" y="182" width="320" height="165" rx="18"/>
+  <text class="actor-title" x="545" y="226">Router</text>
+  <text class="actor-detail" x="545" y="257">识别意图 · 拆分任务</text>
+  <text class="actor-detail" x="545" y="283">并行调用 · 汇总回答</text>
+  <rect class="operator-node" x="415" y="302" width="260" height="30" rx="15"/>
+  <text x="545" y="323" font-size="13" font-weight="650" text-anchor="middle">Task → plan → fan-out → answer</text>
+
+  <rect class="operator-card" x="735" y="168" width="615" height="198" rx="18"/>
+  <text class="actor-title" x="1042" y="208">LoopHorizon · Long-running loop</text>
+  <text class="actor-detail" x="1042" y="235">Manager · Executor · Auditor</text>
+
+  <rect class="operator-node" x="765" y="253" width="180" height="34" rx="17"/>
+  <text x="855" y="276" font-size="14" font-weight="650" text-anchor="middle">Resource · spec/status</text>
+  <line class="operator-flow" x1="950" y1="270" x2="972" y2="270"/>
+
+  <rect class="operator-node" x="980" y="253" width="125" height="34" rx="17"/>
+  <text x="1042" y="276" font-size="14" font-weight="650" text-anchor="middle">reconcile</text>
+  <line class="operator-flow" x1="1110" y1="270" x2="1132" y2="270"/>
+
+  <rect class="operator-node" x="1140" y="253" width="180" height="34" rx="17"/>
+  <text x="1230" y="276" font-size="14" font-weight="650" text-anchor="middle">Connector</text>
+
+  <rect class="effect-pill" x="850" y="305" width="155" height="34" rx="17"/>
+  <text x="927" y="328" font-size="14" font-weight="650" text-anchor="middle">Ask / Confirm</text>
+  <rect class="effect-pill" x="1025" y="305" width="205" height="34" rx="17"/>
+  <text x="1127" y="328" font-size="14" font-weight="650" text-anchor="middle">Harness.Prompt</text>
+  <line class="operator-flow" x1="1022" y1="289" x2="940" y2="302"/>
+  <line class="operator-flow" x1="1062" y1="289" x2="1122" y2="302"/>
+  <text x="1042" y="357" font-size="13" fill="#4b5563" text-anchor="middle">observe → compare → act → update status</text>
+
+  <text x="868" y="398" font-size="15" fill="#4b5563" text-anchor="middle">业务定义 Resource、判断逻辑与完成条件；loopd 不内建固定 Workflow 或 Agent Team。</text>
+
+  <line class="port-line" x1="1355" y1="270" x2="1480" y2="270"/>
+  <text x="1418" y="248" font-size="14" fill="#4b5563" font-weight="650" text-anchor="middle">observe · act</text>
+  <rect class="actor" x="1490" y="222" width="250" height="96" rx="42" fill="#eee7ff"/>
+  <text x="1615" y="260" font-size="21" font-weight="700" text-anchor="middle">External systems</text>
+  <text x="1615" y="288" font-size="15" fill="#4b5563" text-anchor="middle">deployment · test · data</text>
+
+  <!-- Task and Effect are the two stable boundaries between domain Operators and loopd. -->
+  <line class="port-line" x1="600" y1="419" x2="600" y2="530"/>
+  <rect class="port-pill" x="463" y="447" width="274" height="40" rx="20"/>
+  <text class="port-label" x="600" y="473">Task CRD · route / wake</text>
+
+  <line class="port-line" x1="1130" y1="419" x2="1130" y2="530"/>
+  <rect class="port-pill" x="1012" y="447" width="236" height="40" rx="20"/>
+  <text class="port-label" x="1130" y="473">Effects · results</text>
+
+  <!-- loopd owns collaboration and shared orchestration mechanics, not domain semantics. -->
+  <rect x="400" y="530" width="1000" height="365" rx="28" fill="#edf3fc" stroke="#111827" stroke-width="3" filter="url(#shadow)"/>
+  <text x="900" y="582" font-size="31" font-weight="750" text-anchor="middle">loopd · Collaboration &amp; Runtime</text>
+  <text x="900" y="613" font-size="17" fill="#4b5563" text-anchor="middle">公共能力沉淀在平台，领域判断留给 Operator</text>
+
+  <rect class="core-card" x="450" y="642" width="390" height="172" rx="18"/>
+  <text x="645" y="681" font-size="24" font-weight="720" text-anchor="middle">loop-server</text>
+  <text x="645" y="708" font-size="15" fill="#4b5563" text-anchor="middle">visible collaboration &amp; Task lifecycle</text>
+  <rect class="core-pill" x="470" y="732" width="180" height="46" rx="14"/>
+  <text x="560" y="761" font-size="14" font-weight="650" text-anchor="middle">Conversation · Message</text>
+  <rect class="core-pill" x="665" y="732" width="155" height="46" rx="14"/>
+  <text x="742" y="753" font-size="13" font-weight="650" text-anchor="middle">create · resume</text>
+  <text x="742" y="770" font-size="13" font-weight="650" text-anchor="middle">complete Task</text>
+
+  <rect class="core-card" x="960" y="642" width="390" height="172" rx="18"/>
+  <text x="1155" y="681" font-size="24" font-weight="720" text-anchor="middle">loop-runtime</text>
+  <text x="1155" y="708" font-size="15" fill="#4b5563" text-anchor="middle">Operator SDK &amp; recoverable Effects</text>
+  <rect class="core-pill" x="990" y="732" width="160" height="46" rx="14"/>
+  <text x="1070" y="753" font-size="13" font-weight="650" text-anchor="middle">observe Task</text>
+  <text x="1070" y="770" font-size="13" font-weight="650" text-anchor="middle">read context</text>
+  <rect class="core-pill" x="1165" y="732" width="155" height="46" rx="14"/>
+  <text x="1242" y="753" font-size="13" font-weight="650" text-anchor="middle">Human · Harness</text>
+  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">External Effects</text>
+
+  <line class="port-line" x1="844" y1="728" x2="956" y2="728"/>
+  <rect class="port-pill" x="848" y="681" width="104" height="34" rx="17"/>
+  <text x="900" y="704" font-size="13" font-weight="650" text-anchor="middle">typed API</text>
+
+  <rect x="450" y="835" width="900" height="42" rx="15" fill="#dff3f8" stroke="#4c8a9c" stroke-width="1.8"/>
+  <text x="900" y="862" font-size="16" font-weight="650" text-anchor="middle">AgentUE · 可见进展、处理详情与断线续接</text>
+
+  <!-- Human and Harness are peers connected by loopd's collaboration boundary. -->
+  <rect class="actor" x="55" y="620" width="295" height="155" rx="22" fill="#eef3fb"/>
+  <text class="actor-title" x="202" y="711">Human / UI</text>
+  <text class="actor-detail" x="202" y="739">目标 · 输入 · 决策</text>
+  <text class="actor-detail" x="202" y="763">主对话 · 处理详情</text>
+
+  <line class="port-line" x1="354" y1="690" x2="396" y2="690"/>
+  <rect class="port-pill" x="260" y="638" width="230" height="38" rx="19"/>
+  <text class="port-label" x="375" y="663">Query · Answer · Decision</text>
+
+  <rect class="actor" x="1450" y="620" width="300" height="155" rx="22" fill="#fff3cf"/>
+  <text class="actor-title" x="1600" y="711">Harness / agentd</text>
+  <text class="actor-detail" x="1600" y="739">model · tools · sandbox</text>
+  <text class="actor-detail" x="1600" y="763">durable Agent execution</text>
+
+  <line class="port-line" x1="1404" y1="690" x2="1446" y2="690"/>
+  <rect class="port-pill" x="1325" y="638" width="250" height="38" rx="19"/>
+  <text class="port-label" x="1450" y="663">Prompt · Stream · Result</text>
+
+  <!-- Full execution facts are separate from page-visible collaboration. -->
+  <path class="ledger-line" d="M 1345 795 C 1410 812, 1430 838, 1480 848"/>
+  <line class="ledger-line" x1="1600" y1="779" x2="1600" y2="828"/>
+  <rect x="1470" y="835" width="260" height="72" rx="18" fill="#f7f1e8" stroke="#8c6b3f" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1600" y="866" font-size="20" font-weight="700" text-anchor="middle">AgentLedger</text>
+  <text x="1600" y="890" font-size="14" fill="#4b5563" text-anchor="middle">effects · calls · cost · audit</text>
+
+  <text x="900" y="951" font-size="17" fill="#6b7280" text-anchor="middle">loopd owns collaboration and execution boundaries; each Operator owns its business loop; each Harness owns intelligent execution.</text>
+</svg>

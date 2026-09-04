@@ -15,6 +15,8 @@ Operator may create domain CRDs for its own state and completion semantics.
 `loopd` keeps visible collaboration in conversations and messages, while full
 execution history belongs to the Harness and AgentLedger.
 
+![loopd orchestration architecture](docs/arch_v1.svg)
+
 ## Components
 
 - **loop-server** is a Hertz service that owns page-visible conversations and
