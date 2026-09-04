@@ -12,11 +12,15 @@ loop-server 当前只支持 SQLite，所以 Chart 固定要求 `server.replicaCo
 继续读取 Task 事件，但不会把 SQLite 变成共享数据库。等 loop-server 支持外部共享数据库后，再开放
 server 多副本。
 
-Quick Start 可以使用内置 Redis，并为 Router 配置模型密钥：
+Router 通过 OpenAI-compatible API 访问模型。Chart 会把模型名称与 API URL 写入 ConfigMap，
+API key 则写入或引用 Secret，避免密钥出现在普通配置中。
+
+Quick Start 可以使用内置 Redis，并配置模型 URL 与密钥：
 
 ```bash
 helm upgrade --install loopd deploy/k8s/loopd \
   --namespace loopd --create-namespace \
+  --set-string router.model.baseURL="https://model.example.com/v1" \
   --set-string router.model.apiKey="$MODEL_API_KEY"
 ```
 
@@ -30,4 +34,3 @@ kubectl -n loopd port-forward service/loopd-loopd-web 8080:80
 ```
 
 然后打开 `http://127.0.0.1:8080`。
-

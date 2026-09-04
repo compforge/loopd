@@ -14,16 +14,17 @@ spec:
       app.kubernetes.io/component: router
   template:
     metadata:
+      annotations:
+        checksum/model-config: {{ include (print $.Template.BasePath "/router-config.yaml") . | sha256sum }}
+        {{- with .Values.router.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "loopd.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: router
         {{- with .Values.router.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.router.podAnnotations }}
-      annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
     spec:
       serviceAccountName: {{ include "loopd.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
@@ -42,17 +43,24 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: LOOP_ROUTER_MODEL_PROVIDER
-              value: {{ .Values.router.model.provider | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: provider
             - name: LOOP_ROUTER_MODEL
-              value: {{ .Values.router.model.name | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: model
+            - name: LOOP_ROUTER_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "loopd.routerConfigName" . }}
+                  key: base-url
             - name: LOOP_ROUTER_MAX_SUBTASKS
               value: {{ .Values.router.maxSubtasks | quote }}
             - name: LOOP_ROUTER_CONCURRENCY
               value: {{ .Values.router.concurrency | quote }}
-            {{- if .Values.router.model.baseURL }}
-            - name: LOOP_ROUTER_BASE_URL
-              value: {{ .Values.router.model.baseURL | quote }}
-            {{- end }}
             {{- if or .Values.router.model.apiKey .Values.router.model.existingSecret }}
             - name: LOOP_ROUTER_API_KEY
               valueFrom:

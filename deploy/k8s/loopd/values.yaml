@@ -41,8 +41,8 @@ router:
     tag: latest
     pullPolicy: IfNotPresent
   model:
-    provider: openai
     name: gpt-5-mini
+    # OpenAI-compatible API endpoint. Leave empty to use AgentGo's default.
     baseURL: ""
     # Quick Start may set apiKey directly. Production should reference an
     # existing Secret so the credential is not stored in Helm values.
@@ -108,4 +108,3 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
-
