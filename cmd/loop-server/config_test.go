@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,11 +56,40 @@ func TestLoadConfigRequiresMySQLDSN(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsLegacyEnvironment(t *testing.T) {
+	for _, test := range []struct{ name, replacement string }{
+		{"LOOP_SERVER_MYSQL_DSN", "DATABASE_DRIVER=mysql and DATABASE_DSN"},
+		{"LOOP_SERVER_SQLITE_PATH", "DATABASE_DRIVER=sqlite and DATABASE_DSN"},
+		{"LOOP_SERVER_ADDR", "SERVER_ADDRESS"},
+		{"LOOP_SERVER_REDIS_ADDR", "REDIS_ADDRESS"},
+		{"LOOP_SERVER_REDIS_USERNAME", "REDIS_USERNAME"},
+		{"LOOP_SERVER_REDIS_PASSWORD", "REDIS_PASSWORD"},
+		{"LOOP_SERVER_TASK_NAMESPACE", "TASK_NAMESPACE"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv(test.name, "private-config-value")
+			_, err := loadConfig()
+			if err == nil {
+				t.Fatal("legacy configuration silently accepted")
+			}
+			if !strings.Contains(err.Error(), test.name) || !strings.Contains(err.Error(), test.replacement) {
+				t.Fatalf("missing migration guidance: %v", err)
+			}
+			if strings.Contains(err.Error(), "private-config-value") {
+				t.Fatal("configuration value leaked in error")
+			}
+		})
+	}
+}
+
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"SERVER_ADDRESS", "DATABASE_DRIVER", "DATABASE_DSN", "REDIS_ADDRESS", "REDIS_USERNAME", "REDIS_PASSWORD",
 		"TASK_NAMESPACE", "TASK_CLIENT_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
+		"LOOP_SERVER_MYSQL_DSN", "LOOP_SERVER_SQLITE_PATH", "LOOP_SERVER_ADDR", "LOOP_SERVER_REDIS_ADDR",
+		"LOOP_SERVER_REDIS_USERNAME", "LOOP_SERVER_REDIS_PASSWORD", "LOOP_SERVER_TASK_NAMESPACE",
 	} {
 		t.Setenv(name, "")
 	}

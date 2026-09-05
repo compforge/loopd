@@ -22,6 +22,20 @@ type config struct {
 }
 
 func loadConfig() (config, error) {
+	// An ignored store setting could silently redirect writes to the default SQLite file.
+	for _, legacy := range []struct{ name, replacement string }{
+		{"LOOP_SERVER_MYSQL_DSN", "DATABASE_DRIVER=mysql and DATABASE_DSN"},
+		{"LOOP_SERVER_SQLITE_PATH", "DATABASE_DRIVER=sqlite and DATABASE_DSN"},
+		{"LOOP_SERVER_ADDR", "SERVER_ADDRESS"},
+		{"LOOP_SERVER_REDIS_ADDR", "REDIS_ADDRESS"},
+		{"LOOP_SERVER_REDIS_USERNAME", "REDIS_USERNAME"},
+		{"LOOP_SERVER_REDIS_PASSWORD", "REDIS_PASSWORD"},
+		{"LOOP_SERVER_TASK_NAMESPACE", "TASK_NAMESPACE"},
+	} {
+		if os.Getenv(legacy.name) != "" {
+			return config{}, fmt.Errorf("%s is no longer supported; remove it and configure %s", legacy.name, legacy.replacement)
+		}
+	}
 	databaseDriver := strings.ToLower(strings.TrimSpace(envOr("DATABASE_DRIVER", "sqlite")))
 	databaseDSN := os.Getenv("DATABASE_DSN")
 	switch databaseDriver {
