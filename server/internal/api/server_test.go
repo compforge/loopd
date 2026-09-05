@@ -21,12 +21,13 @@ import (
 )
 
 func TestChatHTTPFlow(t *testing.T) {
-	store, err := repo.Open(repo.Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	server := New(
+		service.NewActorService(store, nil),
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
 		service.NewChatService(store, nopTaskClient{}, completedChatRunner{}, nil),
@@ -89,9 +90,6 @@ func TestChatHTTPFlow(t *testing.T) {
 	}
 	if len(result.Data) != 2 || result.Data[0].TaskID != taskID || result.Data[1].ID != task.Response.ID {
 		t.Fatalf("history = %#v", result.Data)
-	}
-	if response := ut.PerformRequest(engine, "GET", "/v1/actors", nil).Result(); response.StatusCode() != 404 {
-		t.Fatalf("actors status=%d, want 404", response.StatusCode())
 	}
 }
 

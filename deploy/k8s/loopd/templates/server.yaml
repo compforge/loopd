@@ -71,32 +71,36 @@ spec:
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           env:
-            - name: LOOP_SERVER_ADDR
+            - name: SERVER_ADDRESS
               value: :8080
             {{- if $mysqlEnabled }}
-            - name: LOOP_SERVER_MYSQL_DSN
+            - name: DATABASE_DRIVER
+              value: mysql
+            - name: DATABASE_DSN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "loopd.databaseSecretName" . }}
                   key: {{ .Values.database.mysql.existingSecretKey | quote }}
             {{- else }}
-            - name: LOOP_SERVER_SQLITE_PATH
+            - name: DATABASE_DRIVER
+              value: sqlite
+            - name: DATABASE_DSN
               value: /var/lib/loopd/loopd.db
             {{- end }}
-            - name: LOOP_SERVER_REDIS_ADDR
+            - name: REDIS_ADDRESS
               value: {{ include "loopd.redisAddress" . | quote }}
-            - name: LOOP_SERVER_TASK_NAMESPACE
+            - name: TASK_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- if .Values.redis.existingSecret }}
-            - name: LOOP_SERVER_REDIS_USERNAME
+            - name: REDIS_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.redis.existingSecret }}
                   key: {{ .Values.redis.existingSecretUsernameKey }}
                   optional: true
-            - name: LOOP_SERVER_REDIS_PASSWORD
+            - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.redis.existingSecret }}

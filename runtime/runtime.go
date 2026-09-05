@@ -19,10 +19,11 @@ import (
 )
 
 type Options struct {
-	HTTPClient     *http.Client
-	RequestTimeout time.Duration
-	Harnesses      map[string]harness.Adapter
-	Logger         *slog.Logger
+	HTTPClient            *http.Client
+	RequestTimeout        time.Duration
+	RegistryLeaseDuration time.Duration
+	Harnesses             map[string]harness.Adapter
+	Logger                *slog.Logger
 }
 
 type Runtime struct {
@@ -31,9 +32,10 @@ type Runtime struct {
 }
 
 type Loop struct {
-	Chat    Chat
-	Harness Harness
-	Task    Task
+	Chat     Chat
+	Harness  Harness
+	Operator Operator
+	Task     Task
 }
 
 func New(baseURL string, options Options) (*Runtime, error) {
@@ -64,8 +66,11 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
 	loop.Chat = newChat(c)
-	loop.Harness = newHarness(runCtx, options.Harnesses, options.Logger)
+	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
 	loop.Harness.chat = loop.Chat
+	loop.Operator = Operator{registry: newRegistry(
+		runCtx, c, "operator", "operators", options.RegistryLeaseDuration, options.Logger,
+	)}
 	loop.Task = Task{client: c}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }

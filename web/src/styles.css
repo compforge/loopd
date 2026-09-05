@@ -10,7 +10,7 @@
 
 html, body, #root { width: 100%; min-width: 980px; height: 100%; margin: 0; }
 
-button, textarea { font: inherit; }
+button, select, textarea { font: inherit; }
 button { color: inherit; }
 
 .shell {
@@ -103,20 +103,7 @@ button { color: inherit; }
 }
 .chat-header h1, .detail-header h2 { margin: 4px 0 0; font-family: Georgia, serif; font-weight: 500; }
 .chat-header h1 { max-width: 470px; overflow: hidden; font-size: 20px; text-overflow: ellipsis; white-space: nowrap; }
-.actor-select {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 178px;
-  padding: 8px 10px;
-  border: 1px solid #d8d8d1;
-  border-radius: 9px;
-  background: #f3f2ee;
-}
-.actor-select small { display: block; color: #878980; font-size: 9px; }
-.actor-select strong { font-size: 11px; }
 .actor-dot { width: 8px; height: 8px; border-radius: 50%; background: #5d8068; box-shadow: 0 0 0 4px #dce6df; }
-.chevron { margin-left: auto; color: #8c8e86; }
 
 .messages { overflow-y: auto; padding: 38px clamp(28px, 7vw, 96px) 26px; }
 .message { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 25px; }
@@ -177,7 +164,22 @@ button { color: inherit; }
   font-size: 20px;
 }
 .send-button:disabled { cursor: default; opacity: .35; }
-.composer-meta { display: flex; justify-content: space-between; padding: 7px 4px 0; color: #999a94; font-size: 9px; }
+.composer-meta { display: flex; align-items: center; justify-content: space-between; padding: 8px 4px 0; color: #999a94; font-size: 9px; }
+.actor-picker { display: flex; align-items: center; gap: 8px; color: #777b74; }
+.actor-picker select {
+  min-width: 154px;
+  padding: 5px 26px 5px 8px;
+  border: 1px solid #d2d4cd;
+  border-radius: 8px;
+  outline: none;
+  color: #3f4942;
+  background: #f6f6f2;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+}
+.actor-picker select:focus { border-color: #7b8d80; box-shadow: 0 0 0 2px rgba(90, 117, 98, .1); }
+.actor-picker select:disabled { cursor: default; opacity: .55; }
 .error-banner { padding: 11px 14px; border: 1px solid #e0bdb8; border-radius: 9px; color: #8a3930; background: #fff1ef; font-size: 12px; }
 
 .detail-panel { border-left: 1px solid #d7d6d0; background: #f0efea; }

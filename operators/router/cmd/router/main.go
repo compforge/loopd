@@ -67,6 +67,15 @@ func run() error {
 		return err
 	}
 	defer runtime.Close()
+	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelRegister()
+	if err := runtime.Loop.Operator.Register(registerCtx, loopruntime.OperatorRegistration{
+		Key:         operatorrouter.OperatorKey,
+		DisplayName: "Router",
+		Description: "Routes a request to one or more temporary Harness calls and summarizes the result.",
+	}); err != nil {
+		return err
+	}
 
 	scheme := kruntime.NewScheme()
 	if err := taskv1alpha1.AddToScheme(scheme); err != nil {

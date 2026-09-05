@@ -11,7 +11,7 @@ import (
 	"github.com/compforge/loopd/server/internal/model"
 )
 
-func TestOpenCreatesOnlyConversationAndMessageTables(t *testing.T) {
+func TestOpenCreatesChatAndActorTables(t *testing.T) {
 	store := openTestStore(t)
 
 	var tables []string
@@ -22,7 +22,7 @@ func TestOpenCreatesOnlyConversationAndMessageTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Strings(tables)
-	if want := []string{"conversations", "messages"}; !reflect.DeepEqual(tables, want) {
+	if want := []string{"conversations", "harnesses", "messages", "operators"}; !reflect.DeepEqual(tables, want) {
 		t.Fatalf("tables = %v, want %v", tables, want)
 	}
 	for _, table := range tables {
@@ -31,7 +31,7 @@ func TestOpenCreatesOnlyConversationAndMessageTables(t *testing.T) {
 }
 
 func TestOpenRejectsInvalidMySQLDSN(t *testing.T) {
-	_, err := Open(Config{MySQLDSN: "://invalid"})
+	_, err := Open(Config{Driver: "mysql", DSN: "://invalid"})
 	if err == nil {
 		t.Fatal("Open succeeded with an invalid MySQL DSN")
 	}
@@ -139,7 +139,7 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := Open(Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

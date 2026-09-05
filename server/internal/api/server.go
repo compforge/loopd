@@ -16,6 +16,7 @@ import (
 )
 
 type Server struct {
+	actors        *service.ActorService
 	conversations *service.ConversationService
 	messages      *service.MessageService
 	chat          *service.ChatService
@@ -24,6 +25,7 @@ type Server struct {
 }
 
 func New(
+	actors *service.ActorService,
 	conversations *service.ConversationService,
 	messages *service.MessageService,
 	chat *service.ChatService,
@@ -33,13 +35,16 @@ func New(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{conversations: conversations, messages: messages, chat: chat, tasks: tasks, logger: logger}
+	return &Server{actors: actors, conversations: conversations, messages: messages, chat: chat, tasks: tasks, logger: logger}
 }
 
 func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/healthz", func(_ context.Context, request *hertzapp.RequestContext) {
 		request.JSON(consts.StatusOK, map[string]bool{"ok": true})
 	})
+	engine.GET("/v1/actors", server.adapt(server.listActors))
+	engine.PUT("/v1/operators/:key", server.adapt(server.registerOperator))
+	engine.PUT("/v1/harnesses/:key", server.adapt(server.registerHarness))
 	engine.POST("/v1/conversations", server.adapt(server.createConversation))
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))

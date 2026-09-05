@@ -25,8 +25,8 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	MySQLDSN         string
-	SQLitePath       string
+	Driver           string
+	DSN              string
 	OperationTimeout time.Duration
 	MaxOpenConns     int
 	MaxIdleConns     int
@@ -45,7 +45,7 @@ func New(config Config) (*Server, error) {
 		return nil, errors.New("task client is required")
 	}
 	store, err := repo.Open(repo.Config{
-		MySQLDSN: config.Database.MySQLDSN, SQLitePath: config.Database.SQLitePath,
+		Driver: config.Database.Driver, DSN: config.Database.DSN,
 		OperationTimeout: config.Database.OperationTimeout,
 		MaxOpenConns:     config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
 		ConnMaxLifetime: config.Database.ConnMaxLifetime, ConnMaxIdleTime: config.Database.ConnMaxIdleTime,
@@ -59,6 +59,7 @@ func New(config Config) (*Server, error) {
 		return nil, err
 	}
 	conversations := service.NewConversationService(store, config.Logger)
+	actors := service.NewActorService(store, config.Logger)
 	messages := service.NewMessageService(store, config.Logger)
 	chatDelivery := delivery.New(events, store, config.Logger)
 	chat := service.NewChatService(store, config.Tasks, chatDelivery, config.Logger)
@@ -66,7 +67,7 @@ func New(config Config) (*Server, error) {
 	return &Server{
 		store: store,
 		redis: redisClient,
-		api:   serverapi.New(conversations, messages, chat, tasks, config.Logger),
+		api:   serverapi.New(actors, conversations, messages, chat, tasks, config.Logger),
 	}, nil
 }
 

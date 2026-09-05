@@ -306,7 +306,7 @@ func (failingCommitRepository) CreateChatMessages(
 
 func openServiceStore(t *testing.T) *repo.Store {
 	t.Helper()
-	store, err := repo.Open(repo.Config{SQLitePath: filepath.Join(t.TempDir(), "loopd.db")})
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

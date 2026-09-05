@@ -28,33 +28,19 @@ loopd/
 
 ## 关键约定
 
-1. Conversation History 属于 loop-server，不属于某一个 Operator 或 Harness；同一 Conversation 可由
-   多个参与者先后协作。
-2. loop-server 的聊天事实只有 Conversation 与 Message。Message 通过 `task_id + kind + key + content`
-   表达 Human、Operator 或 Harness 的一条页面可见发言；`content` 是 AgentUE semantic model，使用
-   可扩展 blocks 承载文本、可见工具状态和产物，不混入完整执行轨迹。
-3. `conversations` 与 `messages` 均使用 go-stdx 生成的 UUIDv7 `id` 作为主键和游标；不再维护平行的
-   message sequence。
-4. 一次问答由 user Message、目标 Actor 的 response Message 和同 ID 的 Task CRD 组成。服务端在数据库事务提交前
-   初始化 AgentUE Redis Stream 并创建 CRD；任一步失败则回滚两条 Message，并尽力删除已创建的外部资源。
-   回答完成并固化后删除 Task marker，避免 Operator 重启时再次处理已经结束的工作。
-5. 主会话的 `parent_message_id` 为空；Operator 内部工作会话通过该字段引用主链路 response Message。
-   v1 不允许详情会话继续嵌套，且同一条 Message 最多关联一个详情会话。
-6. v1alpha1 Task CRD 当前保存路由和唤醒信息，详细上下文由 runtime 按 Task ID 向 server 查询。公共协调
-   字段可按 Kubernetes API 兼容规则增量演进；领域状态复杂时，Operator 创建并拥有自己的 CRD。
-7. AgentLedger 承载完整执行历史、审计和成本记录，不替代 Conversation 与 Message 的页面业务存储。
-8. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
-9. 修改 `runtime/api/` 下的 CRD 类型后运行 `make generate manifests`，并提交生成的 DeepCopy、基础 CRD
+1. server 拥有跨参与者的可见聊天历史；Operator 拥有领域状态，Harness 拥有执行状态，AgentLedger
+   承载完整轨迹。具体存储、交付和发现约束见各领域文档。
+2. Operator 通过 loop-runtime 公共契约接入；领域类型与 Harness provider 差异不进入 server。
+3. 修改 `runtime/api/` 下的 CRD 类型后运行 `make generate manifests`，提交 DeepCopy、基础 CRD
    YAML 与 Helm Chart 中同步的 CRD YAML。
-10. Operator 通过 loop-runtime 调用 Harness；可见 `set/append` 事件由 runtime 发送给任意 loop-server
-    实例，再进入共享 Redis Stream。AgentGo Adapter 只用于进程内演示，生产级执行恢复由 agentd 持有。
-11. 根目录 `VERSION` 是 loopd 当前版本，使用 SemVer。任何代码改动都必须在同一变更中递增
-    `VERSION`；初始版本为 `0.0.1`。
+4. 根目录 `VERSION` 使用 SemVer；任何代码改动都必须在同一变更中递增版本。
+5. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
 
 ## References
 
 - `docs/kernel.md` — loopd 稳定模型、主流程和扩展边界
+- `docs/operators.md` — Operator 接入、Task 上下文与 Harness Call 约束
+- `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `deploy/docker/README.md` — loop-server、Router 与 Web 镜像构建入口
 - `deploy/k8s/README.md` — Helm Quick Start、组件拓扑与配置边界
-- `server/docs/persistence.md` — Conversation 与 Message 的数据库约束
 - `README.md` — 产品定位与使用入口
