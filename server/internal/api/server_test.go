@@ -45,6 +45,9 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(created.Body(), &conversation); err != nil {
 		t.Fatal(err)
 	}
+	if conversation.ActorKind != loopd.RoleUser || conversation.ActorKey == "" || conversation.TaskID != "" {
+		t.Fatalf("user conversation = %+v", conversation)
+	}
 	listed := ut.PerformRequest(engine, "GET", "/v1/conversations", nil).Result()
 	if listed.StatusCode() != 200 {
 		t.Fatalf("list conversations status=%d body=%s", listed.StatusCode(), listed.Body())
@@ -92,7 +95,7 @@ func TestChatHTTPFlow(t *testing.T) {
 		t.Fatalf("history = %#v", result.Data)
 	}
 
-	childResponse := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"Details","parent_message_id":"`+task.Response.ID+`"}`)
+	childResponse := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"Details","task_id":"`+taskID+`"}`)
 	if childResponse.StatusCode() != 201 {
 		t.Fatalf("create detail=%s", childResponse.Body())
 	}
@@ -100,8 +103,8 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.ParentMessageID != task.Response.ID {
-		t.Fatalf("parent=%s", child.ParentMessageID)
+	if child.TaskID != taskID || child.ActorKind != loopd.RoleOperator || child.ActorKey != "intent" {
+		t.Fatalf("work conversation=%+v", child)
 	}
 	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.RoleHarness, "call-1",
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"detail output"}]}`))
@@ -113,9 +116,8 @@ func TestChatHTTPFlow(t *testing.T) {
 		expectedID string
 	}{
 		{"", conversation.ID},
-		{"?parent_message_id=" + task.Response.ID, child.ID},
-		{"?parent_message_id=" + task.Input.ID, ""},
-		{"?parent_message_id=missing-message", ""},
+		{"?task_id=" + taskID, child.ID},
+		{"?task_id=missing-task", ""},
 	} {
 		response := ut.PerformRequest(engine, "GET", "/v1/conversations"+test.query, nil).Result()
 		if response.StatusCode() != 200 {
@@ -136,6 +138,14 @@ func TestChatHTTPFlow(t *testing.T) {
 	childMessages := ut.PerformRequest(engine, "GET", "/v1/conversations/"+child.ID+"/messages", nil).Result()
 	if childMessages.StatusCode() != 200 || !strings.Contains(string(childMessages.Body()), "detail output") {
 		t.Fatalf("child messages=%s", childMessages.Body())
+	}
+	taskMessages := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID+"/messages?after="+task.Response.ID+"&limit=1", nil).Result()
+	var taskPage page[loopd.Message]
+	if err := json.Unmarshal(taskMessages.Body(), &taskPage); err != nil {
+		t.Fatal(err)
+	}
+	if taskMessages.StatusCode() != 200 || len(taskPage.Data) != 1 || taskPage.Data[0].ConversationID != child.ID {
+		t.Fatalf("task messages = %s", taskMessages.Body())
 	}
 }
 

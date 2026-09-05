@@ -22,14 +22,14 @@ func (coordinator *Coordinator) ensureDetail(ctx context.Context, response model
 		return model.Message{}, err
 	}
 	message, created, err := coordinator.repo.EnsureDetailMessage(ctx,
-		model.Conversation{ID: uuid.V7(), Name: "处理详情", ParentMessageID: &response.ID},
+		model.Conversation{ID: uuid.V7(), Name: "处理详情", TaskID: &response.TaskID, ActorKind: response.Kind, ActorKey: response.ActorKey},
 		model.Message{ID: uuid.V7(), TaskID: response.TaskID, Kind: string(loopd.RoleHarness), ActorKey: callID, Content: content, CreatedAt: at, UpdatedAt: at},
 	)
 	if err == nil && !created && !at.IsZero() {
 		err = coordinator.repo.ObserveMessageActivity(ctx, message.ID, at)
 	}
 	if err == nil && created {
-		coordinator.logger.InfoContext(ctx, "detail message created", "parent_message_id", response.ID,
+		coordinator.logger.InfoContext(ctx, "detail message created",
 			"conversation_id", message.ConversationID, "message_id", message.ID,
 			"task_id", response.TaskID, "effect_key", effectKey)
 	}

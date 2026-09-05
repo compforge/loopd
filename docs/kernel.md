@@ -37,8 +37,12 @@ Message 记录 Actor 发出的消息，记录顺序不定义 Actor 的执行顺�
 Activity、Artifact 和流式事件是过程记录或投影，不独立拥有业务执行状态。在线发现也不代替
 任务生命周期；注册与 Actor 发现是 runtime 的公共能力，记录由 server 保存。
 
-Conversation 是一个对话框，每次提问可以更换目标。详情 Conversation 挂在某条主回答下，
-供页面展开内部工作；最终回答仍由该次问答的目标负责。可见历史属于 server，完整 prompt、
+Conversation 是一个对话框，actor 表达会话的组织归属，Message 的 actor 表达具体发送者。
+习惯上将用户的主会话称为 **User conv**，将 Operator 组织的任务工作会话称为 **Operator conv**。
+这两个叫法表达组织归属，不是两套模型，也不限定其中只能由 User 或 Operator 发消息。
+User Conversation 每次提问可以更换目标，但会话归属不变。工作 Conversation 关联一次 Task，
+归属于该 Task 的 Operator/Harness，内部允许多个参与者发消息；同一 Task 的消息共享处理详情。
+最终回答仍由该次问答的目标负责。可见历史属于 server，完整 prompt、
 模型事件、tool call/result、重试与成本由 AgentLedger 承载。
 
 ## Loop is a CRD

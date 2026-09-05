@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	loopd "github.com/compforge/loopd"
 	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
@@ -21,6 +22,16 @@ import (
 // Task exposes loopd Task observation and context lookup to an Operator.
 type Task struct {
 	client *client
+}
+
+// Messages reads a page of visible messages across the Task's user and work
+// conversations, including Human questions and replies. Each result retains its
+// conversation ID. Use Chat.History to read just one conversation across tasks.
+func (task Task) Messages(ctx context.Context, taskID, after string, limit int) ([]loopd.Message, error) {
+	var result page[loopd.Message]
+	path := "/v1/tasks/" + url.PathEscape(taskID) + "/messages?after=" + url.QueryEscape(after) + "&limit=" + strconv.Itoa(limit)
+	err := task.client.do(ctx, http.MethodGet, path, nil, &result)
+	return result.Data, err
 }
 
 // TaskWatchOptions configures the controller that observes one Task target.

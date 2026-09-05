@@ -5,13 +5,13 @@ import { detailMessageModel, traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
 interface Detail {
-  parentMessageID: string;
+  taskID: string;
   conversation?: Conversation;
   messages: Message[];
   error?: string;
 }
 
-/** @spec 详情仅来自选中 Message 的子 Conversation，切换 Message 后不得显示上一个查询的结果。 */
+/** @spec 同一 Task 的消息共享工作 Conversation；切换 Task 不得显示上一个查询的结果。 */
 export function DetailPanel({ message, liveModel, running, status }: {
   message?: Message;
   liveModel?: UIModel;
@@ -19,21 +19,21 @@ export function DetailPanel({ message, liveModel, running, status }: {
   status?: string;
 }) {
   const [detail, setDetail] = useState<Detail>();
-  const messageID = message?.id;
+  const taskID = message?.task_id;
   useEffect(() => {
-    if (!messageID) return;
+    if (!taskID) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     // Poll only the selected active detail; deltas still come from the shared
     // Task stream. Completion and reload use the persisted child Messages.
     async function refresh() {
       try {
-        const conversation = await findDetailConversation(messageID!, controller.signal);
+        const conversation = await findDetailConversation(taskID!, controller.signal);
         const messages = conversation ? await listMessages(conversation.id, controller.signal) : [];
-        if (!controller.signal.aborted) setDetail({ parentMessageID: messageID!, conversation, messages });
+        if (!controller.signal.aborted) setDetail({ taskID: taskID!, conversation, messages });
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setDetail({ parentMessageID: messageID!, messages: [], error: String(cause) });
+          setDetail({ taskID: taskID!, messages: [], error: String(cause) });
         }
       } finally {
         if (running && !controller.signal.aborted) timer = setTimeout(refresh, 1_000);
@@ -41,9 +41,9 @@ export function DetailPanel({ message, liveModel, running, status }: {
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [messageID, running]);
+  }, [taskID, running]);
 
-  const selected = detail?.parentMessageID === messageID ? detail : undefined;
+  const selected = detail?.taskID === taskID ? detail : undefined;
   const groups = groupParallelMessages(selected?.messages ?? []);
   const indices = new Map((selected?.messages ?? []).map((item, index) => [item.id, index]));
   return (

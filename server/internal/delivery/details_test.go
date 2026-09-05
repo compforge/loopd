@@ -52,11 +52,14 @@ func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	detail, err := store.FindConversationByParentMessage(ctx, "response")
+	detail, err := store.FindConversationByTask(ctx, "task")
 	if err != nil {
 		t.Fatal(err)
 	}
 	live, err := store.ListMessages(ctx, detail.ID, "", 100)
+	if detail.ActorKind != "operator" || detail.ActorKey != "router" {
+		t.Fatalf("work conversation owner = %+v", detail)
+	}
 	if err != nil || len(live) != 1 || live[0].ActorKey != "call-a" {
 		t.Fatalf("live detail=%+v err=%v", live, err)
 	}
@@ -159,7 +162,9 @@ func TestEnsureDetailMessageConcurrentIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := store.CreateMessage(ctx, model.Message{ID: "parent", ConversationID: "root", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial})
+	parent, err := store.CreateChatMessages(ctx,
+		model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial},
+		model.Message{ID: "parent", ConversationID: "root", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

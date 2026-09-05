@@ -40,8 +40,10 @@ func newChat(client *client) Chat {
 }
 
 type CreateConversationRequest struct {
-	Name            string `json:"name"`
-	ParentMessageID string `json:"parent_message_id,omitempty"`
+	Name string `json:"name"`
+	// TaskID creates a work conversation owned by the Task's target. Without
+	// it, the server creates a user conversation using the caller's identity.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 type SendMessageRequest struct {

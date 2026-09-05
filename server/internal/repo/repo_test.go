@@ -77,9 +77,9 @@ func TestListConversationsReturnsOnlyRootsNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	first := model.Conversation{ID: "01991f3d-1111-7000-8000-000000000000", Name: "First"}
 	second := model.Conversation{ID: "01991f3d-1112-7000-8000-000000000000", Name: "Second"}
-	parentMessageID := "01991f3d-1113-7000-8000-000000000000"
+	taskID := "01991f3d-1113-7000-8000-000000000000"
 	detail := model.Conversation{
-		ID: "01991f3d-1114-7000-8000-000000000000", Name: "Detail", ParentMessageID: &parentMessageID,
+		ID: "01991f3d-1114-7000-8000-000000000000", Name: "Detail", TaskID: &taskID, ActorKind: "operator", ActorKey: "router",
 	}
 	for _, conversation := range []model.Conversation{first, second, detail} {
 		if _, err := store.CreateConversation(ctx, conversation); err != nil {

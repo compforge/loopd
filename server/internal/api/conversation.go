@@ -13,7 +13,15 @@ func (server *Server) createConversation(ctx context.Context, request *hertzapp.
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
-	conversation, err := server.conversations.CreateConversation(ctx, input.Name, input.ParentMessageID)
+	var userKey string
+	if input.TaskID == "" {
+		identity, err := server.identity(ctx, request)
+		if err != nil {
+			return err
+		}
+		userKey = identity
+	}
+	conversation, err := server.conversations.CreateConversation(ctx, input.Name, userKey, input.TaskID)
 	if err != nil {
 		return err
 	}
@@ -31,8 +39,8 @@ func (server *Server) getConversation(ctx context.Context, request *hertzapp.Req
 }
 
 func (server *Server) listConversations(ctx context.Context, request *hertzapp.RequestContext) error {
-	if parentMessageID := request.Query("parent_message_id"); parentMessageID != "" {
-		conversations, err := server.conversations.ListDetailConversations(ctx, parentMessageID)
+	if taskID := request.Query("task_id"); taskID != "" {
+		conversations, err := server.conversations.ListDetailConversations(ctx, taskID)
 		if err != nil {
 			return err
 		}

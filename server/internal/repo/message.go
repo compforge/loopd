@@ -20,24 +20,24 @@ type MessageRepository interface {
 	UpdateMessageContent(context.Context, string, string, []byte) (model.Message, error)
 }
 
-// EnsureDetailMessage serializes identity creation on the parent response row.
+// EnsureDetailMessage serializes identity creation on the task response row.
 // MySQL uses a row lock; the SQLite Quick Start pool serializes transactions.
 //
-// +spec=`一个主回答最多对应一个详情 Conversation；同一临时 Harness 的重复交付复用 Message`
-// +why=`用父回答行串行创建，避免不同 server 实例为并行输出建立重复身份`
+// +spec=`一个 Task 最多对应一个工作 Conversation；同一临时 Harness 的重复交付复用 Message`
+// +why=`沿用 Task 收口的行锁串行创建，避免不同 server 实例为并行输出建立重复身份`
 func (store *Store) EnsureDetailMessage(ctx context.Context, conversation model.Conversation, message model.Message) (model.Message, bool, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	if conversation.ParentMessageID == nil {
+	if conversation.TaskID == nil || *conversation.TaskID == "" || *conversation.TaskID != message.TaskID {
 		return model.Message{}, false, ErrConflict
 	}
 	// Streaming deltas usually refer to an existing Message. Avoid taking the
-	// parent write lock for every token; creation still rechecks under the lock.
+	// task write lock for every token; creation still rechecks under the lock.
 	var existing model.Message
 	err := store.db.WithContext(ctx).
 		Joins("JOIN conversations ON conversations.id = messages.conversation_id").
-		Where("conversations.parent_message_id = ? AND messages.task_id = ? AND messages.kind = ? AND messages.actor_key = ?",
-			*conversation.ParentMessageID, message.TaskID, message.Kind, message.ActorKey).
+		Where("conversations.task_id = ? AND messages.task_id = ? AND messages.kind = ? AND messages.actor_key = ?",
+			*conversation.TaskID, message.TaskID, message.Kind, message.ActorKey).
 		First(&existing).Error
 	if err == nil {
 		return existing, false, nil
@@ -45,24 +45,26 @@ func (store *Store) EnsureDetailMessage(ctx context.Context, conversation model.
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Message{}, false, mapError(err)
 	}
+	roots, err := store.ListRootMessagesByTask(ctx, message.TaskID)
+	if err != nil {
+		return model.Message{}, false, err
+	}
+	_, response, err := TaskPair(roots)
+	if err != nil {
+		return model.Message{}, false, err
+	}
 	created := false
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var parent model.Message
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, "id = ?", *conversation.ParentMessageID).Error; err != nil {
+		// Lock before any snapshot read in the transaction: under MySQL's
+		// repeatable-read isolation, later reads must see the previous creator.
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&response, "id = ?", response.ID).Error; err != nil {
 			return err
 		}
-		var root model.Conversation
-		if err := tx.First(&root, "id = ?", parent.ConversationID).Error; err != nil {
-			return err
-		}
-		if parent.Purpose != "" && parent.Purpose != "response" {
-			return ErrConflict
-		}
-		if root.ParentMessageID != nil || parent.Kind != "operator" || parent.TaskID != message.TaskID {
+		if response.Kind != conversation.ActorKind || response.ActorKey != conversation.ActorKey {
 			return ErrConflict
 		}
 		var detail model.Conversation
-		err := tx.Where("parent_message_id = ?", parent.ID).First(&detail).Error
+		err := tx.Where("task_id = ?", message.TaskID).First(&detail).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			detail = conversation
 			if err := tx.Create(&detail).Error; err != nil {
@@ -95,8 +97,12 @@ func (store *Store) CreateMessage(ctx context.Context, message model.Message) (m
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 
-	if err := ensureConversation(store.db.WithContext(ctx), message.ConversationID); err != nil {
-		return model.Message{}, err
+	var conversation model.Conversation
+	if err := store.db.WithContext(ctx).First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
+		return model.Message{}, mapError(err)
+	}
+	if conversation.TaskID != nil && *conversation.TaskID != message.TaskID {
+		return model.Message{}, ErrConflict
 	}
 	if err := mapError(store.db.WithContext(ctx).Create(&message).Error); err != nil {
 		return model.Message{}, err
@@ -120,8 +126,12 @@ func (store *Store) CreateChatMessages(
 		if userMessage.ConversationID != responseMessage.ConversationID || userMessage.TaskID != responseMessage.TaskID {
 			return ErrConflict
 		}
-		if err := ensureConversation(tx, userMessage.ConversationID); err != nil {
-			return err
+		var conversation model.Conversation
+		if err := tx.First(&conversation, "id = ?", userMessage.ConversationID).Error; err != nil {
+			return mapError(err)
+		}
+		if conversation.TaskID != nil || conversation.ActorKind != "user" {
+			return ErrConflict
 		}
 		if err := mapError(tx.Create(&userMessage).Error); err != nil {
 			return err
@@ -147,12 +157,26 @@ func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) (
 	var messages []model.Message
 	if err := store.db.WithContext(ctx).
 		Joins("JOIN conversations ON conversations.id = messages.conversation_id").
-		Where("messages.task_id = ? AND conversations.parent_message_id IS NULL", taskID).
+		Where("messages.task_id = ? AND conversations.task_id IS NULL", taskID).
 		Order("messages.id ASC").
 		Find(&messages).Error; err != nil {
 		return nil, err
 	}
 	return messages, nil
+}
+
+// ListMessagesByTask includes both user-conversation and work-conversation
+// messages. It does not infer the current input from the last user reply.
+func (store *Store) ListMessagesByTask(ctx context.Context, taskID, after string, limit int) ([]model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	query := store.db.WithContext(ctx).Where("task_id = ?", taskID)
+	if after != "" {
+		query = query.Where("id > ?", after)
+	}
+	var messages []model.Message
+	err := query.Order("id ASC").Limit(limit).Find(&messages).Error
+	return messages, mapError(err)
 }
 
 func (store *Store) ListMessagesThrough(
@@ -230,17 +254,6 @@ func (store *Store) UpdateMessageContent(
 		return model.Message{}, mapError(err)
 	}
 	return message, nil
-}
-
-func ensureConversation(db *gorm.DB, id string) error {
-	var count int64
-	if err := db.Model(&model.Conversation{}).Where("id = ?", id).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // ObserveMessageActivity only widens the interval. Conditional updates remain

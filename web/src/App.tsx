@@ -60,7 +60,8 @@ export function App() {
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
   const selectedMessage = messages.find((message) => message.id === selectedMessageID);
-  const selectedIsLive = Boolean(selectedMessage && liveTask?.responseMessageID === selectedMessage.id);
+  const selectedResponse = messages.find((message) => message.task_id === selectedMessage?.task_id && message.purpose === "response");
+  const selectedIsLive = Boolean(selectedMessage && liveTask?.taskID === selectedMessage.task_id);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -464,7 +465,7 @@ export function App() {
         message={selectedMessage}
         liveModel={selectedIsLive && liveTask ? toUIModel(liveTask.snapshot) : undefined}
         running={Boolean(selectedIsLive && liveTask && !isTerminal(liveTask.status))}
-        status={selectedIsLive ? liveTask?.status : safeModel(selectedMessage?.content)?.meta.error ? "failed" : "completed"}
+        status={selectedIsLive ? liveTask?.status : safeModel(selectedResponse?.content)?.meta.error ? "failed" : "completed"}
       />
     </div>
   );
