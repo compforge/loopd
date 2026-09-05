@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/compforge/loopd/server/internal/migrations"
 	"github.com/compforge/loopd/server/internal/model"
 	drivermysql "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
@@ -91,6 +92,11 @@ func Open(config Config) (*Store, error) {
 	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping loopd %s database: %w", backend, err)
+	}
+	// Rename existing columns before AutoMigrate can add empty replacements.
+	if err := migrations.DomainKeys(db.WithContext(ctx)); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("migrate loopd domain keys: %w", err)
 	}
 	if err := db.WithContext(ctx).AutoMigrate(
 		&model.Conversation{},

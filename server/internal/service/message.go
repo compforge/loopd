@@ -42,7 +42,7 @@ func (service *MessageService) CreateMessage(
 		ConversationID: conversationID,
 		TaskID:         strings.TrimSpace(taskID),
 		Kind:           string(kind),
-		Key:            strings.TrimSpace(key),
+		SenderKey:      strings.TrimSpace(key),
 		Content:        content,
 	})
 	if err == nil {
@@ -51,7 +51,7 @@ func (service *MessageService) CreateMessage(
 			"message_id", message.ID,
 			"task_id", message.TaskID,
 			"kind", message.Kind,
-			"key", message.Key,
+			"sender_key", message.SenderKey,
 		)
 	}
 	return messageFromModel(message), err
@@ -78,7 +78,7 @@ func (service *MessageService) ListMessages(
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
-		Kind: loopd.Role(value.Kind), Key: value.Key, Content: json.RawMessage(value.Content),
+		Kind: loopd.Role(value.Kind), Key: value.SenderKey, Content: json.RawMessage(value.Content),
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 }
