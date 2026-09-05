@@ -35,7 +35,6 @@ type fixture struct {
 	questions         map[string]loopd.HumanRequest
 	results           map[string]loopd.HumanResult
 	answers           map[string]loopd.SpeakRequest
-	completed         map[string]int
 	committed         string
 	failPath          string
 	loseSpeakResponse bool
@@ -43,8 +42,7 @@ type fixture struct {
 
 func newFixture(t *testing.T, messages ...loopd.Message) *fixture {
 	f := &fixture{t: t, messages: messages, questions: map[string]loopd.HumanRequest{},
-		results: map[string]loopd.HumanResult{}, answers: map[string]loopd.SpeakRequest{},
-		completed: map[string]int{}}
+		results: map[string]loopd.HumanResult{}, answers: map[string]loopd.SpeakRequest{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
 	return f
@@ -125,7 +123,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.RoleUser, Key: "user"}) ||
-			request.Key != request.ReplyToID+"/summary" {
+			request.Key != request.ReplyToID+"/summary" || request.Stream {
 			f.t.Errorf("invalid summary identity: %+v", request)
 		}
 		if prior, exists := f.answers[request.Key]; exists && !reflect.DeepEqual(prior, request) {
@@ -138,9 +136,6 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(loopd.Message{ID: request.Key, Content: request.Content})
-	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/deliveries/"):
-		f.completed[r.URL.Path]++
-		w.WriteHeader(http.StatusNoContent)
 	default:
 		f.t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
@@ -220,9 +215,8 @@ func TestSequentialInteraction(t *testing.T) {
 			defer f.mu.Unlock()
 			answer := string(f.answers["01/summary"].Content)
 			if f.committed != "01" || len(f.answers) != 1 ||
-				f.completed["/v1/deliveries/delivery/complete"] != 1 ||
 				!strings.Contains(answer, test.want) || !strings.Contains(answer, "如何学习 Go？") {
-				t.Fatalf("committed=%s answer=%s completed=%v", f.committed, answer, f.completed)
+				t.Fatalf("committed=%s answer=%s", f.committed, answer)
 			}
 			if test.ask.Status != loopd.HumanSuccess && len(f.questions) != 1 {
 				t.Error("unsuccessful Ask still created Confirm")
@@ -261,15 +255,15 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 	f.step(0)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.questions) != 2 || len(f.answers) != 2 || len(f.completed) != 0 || f.committed != "04" {
-		t.Fatalf("questions=%d answers=%d completed=%v committed=%s",
-			len(f.questions), len(f.answers), f.completed, f.committed)
+	if len(f.questions) != 2 || len(f.answers) != 2 || f.committed != "04" {
+		t.Fatalf("questions=%d answers=%d committed=%s",
+			len(f.questions), len(f.answers), f.committed)
 	}
 }
 
-// +case=`Speak 响应丢失、页面收尾或 Commit 失败后重读输入；不提前提交且汇总身份不变`
+// +case=`Speak 响应丢失或 Commit 失败后重读输入；不提前提交且汇总身份不变`
 func TestRetryBeforeCommit(t *testing.T) {
-	for _, stage := range []string{"speak", "complete", "commit"} {
+	for _, stage := range []string{"speak", "commit"} {
 		t.Run(stage, func(t *testing.T) {
 			f := newFixture(t, userMessage("01", "delivery", "你好"))
 			f.step(time.Second)
@@ -278,21 +272,25 @@ func TestRetryBeforeCommit(t *testing.T) {
 			switch stage {
 			case "speak":
 				f.loseSpeakResponse = true
-			case "complete":
-				f.failPath = "/v1/deliveries/delivery/complete"
 			case "commit":
 				f.failPath = "/v1/conversations/conv/commit"
 			}
 			f.mu.Unlock()
-			if _, err := f.reconcile(); err == nil {
-				t.Fatal("expected injected failure")
+			if _, err := f.reconcile(); (err != nil) != (stage == "commit") {
+				t.Fatalf("stage %s: unexpected error %v", stage, err)
 			}
 			f.mu.Lock()
-			if f.committed != "" || len(f.answers) != 1 {
+			wantCommitted := ""
+			if stage == "speak" {
+				wantCommitted = "01"
+			}
+			if f.committed != wantCommitted || len(f.answers) != 1 {
 				t.Error("failure advanced consumption or lost summary")
 			}
 			f.mu.Unlock()
-			f.step(time.Millisecond)
+			if stage == "commit" {
+				f.step(time.Millisecond)
+			}
 			f.step(0)
 			f.mu.Lock()
 			defer f.mu.Unlock()

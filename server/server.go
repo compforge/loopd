@@ -91,7 +91,6 @@ func (server *Server) Register(engine *route.Engine) { server.api.Register(engin
 func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
-	workers.Go(func() { server.chat.Run(ctx) })
 	workers.Go(func() { server.poll.Run(ctx) })
 	workers.Wait()
 }

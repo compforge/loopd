@@ -1,16 +1,17 @@
 # loopd Kernel
 
-loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-独立参与者通过持久化消息协作：各自运行，自己决定何时接收消息、何时回应，处理到安全位置再确认消费。
+loopd 是 Actor 通过持久消息协作的平台，也是 “Loop is a CRD” 在编排层的实现。
+User、Operator 与 Harness 都是 Actor：各自运行，自己决定何时接收消息、何时回应，
+处理到安全位置再确认消费。
 Conversation 是共享交流空间，不是由一次请求驱动、等待一个答案后结束的固定工作流。
 
 ## 协作模型
 
 Human 可以在 Operator 工作期间持续发言；Operator 可以先回应一部分，再继续工作和发言。
-双方不互相占有生命周期，也不必轮流执行。Operator 通过 Poll 接收输入，通过 Speak 回应，
+双方不互相占有生命周期，也不必轮流执行。Operator 通过 Poll 接收输入，通过 Speak 发给 User、其他 Operator 或会话中的 Actor，
 在结果或领域进度足以支持安全恢复后 Commit；何时做这些事，由各 Operator 的业务决定。
 
-这套参与者模型也容纳 Harness。角色描述身份，不表示谁是主、谁是辅；但统一身份不等于统一
+Actor 模型也容纳直接面向用户的 Harness。角色描述身份，不表示谁是主、谁是辅；但统一身份不等于统一
 执行协议：Operator 使用 Poll/Commit，Harness 的接入和执行恢复仍由 Adapter 契约负责。
 
 协作所需的状态各有归属：
@@ -40,6 +41,10 @@ Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费�
 
 Operator 不依赖 server 的私有 model/repo，不直接操作聊天数据库或 Redis。
 server 不导入 Operator 领域 CRD，也不执行 Harness Adapter。
+
+Operator 关注收发消息与业务逻辑。消费进度持久化、通知重试、消息增量固化和间接送达页面等技术
+机制收在 Verb 之下；runtime 的价值是让业务代码不必管理数据库 queue、Redis 或 SSE 连接。
+消息发送成功以 DB 接收为准，页面传输失败不改变这一事实；何时 Commit 仍由业务安全边界决定。
 
 ## 参与者与会话
 
@@ -81,18 +86,20 @@ runtime 不把普通发言自动解释成 steer/followup，也不替 Operator �
 也不决定消息是新业务工作、补充信息还是确认答复。显式卡片回复给 typed Verb 返回值，
 普通发言交给 Operator 判断，不自动解释为批准。
 
-每条 Message 独立寻址、更新和持久化；页面流只聚合传输。Message 的 end 与页面流 end 相互独立。
+每条 Message 独立寻址、更新和持久化；Speak 可以一次说完，也可以逐步输出后 End。
+End 只表示说完这条消息，不结束 Conv 或业务工作。页面流只聚合传输，其连接生命周期由页面管理，
+不是 Operator 的完成动作。
 连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
 
 恢复责任分层：
 
 - 编排恢复依赖 Operator 持久化的 CRD 领域进度；Conv 游标不能恢复 Go 调用栈。
 - Harness 恢复由 Adapter 和执行端保证；agentd 可承载持久执行，agentgo 是进程内 demo。
-- 聊天层负责消息快照、通知重试、流式续接与交付收尾，不接管以上执行恢复。
+- 聊天层负责消息快照、通知重试、流式续接与消息结束状态，不接管以上执行恢复。
 
 ## 文档分工
 
-Kernel 只定义跨功能稳定的参与者模型、协作主线与恢复责任。调用契约和领域机制分别由以下
+Kernel 只定义跨功能稳定的 Actor 模型、协作主线与恢复责任。调用契约和领域机制分别由以下
 文档拥有，不在 Kernel 展开参数、状态分支或示例 Operator 的策略。
 
 | 文档 | 回答的问题 |

@@ -98,8 +98,7 @@ func (service *MessageService) ListMessages(
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
-		DeliveryState: value.DeliveryState,
-		TargetKind:    loopd.Role(value.TargetKind), TargetKey: value.TargetKey,
+		TargetKind: loopd.Role(value.TargetKind), TargetKey: value.TargetKey,
 		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
 		Kind: loopd.Role(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
@@ -133,6 +132,9 @@ func validateContent(content json.RawMessage) error {
 	var meta map[string]json.RawMessage
 	if err := json.Unmarshal(model.Meta, &meta); err != nil {
 		return err
+	}
+	if _, reserved := meta["output"]; reserved {
+		return ErrInvalid
 	}
 	if _, reserved := meta["human"]; reserved {
 		return ErrInvalid

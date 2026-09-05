@@ -2,7 +2,6 @@ package delivery
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -82,50 +81,26 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 		return nil
 	}
 	discover := func() error {
-		rows, err := coordinator.repo.ListMessagesByTask(ctx, taskID, "", -1)
+		rows, err := coordinator.repo.ListDeliveryMessages(ctx, conversationID)
 		if err != nil {
 			return err
 		}
 		for _, row := range rows {
-			if row.Purpose == "input" {
-				continue
+			// SQL snapshots repair missed bridge deliveries without asking writers
+			// or Operators to know whether a browser was connected.
+			if err := snapshot(row); err != nil {
+				return err
 			}
-			if row.Purpose == "output" && input.DeliveryState != "closed" {
+			if row.Purpose == "output" && !visibleMessage(row).Ended() {
 				if err := start(row, ""); err != nil {
 					return err
 				}
-			} else if err := snapshot(row); err != nil {
-				return err
 			}
 		}
 		return nil
 	}
 	if err := discover(); err != nil {
 		return err
-	}
-	if input.DeliveryState == "closed" {
-		var failure *Failure
-		if len(input.Completion) != 0 {
-			if err := json.Unmarshal(input.Completion, &failure); err != nil {
-				return err
-			}
-		}
-		var seq uint64 = 2
-		if failure != nil {
-			data, err := agentueui.Failure(seq, failure.Code, failure.Message).Marshal()
-			if err != nil {
-				return err
-			}
-			if err := deliver(Event{Data: data}); err != nil {
-				return err
-			}
-			seq++
-		}
-		end, err := agentueui.End(seq).Marshal()
-		if err != nil {
-			return err
-		}
-		return deliver(Event{Data: end})
 	}
 	control := transportMessage(input)
 	// A lost bridge can only restart from the durable message snapshot.
@@ -154,31 +129,12 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				}
 				continue
 			}
-			parsed, err := agentueui.Parse(value.delivery.Data)
-			if err != nil {
-				return err
-			}
 			msg := visibleMessage(value.message)
 			event := Event{MessageID: msg.ID, Message: &msg, Data: value.delivery.Data}
 			if msg.ID == control.ID {
 				event.Message = nil
 				event.ID = value.delivery.Cursor
 				event.Persisted = event.ID != ""
-				if parsed.Op == agentueui.OpEnd {
-					// UI closure flushes current snapshots but never terminates message writers.
-					rows, err := coordinator.repo.ListMessagesByTask(ctx, taskID, "", -1)
-					if err != nil {
-						return err
-					}
-					for _, row := range rows {
-						if row.Purpose != "input" {
-							if err := snapshot(row); err != nil {
-								return err
-							}
-						}
-					}
-					return deliver(event)
-				}
 			}
 			if err := deliver(event); err != nil {
 				return err

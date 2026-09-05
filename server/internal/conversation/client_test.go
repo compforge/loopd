@@ -96,7 +96,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	}{
 		{"001", a}, {"002", b}, {"000", a},
 	} {
-		if err := c.Signal(ctx, "conv", signal.id, signal.actor); err != nil {
+		if err := c.Signal(ctx, "conv", signal.id, signal.actor, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,7 +108,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if value.EndOffset("operator", "a") != "001" || value.EndOffset("operator", "b") != "002" {
 		t.Fatalf("signals = %+v", value.Spec)
 	}
-	if err := c.Signal(ctx, "conv", "003", loopd.ActorRef{}); err != nil {
+	if err := c.Signal(ctx, "conv", "003", loopd.ActorRef{}, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := kube.Get(ctx, key, value); err != nil {

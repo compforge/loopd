@@ -6,7 +6,7 @@ import (
 )
 
 func TestHumanRequestModes(t *testing.T) {
-	base := HumanRequest{ConversationID: "conv", Actor: ActorRef{Kind: RoleOperator, Key: "router"}, Target: ActorRef{Kind: RoleUser, Key: "alice"}, TaskID: "task", EffectKey: "effect", Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, Choices: []HumanChoice{{Value: "small", Label: "Small"}}}
+	base := HumanRequest{ConversationID: "conv", Actor: ActorRef{Kind: RoleOperator, Key: "router"}, Target: ActorRef{Kind: RoleUser, Key: "alice"}, EffectKey: "effect", Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, Choices: []HumanChoice{{Value: "small", Label: "Small"}}}
 	for _, test := range []struct {
 		name   string
 		change func(*HumanRequest)

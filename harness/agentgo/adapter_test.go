@@ -17,7 +17,7 @@ func TestAdapterPromptStreamsTextAndReturnsResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	call, err := adapter.Prompt(context.Background(), harness.Request{
-		CallID: "call-1", TaskID: "task-1", IdempotencyKey: "task-1/answer", Prompt: "hi",
+		CallID: "call-1", IdempotencyKey: "task-1/answer", Prompt: "hi",
 	})
 	if err != nil {
 		t.Fatal(err)

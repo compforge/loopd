@@ -76,7 +76,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	return result, nil
 }
 func publicMessage(m model.Message) loopd.Message {
-	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -144,7 +144,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, TaskID: r.TaskID, Kind: "operator", ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: "operator", ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Meta    map[string]any `json:"meta"`
 			Blocks  []replyBlock   `json:"blocks"`
 		}{"1.0", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, TaskID: m.TaskID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
 		if err := tx.Create(&reply).Error; err != nil {
 			return err
 		}
@@ -249,7 +249,7 @@ func (store *Store) AcknowledgeHumanWake(ctx context.Context, id string, revisio
 
 func humanRequest(m model.Message, c humanContent) loopd.HumanRequest {
 	b := c.Blocks[0]
-	return loopd.HumanRequest{TaskID: m.TaskID, EffectKey: c.Meta.Human.EffectKey, Timeout: c.Meta.Human.Timeout, Type: b.Type, Title: b.Title, Prompt: b.Prompt, Choices: b.Choices, AllowOther: b.AllowOther, ConfirmLabel: b.ConfirmLabel, DeclineLabel: b.DeclineLabel}
+	return loopd.HumanRequest{EffectKey: c.Meta.Human.EffectKey, Timeout: c.Meta.Human.Timeout, Type: b.Type, Title: b.Title, Prompt: b.Prompt, Choices: b.Choices, AllowOther: b.AllowOther, ConfirmLabel: b.ConfirmLabel, DeclineLabel: b.DeclineLabel}
 }
 
 func humanQuestion(m model.Message, c humanContent) domain.HumanQuestion {

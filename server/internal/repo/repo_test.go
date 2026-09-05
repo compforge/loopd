@@ -2,7 +2,6 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -104,7 +103,7 @@ func TestListConversationsReturnsOnlyRootsNewestFirst(t *testing.T) {
 	}
 }
 
-func TestCreateChatInputRollsBackOnInitializationError(t *testing.T) {
+func TestCreateChatInputRejectsMissingConversation(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	conversationID := "01991f3d-1111-7000-8000-000000000000"
@@ -124,8 +123,9 @@ func TestCreateChatInputRollsBackOnInitializationError(t *testing.T) {
 		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", ActorKey: "user-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
-	if _, err := store.CreateChatInput(ctx, user, func(context.Context) error { return errors.New("initialize failed") }); err == nil {
-		t.Fatal("CreateChatInput succeeded despite initialization failure")
+	user.ConversationID = "missing"
+	if _, err := store.CreateChatInput(ctx, user); err == nil {
+		t.Fatal("CreateChatInput succeeded for a missing conversation")
 	}
 	messages, err := store.ListMessages(ctx, conversationID, "", 100)
 	if err != nil {

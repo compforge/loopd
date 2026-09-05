@@ -47,20 +47,6 @@ func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) (
 	return messages, nil
 }
 
-// ListMessagesByTask includes both user-conversation and work-conversation
-// messages. It does not infer the current input from the last user reply.
-func (store *Store) ListMessagesByTask(ctx context.Context, taskID, after string, limit int) ([]model.Message, error) {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	query := store.db.WithContext(ctx).Where("task_id = ?", taskID)
-	if after != "" {
-		query = query.Where("id > ?", after)
-	}
-	var messages []model.Message
-	err := query.Order("id ASC").Limit(limit).Find(&messages).Error
-	return messages, mapError(err)
-}
-
 func (store *Store) GetMessage(ctx context.Context, id string) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -124,7 +110,7 @@ func (store *Store) ObserveMessageActivity(ctx context.Context, id string, at ti
 		Where("id = ? AND updated_at < ?", id, at).UpdateColumn("updated_at", at).Error)
 }
 
-func (store *Store) CreateChatInput(ctx context.Context, input model.Message, beforeCommit func(context.Context) error) (model.Message, error) {
+func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	input.Purpose = "input"
@@ -139,10 +125,19 @@ func (store *Store) CreateChatInput(ctx context.Context, input model.Message, be
 		if err := tx.Create(&input).Error; err != nil {
 			return mapError(err)
 		}
-		if beforeCommit != nil {
-			return beforeCommit(ctx)
-		}
 		return nil
 	})
 	return input, err
+}
+
+// ListDeliveryMessages observes a user conversation and its direct actor workspaces.
+// TaskID identifies the page connection, not the set of messages actors may publish.
+func (store *Store) ListDeliveryMessages(ctx context.Context, conversationID string) ([]model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	var messages []model.Message
+	err := store.db.WithContext(ctx).Joins("JOIN conversations ON conversations.id = messages.conversation_id").
+		Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID).
+		Order("messages.id ASC").Find(&messages).Error
+	return messages, mapError(err)
 }

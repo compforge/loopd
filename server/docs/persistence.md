@@ -40,8 +40,10 @@ revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状�
 每条消息分别更新，不能因为 block ID 相同就跨消息合并。持久化与 replay 见
 [页面交付](ue.md#页面交付)。
 
-task_id 仅关联 UI／Redis 交付，可以为空。purpose=input 的消息是开启该交付的真实用户发言，
-其 delivery_state/completion 保存 UI 关闭意图；这些字段不控制 Actor 是否还可以发言。
+task_id 仅保存在开启 UI／Redis 交付的真实用户 input 上，其他 Actor 发言不需要关联它。
+不再保存页面关闭意图。普通输出的 meta.output.ended 记录是否说完这条消息，不表示业务完成。
+默认 Speak 原子保存完整正文及 ended=true；流式输出的 End 与 Revision 一起保存。
+受控 meta.output 同时保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
 ## Human 状态

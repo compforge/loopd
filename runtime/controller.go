@@ -28,7 +28,8 @@ func ConversationPredicate(actor loopd.ActorRef) predicate.Funcs {
 			}
 			// Changes to B's signal/status do not wake A. Advancing A's cursor
 			// with unread input remaining does wake A to drain the next batch.
-			return old.EndOffset(string(actor.Kind), actor.Key) != next.EndOffset(string(actor.Kind), actor.Key) ||
+			return old.Wake(string(actor.Kind), actor.Key) != next.Wake(string(actor.Kind), actor.Key) ||
+				old.EndOffset(string(actor.Kind), actor.Key) != next.EndOffset(string(actor.Kind), actor.Key) ||
 				old.Committed(string(actor.Kind), actor.Key) != next.Committed(string(actor.Kind), actor.Key)
 		},
 		GenericFunc: func(e event.GenericEvent) bool {

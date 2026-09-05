@@ -32,7 +32,7 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 		t.Fatal(err)
 	}
 	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	if _, err := store.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial}, nil); err != nil {
+	if _, err := store.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial}); err != nil {
 		t.Fatal(err)
 	}
 	redisServer := miniredis.RunT(t)
@@ -47,7 +47,7 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 }
 func ptr(value string) *string { return &value }
 func outputRequest(key string) loopd.SpeakRequest {
-	return loopd.SpeakRequest{Key: key, TaskID: "task", Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
+	return loopd.SpeakRequest{Stream: true, Key: key, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 }
 func outputText(t *testing.T, seq uint64, text string) json.RawMessage {
 	return marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: seq, Block: map[string]any{"id": "text", "type": "text", "content": text}})
@@ -77,9 +77,6 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 			}
 		}
 	}
-	if err := producer.Complete(ctx, "task", nil); err != nil {
-		t.Fatal(err)
-	}
 	// A closed UI stream does not own the lifetime of its writers.
 	if _, err := producer.EmitMessage(ctx, a.ID, outputText(t, 3, "later plan")); err != nil {
 		t.Fatal(err)
@@ -105,13 +102,13 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 		if e.Op == agentueui.OpSet {
 			seen[v.MessageID], _ = e.Block["content"].(string)
 		}
+		if seen[a.ID] == "later plan" && seen[b.ID] == "execute" {
+			return errStop
+		}
 		return nil
 	})
-	if err != nil || seen[a.ID] != "later plan" || seen[b.ID] != "execute" {
+	if !errors.Is(err, errStop) || seen[a.ID] != "later plan" || seen[b.ID] != "execute" {
 		t.Fatalf("seen=%v err=%v", seen, err)
-	}
-	if err := store.FinishCompletion(ctx, "task"); err != nil {
-		t.Fatal(err)
 	}
 	for _, key := range []string{"task", "message/" + a.ID, "message/" + b.ID} {
 		if err := producer.events.Delete(ctx, key); err != nil {
@@ -119,11 +116,19 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 		}
 	}
 	count := 0
-	if err := consumer.Stream(ctx, "task", "root", "", func(Event) error { count++; return nil }); err != nil {
+	if err := consumer.Stream(ctx, "task", "root", "", func(v Event) error {
+		if v.MessageID != "" {
+			count++
+		}
+		if count == 4 {
+			return errStop
+		}
+		return nil
+	}); !errors.Is(err, errStop) {
 		t.Fatal(err)
 	}
 	if count != 4 {
-		t.Fatalf("three messages and control end=%d", count)
+		t.Fatalf("input and three messages=%d", count)
 	}
 }
 func TestSpeakConcurrentIdentity(t *testing.T) {
@@ -184,17 +189,18 @@ func TestStreamDiscoversOutputDuringDelivery(t *testing.T) {
 			if _, err := producer.EmitMessage(ctx, created, outputText(t, 2, "later")); err != nil {
 				return err
 			}
-			return producer.Complete(ctx, "task", nil)
+			return nil
 		}
 		if v.MessageID == created {
 			observed = true
+			return errStop
 		}
 		if v.MessageID == "" && e.Op == agentueui.OpEnd && !observed {
 			t.Fatal("end lost output")
 		}
 		return nil
 	})
-	if err != nil || !observed {
+	if !errors.Is(err, errStop) || !observed {
 		t.Fatalf("observed=%v err=%v", observed, err)
 	}
 }

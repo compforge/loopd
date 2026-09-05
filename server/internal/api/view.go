@@ -44,10 +44,6 @@ type messageEventResponse struct {
 	ID string `json:"id"`
 }
 
-type completeDeliveryRequest struct {
-	Error *deliveryFailure `json:"error,omitempty"`
-}
-
 type deliveryFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -11,7 +11,6 @@ import (
 type Request struct {
 	CallID         string
 	IdempotencyKey string
-	TaskID         string
 	Prompt         string
 	Tools          []loopd.Tool
 }

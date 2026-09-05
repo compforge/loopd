@@ -93,7 +93,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 	// deadline and immutable result, so restarting never resets the 10s wait.
 	ask, err := d.loop.Human.Ask(ctx, rt.AskRequest{
 		ConversationID: conversationID, Actor: actor, Target: target, ReplyToID: message.ID,
-		TaskID: message.TaskID, EffectKey: message.ID + "/answer-style", Timeout: 10 * time.Second,
+		EffectKey: message.ID + "/answer-style", Timeout: 10 * time.Second,
 		Title: "选择处理方式", Prompt: askPrompt,
 		Choices: []loopd.HumanChoice{
 			{Value: "brief", Label: "简要说明"},
@@ -116,7 +116,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		prompt := "你选择了「" + outcome(choice) + "」。是否确认按这个方式处理？（本例只汇总交互，不调用模型或执行外部操作。）"
 		confirm, err := d.loop.Human.Confirm(ctx, rt.ConfirmRequest{
 			ConversationID: conversationID, Actor: actor, Target: target, ReplyToID: message.ID,
-			TaskID: message.TaskID, EffectKey: message.ID + "/confirm-style", Timeout: 10 * time.Second,
+			EffectKey: message.ID + "/confirm-style", Timeout: 10 * time.Second,
 			Title: "确认处理方式", Prompt: prompt, ConfirmLabel: "确认", DeclineLabel: "取消",
 		})
 		if err != nil {
@@ -143,16 +143,9 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 	// Stable message identity lets delivery or Commit retry without another answer.
 	if _, err := d.loop.Conv.Speak(ctx, conversationID, loopd.SpeakRequest{
 		Key: message.ID + "/summary", Actor: actor, Target: target, ReplyToID: message.ID,
-		TaskID: message.TaskID, Content: content,
+		Content: content,
 	}); err != nil {
 		return false, err
-	}
-	// UI correlation is optional. Closing this stream neither ends the Conv nor
-	// defines the consumer position; Commit is a separate step in Reconcile.
-	if message.TaskID != "" {
-		if err := d.loop.Delivery.Complete(ctx, message.TaskID, nil); err != nil {
-			return false, err
-		}
 	}
 	return false, nil
 }

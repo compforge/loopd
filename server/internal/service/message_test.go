@@ -37,40 +37,36 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 	if err != nil || len(history) != 1 || history[0].ID != input.ID || string(history[0].Content) != string(textContent("question")) {
 		t.Fatalf("expected only the actual input: %+v %v", history, err)
 	}
-	if err := chat.Complete(ctx, input.TaskID, nil); err != nil {
-		t.Fatal(err)
-	}
 	history, err = store.ListMessages(ctx, conversation.ID, "", 100)
-	if err != nil || len(history) != 1 || history[0].DeliveryState != "closed" {
-		t.Fatalf("completion must not invent an answer: %+v %v", history, err)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("input must not invent an answer: %+v %v", history, err)
 	}
 }
 
-func TestChatRollsBackInputWhenStreamInitializationFails(t *testing.T) {
+func TestChatAcceptsInputWithoutPageDelivery(t *testing.T) {
 	store := openServiceStore(t)
 	ctx := context.Background()
 	conversation, err := NewConversationService(store, nil).CreateConversation(ctx, "Planning", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &recordingChatRunner{initializeErr: errors.New("offline")}
-	chat := NewChatService(store, runner, nil, nil)
+	chat := NewChatService(store, nil, nil, nil)
 	_, err = chat.Create(ctx, conversation.ID, "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("question"))
-	if !errors.Is(err, ErrUnavailable) {
+	if err != nil {
 		t.Fatalf("Create = %v", err)
 	}
 	history, err := store.ListMessages(ctx, conversation.ID, "", 100)
-	if err != nil || len(history) != 0 {
-		t.Fatalf("uncommitted input survived: %+v %v", history, err)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("committed input missing: %+v %v", history, err)
 	}
 }
 
-func TestChatDeletesStreamWhenCommitFails(t *testing.T) {
+func TestChatReportsDatabaseFailure(t *testing.T) {
 	runner := &recordingChatRunner{}
 	chat := NewChatService(failingCommitRepository{}, runner, nil, nil)
 	_, err := chat.Create(context.Background(), "conv", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("question"))
-	if err == nil || runner.initializedTaskID == "" || runner.deletedTaskID != runner.initializedTaskID {
-		t.Fatalf("commit compensation: %+v %v", runner, err)
+	if err == nil {
+		t.Fatalf("commit error: %+v %v", runner, err)
 	}
 }
 
@@ -135,38 +131,7 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 
 type nopChatRunner struct{}
 
-func (nopChatRunner) Initialize(context.Context, string, json.RawMessage) error { return nil }
-func (nopChatRunner) Delete(context.Context, string) error                      { return nil }
-func (nopChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
-	return "", nil
-}
-
-type recordingChatRunner struct {
-	initializedTaskID string
-	deletedTaskID     string
-	completedTaskID   string
-	completeErr       error
-	initializeErr     error
-}
-
-func (runner *recordingChatRunner) Initialize(_ context.Context, taskID string, _ json.RawMessage) error {
-	runner.initializedTaskID = taskID
-	return runner.initializeErr
-}
-
-func (runner *recordingChatRunner) Delete(_ context.Context, taskID string) error {
-	runner.deletedTaskID = taskID
-	return nil
-}
-
-func (*recordingChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
-	return "", nil
-}
-
-func (runner *recordingChatRunner) Complete(_ context.Context, taskID string, _ *delivery.Failure) error {
-	runner.completedTaskID = taskID
-	return runner.completeErr
-}
+type recordingChatRunner struct{}
 
 func (*recordingChatRunner) Stream(
 	context.Context,
@@ -177,7 +142,6 @@ func (*recordingChatRunner) Stream(
 ) error {
 	return nil
 }
-func (nopChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
 func (nopChatRunner) Stream(
 	context.Context,
 	string,
@@ -193,11 +157,7 @@ type failingCommitRepository struct{}
 func (failingCommitRepository) CreateChatInput(
 	ctx context.Context,
 	_ model.Message,
-	beforeCommit func(context.Context) error,
 ) (model.Message, error) {
-	if err := beforeCommit(ctx); err != nil {
-		return model.Message{}, err
-	}
 	return model.Message{}, errors.New("commit failed")
 }
 
@@ -219,30 +179,6 @@ func textContent(text string) json.RawMessage {
 		"blocks":  []map[string]any{{"id": "text", "type": "text", "content": text}},
 	})
 	return value
-}
-
-func (failingCommitRepository) BeginCompletion(context.Context, string, []byte) error {
-	return nil
-}
-func (failingCommitRepository) FinishCompletion(context.Context, string) error { return nil }
-
-func completionStore(t *testing.T) *repo.Store {
-	t.Helper()
-	store := openServiceStore(t)
-	ctx := context.Background()
-	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conversation-1"}); err != nil {
-		t.Fatal(err)
-	}
-	_, err := store.CreateChatInput(ctx,
-		model.Message{ID: "input", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "alice", Content: textContent("question")}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return store
-}
-
-func (failingCommitRepository) PendingCompletions(context.Context) ([]model.Message, error) {
-	return nil, nil
 }
 
 func (nopChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {

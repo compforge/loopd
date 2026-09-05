@@ -40,7 +40,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err != nil || task.ActorKey != "alice" {
 		t.Fatalf("trusted principal=%+v %v", task, err)
 	}
-	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: task.ID, TaskID: taskID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
+	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
 	data, _ := json.Marshal(request)
 	created := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if created.StatusCode() != 200 {
@@ -78,7 +78,6 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 		t.Fatalf("changed context=%+v %v", taskAfter, err)
 	}
 	// +case=`Questions are conversation-owned even without a UI delivery ID.`
-	request.TaskID = ""
 	request.EffectKey = "independent"
 	data, _ = json.Marshal(request)
 	independent := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))

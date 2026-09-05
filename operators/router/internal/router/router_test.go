@@ -119,10 +119,15 @@ func TestReconcileCompletesInvalidPlanAsFailure(t *testing.T) {
 	}
 }
 
-func (server *loopServer) result() (string, bool, *loopruntime.DeliveryFailure) {
+func (server *loopServer) result() (string, bool, *testFailure) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	return server.answer, server.completed, server.failure
+}
+
+type testFailure struct {
+	Code    string
+	Message string
 }
 
 type loopServer struct {
@@ -130,7 +135,7 @@ type loopServer struct {
 	mu           sync.Mutex
 	answer       string
 	completed    bool
-	failure      *loopruntime.DeliveryFailure
+	failure      *testFailure
 	polls        int
 	inbox        [][]loopd.Message
 	completedIDs []string
@@ -142,6 +147,12 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 	value.Server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/commit"):
+			var input loopd.CommitRequest
+			_ = json.NewDecoder(request.Body).Decode(&input)
+			value.mu.Lock()
+			value.completed = true
+			value.completedIDs = append(value.completedIDs, input.Through)
+			value.mu.Unlock()
 			response.WriteHeader(http.StatusNoContent)
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/speak"):
 			var input loopd.SpeakRequest
@@ -149,6 +160,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 				t.Error(err)
 			}
 			var content struct {
+				Meta   struct{ Error *testFailure }
 				Blocks []struct {
 					ID      string
 					Content string
@@ -156,6 +168,11 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			if err := json.Unmarshal(input.Content, &content); err != nil {
 				t.Error(err)
+			}
+			if content.Meta.Error != nil {
+				value.mu.Lock()
+				value.failure = content.Meta.Error
+				value.mu.Unlock()
 			}
 			for _, block := range content.Blocks {
 				if block.ID == "answer" {
@@ -176,7 +193,11 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			value.polls++
 			value.mu.Unlock()
-			_ = json.NewEncoder(response).Encode(loopd.PollResult{Messages: messages})
+			position := ""
+			if len(messages) > 0 {
+				position = messages[len(messages)-1].ID
+			}
+			_ = json.NewEncoder(response).Encode(loopd.PollResult{Messages: messages, Position: position})
 		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/actors":
 			_ = json.NewEncoder(response).Encode(loopd.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: loopd.RoleOperator, ActorKey: "router"})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
@@ -209,21 +230,6 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(response, `{"id":%q}`, fmt.Sprintf("%d-0", event.Seq))
-		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/complete"):
-			var input struct {
-				Error *loopruntime.DeliveryFailure `json:"error"`
-			}
-			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
-				t.Error(err)
-				response.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			value.mu.Lock()
-			value.completed = true
-			value.completedIDs = append(value.completedIDs, strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/deliveries/"), "/complete"))
-			value.failure = input.Error
-			value.mu.Unlock()
-			response.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(response, request)
 		}

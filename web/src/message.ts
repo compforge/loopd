@@ -13,5 +13,7 @@ export function applyMessageEvent(messages: Message[], delivery: MessageEvent): 
   const existing = messages.find((m) => m.id === messageID);
   if (existing && ((existing.revision ?? 0) > event.seq || (event.op !== "start" && (existing.revision ?? 0) === event.seq))) return messages;
   const snapshot = applyPatch(structuredClone(existing?.content ?? {}), event);
-  return mergeMessage(messages, { ...message, revision: event.seq, content: parseUIModel(snapshot) });
+  const model = parseUIModel(snapshot);
+  if (event.op === "end") model.meta.output = { ended: true };
+  return mergeMessage(messages, { ...message, revision: event.seq, content: model });
 }

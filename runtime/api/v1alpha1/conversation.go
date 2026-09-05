@@ -1,6 +1,11 @@
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"crypto/sha256"
+	"fmt"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 const ConversationKind = "Conversation"
 
@@ -78,4 +83,15 @@ func (conversation *Conversation) Committed(kind, key string) string {
 		}
 	}
 	return ""
+}
+
+// WakeAnnotation identifies an actor-specific message revision notification.
+// EndOffset alone cannot wake a reader when an earlier streamed message finishes.
+func WakeAnnotation(kind, key string) string {
+	sum := sha256.Sum256([]byte(kind + "\x00" + key))
+	return fmt.Sprintf("loopd.compforge.io/wake-%x", sum[:16])
+}
+
+func (conversation *Conversation) Wake(kind, key string) string {
+	return conversation.Annotations[WakeAnnotation(kind, key)]
 }

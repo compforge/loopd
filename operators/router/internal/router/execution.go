@@ -15,10 +15,6 @@ import (
 // resource. This demo has no durable business checkpoint: Poll acknowledges
 // receipt, not completion. Harness recovery remains the adapter's responsibility.
 func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, messages []loopd.Message) (runErr error) {
-	var deliveryIDs []string
-	if input.TaskID != "" {
-		deliveryIDs = append(deliveryIDs, input.TaskID)
-	}
 	position := input.ID
 	// UI streams are delivery identities, not business task boundaries.
 	// Several published messages may contribute to the same input range.
@@ -26,9 +22,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 		if ctx.Err() != nil {
 			return
 		}
-		var failure *loopruntime.DeliveryFailure
 		if runErr != nil {
-			failure = &loopruntime.DeliveryFailure{Code: "router_failed", Message: runErr.Error()}
 			reconciler.logger.ErrorContext(ctx, "Router execution failed",
 				"conversation_id", input.ConversationID, "error", runErr)
 		}
@@ -40,21 +34,14 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
 				Key: input.ID + "/failure", Actor: routerActor,
 				Target:    loopd.ActorRef{Kind: input.Kind, Key: input.Key},
-				ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
+				ReplyToID: input.ID, Content: content,
 			}); err != nil {
 				runErr = errors.Join(runErr, err)
 				return
 			}
 		}
-		var completionErr error
-		for _, id := range deliveryIDs {
-			completionErr = errors.Join(completionErr, reconciler.loop.Delivery.Complete(ctx, id, failure))
-		}
-		runErr = errors.Join(runErr, completionErr)
-		if completionErr == nil {
-			runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, input.ConversationID,
-				loopd.CommitRequest{Actor: routerActor, Through: position}))
-		}
+		runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, input.ConversationID,
+			loopd.CommitRequest{Actor: routerActor, Through: position}))
 	}()
 	workspace, err := reconciler.loop.Conv.Workspace(ctx, input.ConversationID, routerActor)
 	if err != nil {
@@ -101,7 +88,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 		// Drain inputs only after the dispatched batch has finished. Arrival
 		// while waiting does not cancel/restart a Harness or launch another run.
 		through := position
-		additions, err := reconciler.pollAdditions(ctx, input.ConversationID, &deliveryIDs, &position)
+		additions, err := reconciler.pollAdditions(ctx, input.ConversationID, &position)
 		if err != nil {
 			return err
 		}
@@ -111,7 +98,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 				"blocks": []any{map[string]any{"id": "progress", "type": "text", "content": "阶段结果\n\n" + strings.Join(results, "\n\n")}}})
 			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
 				Key: fmt.Sprintf("%s/progress/%d", input.ID, round), Actor: routerActor,
-				Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
+				Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, Content: content,
 			}); err != nil {
 				return err
 			}
@@ -135,7 +122,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 					"blocks": []any{map[string]any{"id": "answer", "type": "text", "content": answer}}})
 				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
 					Key: input.ID + "/answer", Actor: routerActor, Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key},
-					ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
+					ReplyToID: input.ID, Content: content,
 				})
 				return err
 			}
@@ -146,7 +133,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 	}
 }
 
-func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, deliveryIDs *[]string, position *string) ([]string, error) {
+func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, position *string) ([]string, error) {
 	var texts []string
 	const limit = 100
 	for {
@@ -160,16 +147,6 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 		for _, message := range inbox.Messages {
 			if message.Kind != loopd.RoleUser {
 				continue
-			}
-			found := false
-			for _, id := range *deliveryIDs {
-				if id == message.TaskID {
-					found = true
-					break
-				}
-			}
-			if !found && message.TaskID != "" {
-				*deliveryIDs = append(*deliveryIDs, message.TaskID)
 			}
 			text, err := modelText(message.Content)
 			if err != nil {
@@ -193,7 +170,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input loopd.Mess
 			key = fmt.Sprintf("work/%d/%d", round, index)
 		}
 		call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-			ConversationID: workspaceID, TaskID: input.TaskID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget,
+			ConversationID: workspaceID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget,
 			Text: executionPrompt(query, history, task),
 		})
 		if err != nil {
@@ -217,7 +194,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input loopd.Mess
 
 func (reconciler *Reconciler) call(ctx context.Context, input loopd.Message, workspaceID, key, prompt string) (string, error) {
 	call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-		ConversationID: workspaceID, TaskID: input.TaskID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
+		ConversationID: workspaceID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
 	})
 	if err != nil {
 		return "", fmt.Errorf("start %s Harness: %w", key, err)

@@ -26,3 +26,18 @@ describe("message-addressed delivery",()=>{
   expect(()=>applyMessageEvent([],{...event,messageID:"b"})).toThrow("identity mismatch");
  });
 });
+
+it("ending one message leaves other messages live and accepts later actors", () => {
+ const a=message("a"), b=message("b");
+ a.content.meta.output={ended:false}; b.content.meta.output={ended:false};
+ let messages:Message[]=[];
+ for(const m of [a,b]) messages=applyMessageEvent(messages,frame(m,{op:"start",seq:1,model:m.content}));
+ messages=applyMessageEvent(messages,frame(a,{op:"end",seq:2}));
+ messages=applyMessageEvent(messages,frame(b,{op:"set",seq:2,block:{id:"text",type:"text",content:"still speaking"}}));
+ expect(messages[0].content.meta.output).toEqual({ended:true});
+ expect(messages[1].content.meta.output).toEqual({ended:false});
+ const c=message("c"); c.task_id=""; c.content.meta.output={ended:true};
+ messages=applyMessageEvent(messages,frame(c,{op:"start",seq:1,model:c.content}));
+ expect(messages).toHaveLength(3);
+ expect(applyMessageEvent(messages,frame(a,{op:"start",seq:1,model:a.content}))).toBe(messages);
+});

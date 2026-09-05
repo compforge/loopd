@@ -59,7 +59,6 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.POST("/v1/conversations/:conversation_id/human", server.adapt(server.createHuman))
 	engine.POST("/v1/conversations/:conversation_id/replies", server.adapt(server.replyHuman))
 	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
-	engine.POST("/v1/deliveries/:task_id/complete", server.adapt(server.completeDelivery))
 }
 
 type handler func(context.Context, *hertzapp.RequestContext) error

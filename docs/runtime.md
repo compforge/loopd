@@ -8,7 +8,7 @@ Client 与 Reconcile 调度，loop-runtime 联合 server 提供数据读取、�
 Operator 持久化的领域 CRD；Harness 恢复由 Adapter 及执行端保证。runtime 不恢复 Go 调用栈，
 也不建立通用持久 Effect 引擎。跨组件边界见 [Kernel](kernel.md)。
 
-本文面向 Operator 开发者，定义 Verb 的调用与组合契约；独立参与者的整体协作模型见 Kernel，
+本文面向 Operator 开发者，定义 Verb 的调用与组合契约；Actor 的整体协作模型见 Kernel，
 服务端消费、存储和页面交付机制分别下沉到 server 的领域文档。
 
 ## 参与者与接入
@@ -43,13 +43,14 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 | Conv | Read | read：分页读取共享消息历史 |
 | Conv | Poll | write：拉取收件消息，记录 Position，不自动提交 |
 | Conv | Commit | write：确认连续安全消费前缀 |
-| Conv | Speak | write：Actor 在指定 Conv 中发一条消息 |
+| Conv | Speak | write：一次说完，或开启流式消息并返回句柄 |
 | Conv | Workspace | write：懒创建或复用该 Actor 的内部会话 |
 | Human | Ask / Confirm | write：创建或复用独立问题 Message |
 | Human handle | Get / Wait | read：观察问题的权威结果 |
 | Harness | Prompt | write：发起或复用有身份的执行，返回 Call |
 | Harness Call | Value / Stream / Wait | read：观察已有执行 |
-| Delivery | EmitMessage / Complete | write：按 Message 更新可见流／关闭页面交付 |
+| Message handle | Emit / End | write：增量更新／结束这条消息，不管理页面连接 |
+| Message handle | ID / Value | read：观察消息身份／本地已知快照 |
 | Operator / Harness | Register | write：注册与续租在线身份 |
 
 read 表达观察意图；server 在读取 Human 状态时推进已到期问题，不等于调用者发起新工作。
@@ -70,16 +71,16 @@ func Reconcile(convID) {
     call := Loop.Harness.Prompt(workspace, prompt, tools)   // 按选择与确认结果调用 Harness，立即取得句柄
     progress := call.Value(); events := call.Stream()      // 查看执行状态或持续观察增量
     result := call.Wait()                                  // 需要结果时再等；也可以先返回，之后再调谐
-    message := Loop.Conv.Speak(convID, result)              // 发言，可多次回应，不暗示整个工作结束
-    Loop.Delivery.EmitMessage(message.ID, event)            // 按消息更新可见内容，间接送达页面
-    Loop.Delivery.Complete(deliveryID)                      // 按需关闭页面流，不结束 Conv 或 Operator
+    Loop.Conv.Speak(convID, result)                        // 已知完整内容，一次说完，无需 End
+    stream := Loop.Conv.Speak(convID, Stream: true)         // 需要逐步输出时，取得消息句柄
+    stream.Emit(event); stream.End()                       // 增量输出，最后结束这条消息；页面继续订阅
     Loop.Conv.Commit(convID, inbox.Position)               // 仅提交已经安全处理的连续消息前缀
 }
 ```
 
 Ask/Confirm 得到有效结果后才进入依赖它们的步骤；取消、超时和拒绝由 Operator 决定如何收口。
 Harness 的可见输出由 runtime 自动交付，`call.Stream` 用于 Operator 自己观察，不必再转发一遍；
-`EmitMessage` 展示的是 Operator 自己更新消息的能力。追加消息何时再次 Poll，也由业务决定。
+`stream.Emit` 展示的是 Operator 自己逐步发言的能力，不是再转发一次 Harness 输出。追加消息何时再次 Poll，也由业务决定。
 
 `Loop.Operator.Register(...)` 与可选的 `Loop.Harness.Register(...)` 在启动时登记在线身份并续租，
 不在每次 Reconcile 里调用。Watch 属于 controller-runtime 的启动配置，不是 Verb。
@@ -91,10 +92,19 @@ Operator 自行选择历史范围并组装执行上下文，runtime 不定义独
 
 Conv.Speak 创建或复用一条 Actor-owned Message，稳定 Key 的范围是 Conv + Actor。
 同 key 重试返回既有消息，不覆盖已有正文；改变收件者或回复引用会冲突。需要新发言用新 key，
-更新已有消息则按其 Message ID 发布事件。内容是 AgentUE model，不限于文字。
+流式更新通过返回的消息句柄发布。内容是 AgentUE model，不限于文字。
 
-Speak 的 TaskID 可选，只用于页面交付关联。它既不依赖一个尚未完成的 user input，也不结束
-Operator 的工作。reply_to_id 表达回应哪条消息，target 表达说给谁听，两者不能互相替代。
+Speak 默认一次说完：Content 随消息原子保存并标记结束，不需要独立消息 Redis 流，也不需要 End。
+只有 `Stream: true` 才保持消息开放；可携带初始 Content，也可省略，之后用 `stream.Emit` 发布
+AgentUE set/append，最后 `stream.End`。两种模式返回同一 Go 句柄类型，ID/Value 可读取身份与快照。
+模式只在首次创建时生效，同 Key 重试不能把已结束消息重新打开。
+
+End 可重复调用，结束后不再接受 Emit；重新 Speak 同 Key 可取回结束状态与 Revision。
+句柄只属于一条消息，不关闭 Conv、不 Commit，也不结束其他 Actor 的工作或页面订阅。
+
+Speak 不依赖某次 user input 或页面连接。Target 可以是 User、其他 Operator，或留空向会话发言；
+reply_to_id 表达回应哪条消息，Target 表达说给谁听，两者不能互相替代。
+页面实时观察流式内容；其他 Operator 的 Poll 在 End 后收到完整消息，不消费半条流式输出。
 
 Conv.Workspace 按 User conv + Actor 懒创建并复用内部会话。Operator 决定哪些信息面向用户，
 哪些属于内部协作；Toolkit 承担工作会话的分配细节。归属见
@@ -120,9 +130,8 @@ Harness.Prompt 返回 Call handle。Operator 提供 prompt、tools、目标、�
 
 同一 runtime 内同身份同参数复用 Call，变化冲突。生产 Adapter 必须把相同身份映射到相同持久
 执行，并在重启后重新观察；agentd 可以承担持久执行，内置 agentgo 只是进程内 demo。
-TaskID 仅作为可选的页面交付关联，不替代业务 IdempotencyKey。
 
-Call.Value 读取状态，Stream 观察增量，Wait 等待终态。耗时长不代表没有进展。Wait 的 context
+Call.Value 读取状态，Stream(ctx) 观察本地 AgentUE 增量（不需要页面游标），Wait 等待终态。耗时长不代表没有进展。Wait 的 context
 取消只结束等待；runtime 关闭会结束进程内执行，外部持久执行仍由 Harness 拥有。
 
 Wait 会占用 Reconcile 并发位。不等待时应安排 RequeueAfter 或自己的资源 Watch；Conv Watch
@@ -131,7 +140,7 @@ Wait 会占用 Reconcile 并发位。不等待时应安排 RequeueAfter 或自�
 ## Human：Ask 与 Confirm
 
 Ask/Confirm 以 ConversationID、提问 Actor、目标 User、EffectKey、问题和有限正 Timeout
-定义一项交互，可选 ReplyToID 与 TaskID。问题与答复直接存为 Message，不另建 Interaction 表。
+定义一项交互，可选 ReplyToID。问题与答复直接存为 Message，不另建 Interaction 表。
 相同 Conv/Actor/EffectKey 同参数返回原问题、deadline 和结果；不同参数冲突。
 
 | Verb | 输入与正常返回值 |
@@ -154,24 +163,25 @@ server 原子校验身份、期限与结果，创建 user 回复并通知提问�
 这些块或修改其受控 meta。超时不伪造 user Message，也不把正常 dismissed/timeout 渲染成异常。
 
 UI delivery 关闭、浏览器断线或 Wait context 取消均不终止问题。问题仍可答复，直到其自身 deadline
-或有效终态。Human 维护到期与通知，通用交付收尾重试由 Delivery 生命周期负责。
+或有效终态。Human 维护到期与通知，消息输出结束与 Human 结果是不同的边界。
 
 Quick Start 用 HttpOnly Cookie 的摘要标识 User；托管方可通过 HumanIdentity 接入登录身份。
 只有问题指定的目标 User 可以作答；任意 user_key 字段不能冒充身份。
 Operator API 与历史读取仍是可信部署边界，不提供完整多租户 ACL。
 
-## Delivery：页面传输而非业务回合
+## 消息发送与技术边界
 
-Delivery 封装提交／replay、按 Message 发事件、以及 UI 交付关闭。task_id 只关联 Redis 与页面流。
-当前输入来自 Poll，历史通过 Conv.Read 获取，不提供按 task_id 推断问答上下文的入口。
+Operator 只调用 Speak、Emit、End，不接触 Delivery、task_id、Redis Event ID 或 SSE 连接。
+发送成功表示 DB 已接收可见消息；runtime/server 负责增量持久化、通知和间接送达页面。
+Redis 暂时不可用不要求 Operator 重做业务；页面通过持久快照追上，详见 [UE](../server/docs/ue.md)。
 
-发言使用 Conv.Speak，再用 Delivery.EmitMessage 指定 Message ID，不需要传入 task_id。
-每条消息独立更新，不受某条 UI 流的开放状态限制。
-消息 end 与 UI delivery end 不同；结束页面流不禁止后续 Speak、Ask 或 Confirm。
+stream.Emit 接收 AgentUE set/append，忽略调用方的 Seq，由句柄串行分配序号并有界重试瞬时失败。
+同 Key 的 Speak 复用消息和本地句柄；重启后依据持久 Revision 恢复写入位置，不恢复 Go 调用栈。
+一条消息须由一个逻辑写入者拥有，多副本执行互斥仍由 Operator 配置。
 
-同一 runtime 按 Message 串行分配 AgentUE seq，不是多个进程的全局序号服务。
-恢复写入方应从持久 Message.Revision 与 Adapter 检查点恢复顺序；Redis Event ID 只是传输续接位置。
-完整模型事件、工具执行与成本属于 AgentLedger，不由可见 Message 代替审计。
+重试耗尽仍返回错误，未确认的更新不能被下一条内容越过；调用方可重试同一更新，或结束本轮执行
+交由自身恢复策略处理。业务检查点决定哪些内容仍需输出，runtime 不推断哪些 token 已被处理。
+完整执行事件、工具输入输出与成本属于 AgentLedger，不由可见 Message 代替审计。
 
 ## 注册与发现
 
@@ -189,7 +199,7 @@ Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Read
 重新 plan，决定继续分派或汇总。没有新输入则发出该输入快照的汇总结果。
 
 汇总期间到达的消息留给下一次 Reconcile，持续输入不能让当前结果无限推迟。
-发言成功或明确发出失败说明后，关闭关联 UI 流，再 Commit 连续消费前缀；这些 ID 不定义业务任务。
+完整发言成功或明确发出失败说明后，再 Commit 连续消费前缀；不等待页面关闭。
 这是 Router 的策略，不是 runtime 强制的交互回合。
 
 示例循环状态在内存，未提交输入可以重读，但计划与结果不会凭空恢复；需要持久工作时由 Operator
@@ -197,7 +207,7 @@ Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Read
 
 ## 实现与验证入口
 
-[Conv](../runtime/conversation.go)、[Delivery](../runtime/delivery.go)、
+[Conv](../runtime/conversation.go)、[消息句柄](../runtime/message.go)、
 [Human](../runtime/human.go)、[Harness](../runtime/harness.go) 和
 [Router](../operators/router/internal/router/router.go) 是能力入口。
 Go 测试覆盖消费重读、交付和交互，Web 测试覆盖消息投影与卡片展示。

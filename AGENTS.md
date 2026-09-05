@@ -2,8 +2,8 @@
 
 ## 项目定位与边界
 
-loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-独立参与者通过持久化消息协作，自行决定何时接收、回应和确认安全消费。DB 保存会话消息，
+loopd 是 Actor 通过持久消息协作的平台，也是 “Loop is a CRD” 在编排层的实现。
+Actor 自行决定何时接收、回应和确认安全消费。DB 保存会话消息，
 Conv CRD 保存消费进度并触发 Reconcile，Redis 服务页面流与重连。Operator 自行定义业务执行边界
 及领域 CRD，Harness 持有智能执行状态；loopd 不保存 Operator 领域表。稳定模型见 `docs/kernel.md`。
 
@@ -21,7 +21,7 @@ loopd/
 ├── harness/                # runtime 侧 Harness Adapter 契约；agentgo 为进程内 demo
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
 ├── operators/interaction/  # 串行 Ask → Confirm 交互示例，含取消、超时与结果汇总
-├── runtime/                # Operator 协作 toolkit；提供 Conv、Delivery、Human、Harness 与注册 Verb
+├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
 ├── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 └── *.go                    # 跨 server、runtime 和 harness 的公共协作模型
@@ -40,7 +40,7 @@ loopd/
 
 ## References
 
-- `docs/kernel.md` — 独立参与者协作模型、状态与恢复责任、设计文档分工
+- `docs/kernel.md` — Actor 协作模型、状态与恢复责任、设计文档分工
 - `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、共享历史、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `server/docs/conversation.md` — Conv 消息接收与 Poll 契约

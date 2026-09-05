@@ -7,6 +7,8 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	hertzsse "github.com/cloudwego/hertz/pkg/protocol/sse"
+	ui "github.com/compforge/agentue/sdks/go/ui"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/delivery"
 )
 
@@ -19,6 +21,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	}
 	conversationID := request.Param("conversation_id")
 	taskID := input.TaskID
+	var accepted *loopd.Message
 	if taskID == "" {
 		if server.Human != nil {
 			identity, err := server.identity(ctx, request)
@@ -32,9 +35,33 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			return err
 		}
 		taskID = message.TaskID
+		accepted = &message
 	}
 	request.Response.Header.Set(taskIDHeader, taskID)
 	var writer *hertzsse.Writer
+	// DB acceptance must reach the client before opening the page bridge.
+	// Otherwise a transient Redis failure could look like a rejected input and
+	// cause the user to resend instead of reconnecting with this task ID.
+	if accepted != nil {
+		start, err := ui.Start(accepted.Content, accepted.Revision)
+		if err != nil {
+			return err
+		}
+		data, err := json.Marshal(struct {
+			MessageID string         `json:"message_id"`
+			Message   *loopd.Message `json:"message"`
+			Event     ui.Event       `json:"event"`
+		}{accepted.ID, accepted, start})
+		if err != nil {
+			return err
+		}
+		writer = hertzsse.NewWriter(request)
+		if err := writer.WriteEvent("", "", data); err != nil {
+			server.logger.WarnContext(ctx, "input accepted but page disconnected", "task_id", taskID, "error", err)
+			_ = writer.Close()
+			return nil
+		}
+	}
 	streamErr := server.chat.Stream(
 		ctx,
 		conversationID,

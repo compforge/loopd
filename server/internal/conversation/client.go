@@ -34,7 +34,7 @@ func NewClient(kube client.Client, namespace string, timeout time.Duration) *Cli
 
 // Signal records a committed message's recipient. An empty target is an
 // explicit broadcast to existing participants; it never registers all Operators.
-func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target loopd.ActorRef) error {
+func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target loopd.ActorRef, revision uint64) error {
 	if conversationID == "" || messageID == "" ||
 		(target != (loopd.ActorRef{}) && !target.ValidTarget()) {
 		return errors.New("conversation, message and a valid target or broadcast are required")
@@ -56,16 +56,29 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 			}
 		}
 		found, changed := false, false
+		if value.Annotations == nil {
+			value.Annotations = map[string]string{}
+		}
+		wake := func(kind, key string) {
+			annotation := conversationv1.WakeAnnotation(kind, key)
+			stamp := fmt.Sprintf("%s/%d", messageID, revision)
+			if value.Annotations[annotation] != stamp {
+				value.Annotations[annotation] = stamp
+				changed = true
+			}
+		}
 		for i := range value.Spec.Participants {
 			participant := &value.Spec.Participants[i]
 			if target == (loopd.ActorRef{}) || (participant.Kind == string(target.Kind) && participant.Key == target.Key) {
 				found = true
+				wake(participant.Kind, participant.Key)
 				if participant.EndOffset < messageID {
 					participant.EndOffset, changed = messageID, true
 				}
 			}
 		}
 		if !found && target != (loopd.ActorRef{}) {
+			wake(string(target.Kind), target.Key)
 			value.Spec.Participants = append(value.Spec.Participants, conversationv1.ConversationParticipant{
 				Kind: string(target.Kind), Key: target.Key, EndOffset: messageID,
 			})
