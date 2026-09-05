@@ -10,7 +10,7 @@ loopd 位于 Agent 技术体系的 Orchestrator 层。模型推理、工具循�
 及基础设施提供；loopd 协调参与者、持久聊天、Task 分发和可见结果。
 
 - loop-server 提供 Chat API 和页面协作状态，拥有 Conversation、Message 与 Task 分发。
-- loop-runtime 是 Operator 的协作开发库，复用 controller-runtime 的资源控制循环，提供 Read/Write Effect 协作能力。
+- loop-runtime 是 Operator 的协作 toolkit，复用 controller-runtime 的资源控制循环，提供类型化 Verb；Verb 的 Effect 分为 read 与 write。
 - Operator 实现具体编排策略，可按复杂度拥有自己的领域 Resource。
 - Harness 拥有智能执行状态，通过 Adapter 接入，可被 Operator 调用或直接回答 Human。
 

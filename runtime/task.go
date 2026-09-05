@@ -24,7 +24,7 @@ type Task struct {
 	client *client
 }
 
-// Messages is a read Effect returning a page of visible messages across the Task's user and work
+// Messages is a Verb (effect: read) returning a page of visible messages across the Task's user and work
 // conversations, including Human questions and replies. Each result retains its
 // conversation ID. Use Chat.History to read just one conversation across tasks.
 func (task Task) Messages(ctx context.Context, taskID, after string, limit int) ([]loopd.Message, error) {
@@ -39,7 +39,7 @@ type TaskWatchOptions struct {
 	MaxConcurrentReconciles int
 }
 
-// Get is a read Effect resolving the initial chat state associated with a Task CRD. A Task may become
+// Get is a Verb (effect: read) resolving the initial chat state associated with a Task CRD. A Task may become
 // visible to a controller just before the database transaction commits; in
 // that case the server returns not found and the Reconciler should retry.
 func (task Task) Get(ctx context.Context, taskID string) (loopd.TaskContext, error) {
@@ -48,7 +48,7 @@ func (task Task) Get(ctx context.Context, taskID string) (loopd.TaskContext, err
 	return result, err
 }
 
-// Watch is a read Effect subscribing a controller-runtime Reconciler to Tasks routed to target.
+// Watch is a Verb (effect: read) subscribing a controller-runtime Reconciler to Tasks routed to target.
 // The Operator sees only a Task name and uses Get for current chat context.
 func (task Task) Watch(
 	mgr manager.Manager,

@@ -35,12 +35,12 @@ type HumanHandle struct {
 
 func (h *HumanHandle) ID() string { return h.messageID }
 
-// Ask is a write Effect creating or reusing a durable question.
+// Ask is a Verb (effect: write) creating or reusing a durable question.
 func (h Human) Ask(ctx context.Context, r AskRequest) (*HumanHandle, error) {
 	return h.create(ctx, loopd.HumanRequest{TaskID: r.TaskID, EffectKey: r.EffectKey, Type: "ask", Title: r.Title, Prompt: r.Prompt, Timeout: r.Timeout, Choices: r.Choices, AllowOther: r.AllowOther})
 }
 
-// Confirm is a write Effect creating or reusing a durable confirmation.
+// Confirm is a Verb (effect: write) creating or reusing a durable confirmation.
 func (h Human) Confirm(ctx context.Context, r ConfirmRequest) (*HumanHandle, error) {
 	return h.create(ctx, loopd.HumanRequest{TaskID: r.TaskID, EffectKey: r.EffectKey, Type: "confirm", Title: r.Title, Prompt: r.Prompt, Timeout: r.Timeout, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel})
 }
@@ -55,14 +55,14 @@ func (h Human) create(ctx context.Context, r loopd.HumanRequest) (*HumanHandle, 
 	return &HumanHandle{client: h.client, messageID: result.Message.ID}, nil
 }
 
-// Get is a read Effect observing the authoritative question state.
+// Get is a Verb (effect: read) observing the authoritative question state.
 func (h *HumanHandle) Get(ctx context.Context) (loopd.HumanResult, error) {
 	var result loopd.HumanResult
 	err := h.client.do(ctx, http.MethodGet, "/v1/human/"+url.PathEscape(h.messageID), nil, &result)
 	return result, err
 }
 
-// Wait is a read Effect; it only observes. Cancelling ctx never dismisses the persisted request.
+// Wait is a Verb (effect: read); it only observes. Cancelling ctx never dismisses the persisted request.
 func (h *HumanHandle) Wait(ctx context.Context) (loopd.HumanResult, error) {
 	timer := time.NewTicker(250 * time.Millisecond)
 	defer timer.Stop()

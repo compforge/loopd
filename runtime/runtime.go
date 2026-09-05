@@ -1,4 +1,4 @@
-// Package runtime provides the Go client embedded by Operator reconcilers.
+// Package runtime provides the Go collaboration toolkit embedded by Operator reconcilers.
 package runtime
 
 import (
@@ -32,9 +32,9 @@ type Runtime struct {
 	cancel context.CancelFunc
 }
 
-// Loop exposes collaboration Effects. Read Effects observe existing facts;
-// write Effects initiate work or change collaboration state. Identity and retry
-// guarantees belong to each operation, not to a generic persistent Effect engine.
+// Loop exposes collaboration Verbs. A Verb's effect is read (observe existing
+// facts) or write (initiate work or change collaboration state). Identity and
+// retry guarantees belong to each Verb, not to a generic persistent Effect engine.
 type Loop struct {
 	Human    Human
 	Chat     Chat

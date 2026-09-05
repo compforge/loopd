@@ -30,7 +30,7 @@ input 的有界 History。返回的历史水位和截断标志用于显式读取
 
 每条输出 Message 有独立的 AgentUE model、block ID 空间与 seq。runtime 先通过 Output
 创建或复用工作 Message，再按 message_id 发布 set/append；server 校验它属于指定 Task，
-不从 block 内容推断消息身份。Human 请求与答复仍必须通过 typed Write Effect 修改。
+不从 block 内容推断消息身份。Human 请求与答复仍必须通过类型化 Verb 修改，其 Effect 为 write。
 
 Task Stream 只聚合传输，SSE 外层为 `{message_id, message?, event}`，内层保持标准 AgentUE event。
 页面对所有参与者使用同一个按 Message 应用事件的入口，不把多个模型合并成主回答。
@@ -40,7 +40,7 @@ Task Stream 只聚合传输，SSE 外层为 `{message_id, message?, event}`，�
 - Last-Event-ID 续接主回答的传输位置；工作输出在每次连接中独立重放，Human 重发权威快照。
   因此非主回答事件不推进该游标，客户端必须按 Message ID 隔离状态。
 - 工作消息的 end 只结束该消息。聚合交付补齐全部输出与 Human 更新后，才发送主回答 end。
-- HTTP/SSE 连接只负责观察；断开连接不取消 Task 或任何 Effect。
+- HTTP/SSE 连接只负责观察；断开连接不取消 Task，也不取消 Verb 已发起的工作。
 
 首次请求与续接使用同一个 Chat API：不带 task_id 创建工作，带 task_id 观察已有工作。
 Redis 丢失后，只能恢复各消息最后持久的快照，尚未固化的输出 delta 仍可能丢失。
