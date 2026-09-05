@@ -16,13 +16,14 @@ import (
 )
 
 type Server struct {
+	Listen        *service.ListenService
 	Human         *service.HumanService
 	HumanIdentity HumanIdentity
 	actors        *service.ActorService
 	conversations *service.ConversationService
 	messages      *service.MessageService
 	chat          *service.ChatService
-	tasks         *service.TaskService
+	tasks         *service.ChatContextService
 	logger        *slog.Logger
 }
 
@@ -31,7 +32,7 @@ func New(
 	conversations *service.ConversationService,
 	messages *service.MessageService,
 	chat *service.ChatService,
-	tasks *service.TaskService,
+	tasks *service.ChatContextService,
 	logger *slog.Logger,
 ) *Server {
 	if logger == nil {
@@ -51,11 +52,12 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
+	engine.POST("/v1/conversations/:conversation_id/listen", server.adapt(server.listenConversation))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
 	engine.POST("/v1/tasks/:task_id/human", server.adapt(server.createHuman))
 	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
 	engine.POST("/v1/conversations/:conversation_id/tasks/:task_id/replies", server.adapt(server.replyHuman))
-	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
+	engine.GET("/v1/tasks/:task_id", server.adapt(server.getChatContext))
 	engine.GET("/v1/tasks/:task_id/messages", server.adapt(server.listTaskMessages))
 	engine.POST("/v1/tasks/:task_id/events", server.adapt(server.appendTaskEvent))
 	engine.POST("/v1/tasks/:task_id/outputs", server.adapt(server.createOutput))

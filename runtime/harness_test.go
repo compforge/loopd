@@ -23,7 +23,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/task-1" {
-			_ = json.NewEncoder(response).Encode(loopd.TaskContext{ID: "task-1", Response: loopd.Message{ID: "response"}})
+			_ = json.NewEncoder(response).Encode(loopd.ChatContext{ID: "task-1", Response: loopd.Message{ID: "response"}})
 			return
 		}
 		if request.URL.Path == "/v1/tasks/task-1/outputs" {

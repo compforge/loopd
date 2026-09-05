@@ -109,14 +109,14 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 	}
 }
 
-func TestChatMainConvenienceSharesMessageSequence(t *testing.T) {
+func TestChatLazyAnswerSharesSequenceAcrossEmits(t *testing.T) {
 	var sequences []uint64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			_, _ = io.WriteString(w, `{"id":"task","response":{"id":"response"}}`)
 			return
 		}
-		if r.URL.Path != "/v1/tasks/task/messages/response/events" {
+		if r.URL.Path != "/v1/tasks/task/events" {
 			t.Errorf("destination=%s", r.URL.Path)
 		}
 		var input struct {
@@ -138,7 +138,7 @@ func TestChatMainConvenienceSharesMessageSequence(t *testing.T) {
 	if _, err := runtime.Loop.Chat.Emit(context.Background(), "task", event); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Loop.Chat.EmitMessage(context.Background(), "task", "response", event); err != nil {
+	if _, err := runtime.Loop.Chat.Emit(context.Background(), "task", event); err != nil {
 		t.Fatal(err)
 	}
 	if len(sequences) != 2 || sequences[0] != 2 || sequences[1] != 3 {
@@ -153,7 +153,7 @@ func TestWorkMessageEndIsNotTaskCompletion(t *testing.T) {
 	}
 	for _, purpose := range []string{"response", "output"} {
 		ended, err := IsEnd(loopd.Event{Data: data, Message: &loopd.Message{Purpose: purpose}})
-		if err != nil || ended != (purpose == "response") {
+		if err != nil || ended {
 			t.Fatalf("purpose=%s ended=%v err=%v", purpose, ended, err)
 		}
 	}

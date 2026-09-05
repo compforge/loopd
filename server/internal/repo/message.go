@@ -10,7 +10,6 @@ import (
 
 type MessageRepository interface {
 	CreateMessage(context.Context, model.Message) (model.Message, error)
-	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	ListMessages(context.Context, string, string, int) ([]model.Message, error)
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
@@ -192,4 +191,27 @@ func (store *Store) ObserveMessageActivity(ctx context.Context, id string, at ti
 	}
 	return mapError(store.db.WithContext(ctx).Model(&model.Message{}).
 		Where("id = ? AND updated_at < ?", id, at).UpdateColumn("updated_at", at).Error)
+}
+
+func (store *Store) CreateChatInput(ctx context.Context, input model.Message, beforeCommit func(context.Context) error) (model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	input.Purpose = "input"
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conversation model.Conversation
+		if err := tx.First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
+			return mapError(err)
+		}
+		if conversation.TaskID != nil || conversation.ActorKind != "user" {
+			return ErrConflict
+		}
+		if err := tx.Create(&input).Error; err != nil {
+			return mapError(err)
+		}
+		if beforeCommit != nil {
+			return beforeCommit(ctx)
+		}
+		return nil
+	})
+	return input, err
 }

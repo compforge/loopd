@@ -41,13 +41,13 @@ func (service *ConversationService) CreateConversation(
 		if err != nil {
 			return loopd.Conversation{}, err
 		}
-		_, response, err := repo.TaskPair(rows)
+		input, _, err := repo.ChatMessages(rows)
 		if err != nil {
 			return loopd.Conversation{}, err
 		}
 		// Ownership follows the logical task target, never a worker instance
 		// or the sender of whichever message happens to arrive last.
-		conversation.ActorKind, conversation.ActorKey = response.Kind, response.ActorKey
+		conversation.ActorKind, conversation.ActorKey = input.TargetKind, input.TargetKey
 		conversation.TaskID = &taskID
 	} else if conversation.ActorKey == "" {
 		return loopd.Conversation{}, ErrInvalid

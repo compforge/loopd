@@ -22,6 +22,9 @@ export interface Conversation {
 
 export interface Message {
   id: string;
+  target_kind?: ActorKind;
+  target_key?: string;
+  delivery_state?: "" | "closing" | "closed";
   reply_to_message_id?: string;
   purpose?: "input" | "response" | "output" | "human_request" | "human_reply";
   revision?: number;

@@ -3,6 +3,11 @@ package model
 import "time"
 
 type Message struct {
+	// Nullable on upgrade: an unaddressed historical row is not a broadcast.
+	// New messages write both empty strings for an intentional broadcast.
+	TargetKind       string     `gorm:"size:16"`
+	TargetKey        string     `gorm:"size:128"`
+	DispatchPending  bool       `gorm:"not null;default:false;index"`
 	OutputKey        *string    `gorm:"size:128;uniqueIndex:idx_message_output"`
 	ReplyToMessageID string     `gorm:"size:36;not null;default:'';index"`
 	Purpose          string     `gorm:"size:24;not null;default:'';index"`

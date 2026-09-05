@@ -79,7 +79,7 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 	}
 	// call_id is presentation metadata, never an implicit routing instruction.
 	main := marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 2, Block: map[string]any{"id": "text", "type": "text", "content": "summary", "call_id": "not-a-destination"}})
-	cursor, err := producer.Emit(ctx, "task", main)
+	_, err = producer.Emit(ctx, "task", main)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 	}
 	seen := map[string]string{}
 	ends := map[string]bool{}
-	err = consumer.Stream(ctx, "task", "root", cursor, func(value Event) error {
+	err = consumer.Stream(ctx, "task", "root", "", func(value Event) error {
 		e, err := agentueui.Parse(value.Data)
 		if err != nil {
 			return err
@@ -100,14 +100,14 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 			seen[value.MessageID], _ = e.Block["content"].(string)
 		}
 		if e.Op == agentueui.OpEnd {
-			if value.MessageID == "response" && (!ends[a.ID] || !ends[b.ID]) {
+			if value.MessageID == "" && (!ends[a.ID] || !ends[b.ID]) {
 				t.Fatal("task end before output end")
 			}
 			ends[value.MessageID] = true
 		}
 		return nil
 	})
-	if err != nil || seen[a.ID] != "plan" || seen[b.ID] != "execute" || !ends["response"] {
+	if err != nil || seen[a.ID] != "plan" || seen[b.ID] != "execute" || !ends[""] {
 		t.Fatalf("seen=%v ends=%v err=%v", seen, ends, err)
 	}
 	for _, id := range []string{a.ID, b.ID, "response"} {
@@ -136,7 +136,7 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 	if err := store.FinishCompletion(ctx, "task"); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"task", "message/" + a.ID, "message/" + b.ID} {
+	for _, key := range []string{"task", "message/response", "message/" + a.ID, "message/" + b.ID} {
 		if err := producer.events.Delete(ctx, key); err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +212,7 @@ func TestStreamDiscoversOutputDuringTask(t *testing.T) {
 		if value.MessageID == created && e.Op == agentueui.OpSet {
 			observed = true
 		}
-		if value.MessageID == "response" && e.Op == agentueui.OpEnd && !observed {
+		if value.MessageID == "" && e.Op == agentueui.OpEnd && !observed {
 			t.Fatal("lost output")
 		}
 		return nil

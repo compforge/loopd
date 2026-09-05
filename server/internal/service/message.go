@@ -77,6 +77,8 @@ func (service *MessageService) ListMessages(
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
+		DeliveryState: value.DeliveryState,
+		TargetKind:    loopd.Role(value.TargetKind), TargetKey: value.TargetKey,
 		ReplyToMessageID: value.ReplyToMessageID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
 		Kind: loopd.Role(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),

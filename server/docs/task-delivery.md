@@ -1,67 +1,56 @@
-# Task 与流式交付
+# Chat 与流式交付
 
-Task 是一次问答的持久路由与唤醒入口，server 不再建立同义的 tasks 表。数据库拥有可见聊天，
-Kubernetes 拥有 Task，Redis 承载活跃问答的页面事件；三者协作的边界由 ChatService 与 delivery 维护。
+`task_id` 标识一次 Chat 的页面交付，不是 Operator 的业务任务。数据库保存可见 Message，
+Conv CRD 保存定向通知与 Listen 游标，Redis 承载活跃页面事件；server 不建立 tasks 表。
 
-## 创建与提交
+## 创建与通知
 
-首次 Chat 请求在数据库事务中创建 user Message 和目标 Operator/Harness 的空 response Message，
-两条记录共享 task_id。提交事务前，server 以同一 ID 初始化 AgentUE Stream，再创建 Task CRD。
+首次 Chat 只创建带收件者的 user input Message，并初始化对应 Redis 流，不预建回答。
+回答、Ask/Confirm 与工作输出在参与者实际发起时创建独立 Message。
 
-数据库事务不覆盖 Redis 和 Kubernetes。任一步失败时回滚 Message，并尽力删除已创建的 Stream
-与 CRD；外部资源已创建但数据库提交失败时，也执行同样补偿。该流程没有分布式原子提交保证。
+Redis 初始化位于输入提交边界内：失败回滚输入；数据库提交失败时尽力删除已初始化的流。
+这不是跨系统事务，进程崩溃可能留下无对应输入的临时流。
 
-Task 可能先于数据库提交被 Operator 观察到，此时上下文查询暂时返回 not found。调用方如何重试
-以及 Task watch 的语义见 [Runtime](../../docs/runtime.md)。
-Task 的通用字段遵循 Kubernetes API 兼容规则；生成物更新要求见根目录 AGENTS.md。
+定向通知在数据库提交后更新 Conv CRD；输入的待通知标记与 Message 同事务保存，通知失败由
+server 后台重试，不要求用户再次发送。具体接收契约见 [Conversation](conversation.md)。
 
-## 上下文边界
+## 上下文与发布
 
-server 根据 task_id 从主会话的 Message 即时组装 Conversation、当前 input、response 和截至
-input 的有界 History。返回的历史水位和截断标志用于显式读取更早的消息，不把完整聊天复制进 CRD。
+`Chat.Context` 按交付 ID 解析原始 input、收件者及截至 input 的有界 History；response 可不存在。
+`Chat.Messages` 读取该交付的全部可见消息；`Conv.Read` 读取会话历史；
+`Conv.Listen` 接收参与者的新消息。它们都不需要 Task CRD。
 
-详情会话可以复用 task_id，但其消息不得覆盖主链路 input/response。Human 交互的开发能力与边界
-统一见 [Runtime](../../docs/runtime.md)。提问和答复按 Message 回复关系关联，
-主 input/response 由创建事务的 purpose 标记确定，不从后到的交互消息重新选择。
-答复必须严格按 reply_to_message_id 定位问题，不以消息邻接或“最近的问题”兜底。回复关系
-本身不区分反问和主回答，不能用它代替主链路身份。
+每条输出 Message 有独立 AgentUE model、block ID 和 seq。调用者可以先 `Chat.Output` 建立明确
+地址，再 `EmitMessage` 发布；指定 User conv 可在主会话发布，省略则使用处理详情。
+`Chat.Emit` 是单条默认回答的便捷入口，在首次有效发布时创建回答，不能依赖它预先存在。
+同一输出应选择一种发布入口，默认 Emit 和显式 EmitMessage 的本地 seq 分配不混用。
 
-## 发布与续接
+Human 请求与答复仍通过 typed Verb 修改。明确回复引用不能以“最近一条消息”推断，
+普通发言也不自动成为 Ask/Confirm 的返回值。
 
-每条输出 Message 有独立的 AgentUE model、block ID 空间与 seq。runtime 先通过 Output
-创建或复用工作 Message，再按 message_id 发布 set/append；server 校验它属于指定 Task，
-不从 block 内容推断消息身份。Human 请求与答复仍必须通过类型化 Verb 修改，其 Effect 为 write。
+## 聚合流与 replay
 
-Task Stream 只聚合传输，SSE 外层为 `{message_id, message?, event}`，内层保持标准 AgentUE event。
-页面对所有参与者使用同一个按 Message 应用事件的入口，不把多个模型合并成主回答。
+- 有消息身份的事件使用 `{message_id, message, event}` 外层；所有参与者共享客户端 Message 更新契约。
+- 每条真实 Message 使用独立 Redis 流，包括默认回答。Human 消息按 revision 发布数据库快照。
+- 不带消息身份的 Start/Error/End 是 Chat 控制事件，只管理交付生命周期，不创建页面气泡。
+- Last-Event-ID 只表示 Chat 控制流的位置；各 Message 在重连时独立重放，客户端按 ID/revision 合并。
+- 任一 Message 的 end 都不结束 Chat。全部输出和 Human 状态交付后，才发送 Chat end。
+- 同一 Conversation 可同时观察多个 task_id；完成一个不能移除其他流的 replay 记录。
 
-- 主回答和工作输出各自复用 AgentUE Redis Bridge / Replayer，完成时固化各自快照。
-- Human 交互在数据库提交后即可观察；每条消息按自己的 revision 发布 start 快照。
-- Last-Event-ID 续接主回答的传输位置；工作输出在每次连接中独立重放，Human 重发权威快照。
-  因此非主回答事件不推进该游标，客户端必须按 Message ID 隔离状态。
-- 工作消息的 end 只结束该消息。聚合交付补齐全部输出与 Human 更新后，才发送主回答 end。
-- HTTP/SSE 连接只负责观察；断开连接不取消 Task，也不取消 Verb 已发起的工作。
-
-首次请求与续接使用同一个 Chat API：不带 task_id 创建工作，带 task_id 观察已有工作。
-Redis 丢失后，只能恢复各消息最后持久的快照，尚未固化的输出 delta 仍可能丢失。
-已关闭 Task 从数据库重放所有可见消息，再发送结束标记，不依赖 Redis 或 CRD 存活。
-
-AgentUE 拥有事件协议、Reducer、Bridge 和单消息续接；server 拥有消息寻址、聚合交付与任务收尾。
-完整执行轨迹由 AgentLedger 承载，页面事件不能替代它。
+不带 task_id 的 Chat 请求创建输入，带 task_id 的请求只观察，不再创建输入或通知 Operator。
+HTTP/SSE 只负责观察，断开不取消执行。已关闭交付从数据库恢复消息和失败信息，不依赖 Redis
+或 CRD 存活；尚未固化的 delta 不承诺在 Redis 丢失后恢复。
 
 ## 完成与重试
 
-完成前先锁定主 response，拒绝未答问题上的正常收口；失败收口将剩余请求标成 failure(task_ended)。
-在事务中保存收口意图并关闭创建／答复入口，随后固化 Message 快照、终结 Stream、再删除 Task。Task 一旦删除，页面回答已经可恢复，
-Operator 重启也不会因旧 Task 再次执行已完成问答。
+输入 Message 的行锁串行化交互写入与交付收尾；它是已经存在的聊天事实，不是空回答或领域任务。
+正常收尾拒绝未答 Human 问题；失败收尾将剩余问题标为 failure。事务保存关闭意图并停止追加，
+随后逐条固化输出、终结 Redis 控制流，最后标记输入交付 closed。完成交付不删除 Conv CRD。
 
-各 Message 从自己的事件流固化快照，工作输出先于主回答完成；部分写入失败时用相同身份重试。
-Message 的完成不自动删除 Task，只有整体交付完成才允许退休 Task。
+相同完成意图可重试，变化冲突。中断后的完成重试由 Chat 生命周期拥有，不归 Human 管；
+Human 只推进问题 deadline，卡片答复由定向 Message 通知，等待者也可轮询权威状态。
 
-删除 Task 失败必须返回可重试错误；重复完成不重复写入回答。runtime 的 Task watch 不把完成后
-的删除事件当作新工作，避免持久 Message 被再次解释为待处理请求。
+Operator 可以将多次 Chat 发言合并成一轮业务执行。Router 将一条最终回答发布到初始 Chat，
+并结束本轮接收的所有 Chat 流；这些交付 ID 不要求各自拥有一条回答。
 
-主 response 的收口意图保留到 Task 删除成功。server.Run 重试中断的交付与删除，完成后标记
-closed；通用恢复由 Chat 生命周期拥有，不依赖是否创建过 Human 问题。
-Human 生命周期只负责问题到期与通知重试。重复提交同一完成意图可恢复，改变完成意图返回冲突。Human 到期、答复与收口共用主
-response 行锁，通知重试只更新现有 Task revision，绝不重建已删除的 Task。
+AgentUE 拥有事件协议、Reducer、Bridge 和单流续接；server 拥有消息寻址、聚合传输与交付收尾。

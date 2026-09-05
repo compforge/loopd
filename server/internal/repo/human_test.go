@@ -103,7 +103,7 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 		t.Fatalf("changed params=%v", err)
 	}
 	rows, _ := s.ListRootMessagesByTask(ctx, "task")
-	input, response, err := TaskPair(rows)
+	input, response, err := ChatMessages(rows)
 	if err != nil || input.ID != "input" || response.ID != "response" || len(rows) != 6 {
 		t.Fatalf("pair=%s/%s rows=%d %v", input.ID, response.ID, len(rows), err)
 	}

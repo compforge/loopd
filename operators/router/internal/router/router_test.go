@@ -75,7 +75,7 @@ func TestReconcileRoutesSimpleAndComplexTasks(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			if _, err := reconciler.Reconcile(ctx, ctrl.Request{
-				NamespacedName: objectKey("task-1"),
+				NamespacedName: objectKey("conversation-1"),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -109,9 +109,9 @@ func TestReconcileCompletesInvalidPlanAsFailure(t *testing.T) {
 	}
 
 	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: objectKey("task-1"),
-	}); err != nil {
-		t.Fatal(err)
+		NamespacedName: objectKey("conversation-1"),
+	}); err == nil {
+		t.Fatal("invalid plan must report execution failure")
 	}
 	_, completed, failure := server.result()
 	if !completed || failure == nil || failure.Code != "router_failed" {
@@ -127,10 +127,13 @@ func (server *loopServer) result() (string, bool, *loopruntime.TaskFailure) {
 
 type loopServer struct {
 	*httptest.Server
-	mu        sync.Mutex
-	answer    string
-	completed bool
-	failure   *loopruntime.TaskFailure
+	mu           sync.Mutex
+	answer       string
+	completed    bool
+	failure      *loopruntime.TaskFailure
+	listens      int
+	inbox        [][]loopd.Message
+	completedIDs []string
 }
 
 func newLoopServer(t *testing.T, taskID string) *loopServer {
@@ -138,9 +141,21 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 	value := &loopServer{}
 	value.Server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
+		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/listen":
+			value.mu.Lock()
+			var messages []loopd.Message
+			if value.listens == 0 {
+				messages = []loopd.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: loopd.RoleUser}}
+			} else if len(value.inbox) > 0 {
+				messages = value.inbox[0]
+				value.inbox = value.inbox[1:]
+			}
+			value.listens++
+			value.mu.Unlock()
+			_ = json.NewEncoder(response).Encode(loopd.ListenResult{Messages: messages})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/"+taskID:
 			response.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(response).Encode(loopd.TaskContext{
+			_ = json.NewEncoder(response).Encode(loopd.ChatContext{
 				ID:           taskID,
 				Response:     loopd.Message{ID: "response", Purpose: "response"},
 				Conversation: loopd.Conversation{ID: "conversation-1"},
@@ -181,7 +196,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(response, `{"id":%q}`, fmt.Sprintf("%d-0", event.Seq))
-		case request.Method == http.MethodPost && request.URL.Path == "/v1/tasks/"+taskID+"/complete":
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/complete"):
 			var input struct {
 				Error *loopruntime.TaskFailure `json:"error"`
 			}
@@ -192,6 +207,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			value.mu.Lock()
 			value.completed = true
+			value.completedIDs = append(value.completedIDs, strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/tasks/"), "/complete"))
 			value.failure = input.Error
 			value.mu.Unlock()
 			response.WriteHeader(http.StatusNoContent)
@@ -204,19 +220,23 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 }
 
 type scriptedAdapter struct {
-	mu        sync.Mutex
-	plan      string
-	results   map[string]string
-	effects   []string
-	wantWork  int
-	workSeen  int
-	workReady chan struct{}
-	workOnce  sync.Once
+	mu          sync.Mutex
+	plan        string
+	results     map[string]string
+	effects     []string
+	wantWork    int
+	workSeen    int
+	workReady   chan struct{}
+	workOnce    sync.Once
+	holdWork    <-chan struct{}
+	started     chan struct{}
+	startedOnce sync.Once
+	prompts     map[string]string
 }
 
 func newScriptedAdapter(plan string, results map[string]string, wantWork int) *scriptedAdapter {
 	return &scriptedAdapter{
-		plan: plan, results: results, wantWork: wantWork, workReady: make(chan struct{}),
+		plan: plan, results: results, wantWork: wantWork, workReady: make(chan struct{}), started: make(chan struct{}), prompts: make(map[string]string),
 	}
 }
 
@@ -224,6 +244,7 @@ func (adapter *scriptedAdapter) Prompt(_ context.Context, request harness.Reques
 	effect := strings.TrimPrefix(request.IdempotencyKey, request.TaskID+"/")
 	adapter.mu.Lock()
 	adapter.effects = append(adapter.effects, effect)
+	adapter.prompts[effect] = request.Prompt
 	result := adapter.results[effect]
 	if effect == "plan" {
 		result = adapter.plan
@@ -240,6 +261,10 @@ func (adapter *scriptedAdapter) Prompt(_ context.Context, request harness.Reques
 	var waitFor <-chan struct{}
 	if strings.HasPrefix(effect, "work/") {
 		waitFor = adapter.workReady
+		if adapter.holdWork != nil {
+			waitFor = adapter.holdWork
+		}
+		adapter.startedOnce.Do(func() { close(adapter.started) })
 	}
 	return scriptedCall{id: request.CallID, events: events, result: result, waitFor: waitFor}, nil
 }

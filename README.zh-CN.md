@@ -10,8 +10,8 @@
 Loop = Resource(spec + status) + Reconcile
 ```
 
-每次聊天请求都会创建一个小型 loopd Task CRD，用来唤醒选定的 Actor。简单的
-Operator 可以直接 Reconcile 这个 Task；复杂的 Operator 则可以创建自己的领域
+消息通过持久 Conversation CRD 唤醒选定的 Actor，Operator 用 Listen Verb 接收输入。
+复杂的 Operator 可以创建自己的领域
 CRD，保存领域状态和完成条件。loopd 通过 Conversation 和 Message 保存页面可见的
 协作内容；Harness 持有自身执行状态，AgentLedger 记录完整执行历史。
 
@@ -19,8 +19,8 @@ CRD，保存领域状态和完成条件。loopd 通过 Conversation 和 Message 
 
 ## 组件
 
-- **loop-server** 拥有页面可见的 Conversation 和 Message。它为每个活跃的聊天请求
-  关联一个 Task CRD，使工作不依赖某次 HTTP 请求、浏览器连接或服务进程而存在。
+- **loop-server** 拥有页面可见的 Conversation 和 Message。它通过 Conv CRD
+  通知选定参与者，流式交付不依赖某次浏览器连接。
 - **loop-runtime** 是嵌入 Operator 的 Go 协作开发库，将 controller-runtime 的资源控制
   循环与 loopd 协作能力组合起来。Operator 开发契约统一见 [Runtime](docs/runtime.md)。
 - **Harness Adapter** 让 Operator 可以通过 loop-runtime 调用 agentd 或其他智能执行
@@ -51,5 +51,5 @@ Conversation 查看进展和回答。选中的 Operator 或 Harness 负责推进
 调用多个 Harness，再汇总为自己的回答。
 
 恢复能力取决于执行与存储配置。内置 AgentGo Demo 在进程内运行，跨 Operator 重启的
-执行恢复需要持久 Harness Adapter。调用与恢复契约见 [Runtime](docs/runtime.md)，
+执行恢复需要 Operator 持久化领域进度，并使用持久 Harness Adapter。调用与恢复契约见 [Runtime](docs/runtime.md)，
 存储配置与 Quick Start 限制见 [Kubernetes 部署](deploy/k8s/README.md)。

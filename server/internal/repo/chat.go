@@ -8,9 +8,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// TaskPair accepts explicit identities, or an unambiguous legacy two-message pair.
+// ChatMessages accepts explicit identities, or an unambiguous legacy two-message pair.
 // It never picks a last/nearest message when multiple actors speak in parallel.
-func TaskPair(rows []model.Message) (input, response model.Message, err error) {
+func ChatMessages(rows []model.Message) (input, response model.Message, err error) {
 	for _, row := range rows {
 		switch row.Purpose {
 		case "input":
@@ -34,27 +34,34 @@ func TaskPair(rows []model.Message) (input, response model.Message, err error) {
 			}
 		}
 	}
-	if input.ID == "" || response.ID == "" || input.Kind != "user" || response.Kind == "user" || input.TaskID != response.TaskID || input.ConversationID != response.ConversationID {
+	if input.ID == "" || input.Kind != "user" {
 		return input, response, ErrNotFound
+	}
+	if response.ID != "" && (response.Kind == "user" || input.TaskID != response.TaskID || input.ConversationID != response.ConversationID) {
+		return input, response, ErrConflict
+	}
+	if input.TargetKind == "" && response.ID != "" {
+		input.TargetKind, input.TargetKey = response.Kind, response.ActorKey
 	}
 	return input, response, nil
 }
 
-// withTask uses the initial response as the lock shared by output creation,
-// Human transitions and Task completion. No external call runs inside the transaction.
-func (store *Store) withTask(ctx context.Context, taskID string, fn func(*gorm.DB, model.Message, model.Message) error) error {
+// withChat serializes UI delivery writes using the committed input. This lock
+// does not represent business execution and never requires an empty answer.
+// No external call runs inside the transaction.
+func (store *Store) withChat(ctx context.Context, taskID string, fn func(*gorm.DB, model.Message, model.Message) error) error {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	rows, err := store.ListRootMessagesByTask(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	input, response, err := TaskPair(rows)
+	input, response, err := ChatMessages(rows)
 	if err != nil {
 		return err
 	}
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&response, "id = ?", response.ID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&input, "id = ?", input.ID).Error; err != nil {
 			return err
 		}
 		if input.Purpose == "" {
@@ -64,6 +71,9 @@ func (store *Store) withTask(ctx context.Context, taskID string, fn func(*gorm.D
 			if err := tx.Model(&model.Message{}).Where("id = ?", response.ID).Updates(map[string]any{"purpose": "response", "reply_to_message_id": input.ID}).Error; err != nil {
 				return err
 			}
+		}
+		if input.TargetKind == "" && response.ID != "" {
+			input.TargetKind, input.TargetKey = response.Kind, response.ActorKey
 		}
 		return fn(tx, input, response)
 	})

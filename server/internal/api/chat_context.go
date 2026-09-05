@@ -8,7 +8,7 @@ import (
 	loopd "github.com/compforge/loopd"
 )
 
-func (server *Server) getTask(ctx context.Context, request *hertzapp.RequestContext) error {
+func (server *Server) getChatContext(ctx context.Context, request *hertzapp.RequestContext) error {
 	task, err := server.tasks.GetContext(ctx, request.Param("task_id"))
 	if err != nil {
 		return err

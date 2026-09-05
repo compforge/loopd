@@ -19,7 +19,7 @@ Verb 是 Reconcile 读取协作事实、推进实际工作的能力入口，不�
 | 关注点 | controller-runtime | loop-runtime | Operator |
 |---|---|---|---|
 | 进程与调度 | Manager 启停 Controller，提供共享依赖、队列与并发控制 | 管理协作 Client、注册续租与本地 Call 观察 | 组装两套库，配置运行范围与生命周期 |
-| 唤醒与读取 | Watch 资源，将变化映射成 Reconcile 请求；Client 读取当前状态 | 将发给自身的 Task 接入 Controller，解析会话上下文 | 定义领域 Resource、Watch 关系，读取外部业务事实 |
+| 唤醒与读取 | Watch 资源，将变化映射成 Reconcile 请求；Client 读取当前状态 | 将参与者的 Conv 信号接入 Controller，解析会话上下文 | 定义领域 Resource、Watch 关系，读取外部业务事实 |
 | 推进工作 | 调用 Reconciler，按其返回值重试或再次排队 | 提供 Harness Call、可见过程和回答发布契约 | 决定拆解、串并行、工具、角色与完成条件 |
 | 状态与恢复 | 根据资源当前状态重新调谐 | 保持协作引用和动作身份，连接各事实 owner | 保存领域进度，重新读取事实后决定如何继续 |
 
@@ -29,8 +29,8 @@ Operator process
   ├─ controller-runtime：Manager / Controller / Watch / Client
   │                         └─ Kubernetes API
   └─ loop-runtime
-       ├─ Chat / Task context / Registration ── loop-server
-       ├─ Task.Watch ── controller-runtime
+       ├─ Chat / Conv / Context / Registration ── loop-server
+       ├─ Conv.Watch ── controller-runtime
        └─ Harness.Prompt ── Adapter ── Harness
 ```
 
@@ -43,7 +43,7 @@ API 和领域 CRD 可以通过普通 Client 访问，无需先进入 loopd Core�
 Verb 是 Operator 面向协作基础设施的入口，底层机制由 runtime 与 server 配合承担，而不是
 要求每个 Operator 自己实现一套数据访问、流式交付和交付重试逻辑：
 
-- 数据读取：按 Task 或 Conversation 获取消息与上下文，屏蔽聊天存储和服务端组装细节。
+- 数据读取：按 Chat 交付 ID 或 Conversation 获取消息与上下文，屏蔽聊天存储和服务端组装细节。
 - 输出交付：runtime 按 Message 发布流式输出，server 协调事件传输与消息固化，再通过
   AgentUE 交付前端；Operator 不需要感知页面连接，也不直接操作聊天数据库或 Redis。
 - 扩展接入：业务通过 Operator 扩展编排策略，Harness 通过 Adapter 接入，差异不进入聊天核心。
@@ -61,8 +61,8 @@ Operator 需要理解这些调用契约和恢复边界，但无需关注其存�
 1. Operator 入口创建 controller-runtime Manager 与 loop-runtime，注入 Harness Adapter、连接
    配置和日志，并负责关闭它们。runtime 本身不启动另一套 Manager。
 2. 注册 Operator 的在线身份，让用户可以在 Chat 中选择它。
-3. 通过 `Loop.Task.Watch` 将自身目标绑定到 Manager 下的 Reconciler，再启动 Manager。
-   Reconciler 根据 Task 名称调用 `Loop.Task.Get`，获得本次问答上下文。
+3. 通过 `Loop.Conv.Watch` 将自身目标绑定到 Manager 下的 Reconciler，再启动 Manager。
+   Reconciler 根据 Conv 名称调用 `Loop.Conv.Listen`，获得发给自己的新消息。
 4. Reconciler 读取领域状态与外部事实，通过 Harness 等能力推进工作，发布可见过程；需要等待
    时选择等待 Call 或返回 Controller，并为再次调谐安排触发来源。
 5. Operator 判断本次问答已完成后发布最终回答，调用 `Chat.Complete` 请求 server 完成交付。
@@ -70,7 +70,7 @@ Operator 需要理解这些调用契约和恢复边界，但无需关注其存�
 ## 注册与发现
 
 注册与发现是 runtime 的一项协作能力。Operator 使用 `Loop.Operator.Register`，可直接接收
-Task 的 Harness 使用 `Loop.Harness.Register`；Human 无需注册，也不进入可选目标列表。
+消息的 Harness 使用 `Loop.Harness.Register`；Human 无需注册，也不进入可选目标列表。
 
 runtime 首次注册成功后随自身生命周期定期续租，续租间隔为请求租期的三分之一。server 保存
 Operator/Harness 各自的注册记录，通过未过期租约判断目标是否在线；停止续租后，目标自然从
@@ -86,37 +86,26 @@ server 通过 `GET /v1/actors` 聚合在线 Operator 与 Harness，Chat UI 用�
 临时创建、只能经由 Operator 调用的 Harness 不注册为直聊目标；Router 就只注册自身。
 
 在线租约只说明近期有进程续租，不能保证发现后的请求立即得到处理，也不提供任务锁或多个副本
-之间的执行互斥。Task 独立承担持久唤醒；副本协调由 Operator 使用 controller-runtime 等运行
-机制配置。注册一个 Harness 不会自动安装 Adapter 或启动 Task 消费，执行目标仍需完成上下文
+之间的执行互斥。Conv CRD 独立承担持久唤醒；副本协调由 Operator 使用 controller-runtime 等运行
+机制配置。注册一个 Harness 不会自动安装 Adapter 或启动 Conv 消息消费，执行目标仍需完成上下文
 读取、执行和结果发布的接入。
 
-## Task 与上下文
+## Conv、Listen 与上下文
 
-Task 是一次问答的公共路由入口，名称就是 task_id。简单 Operator 直接 Reconcile Task；复杂
-Operator 可以由 Task 建立自己的领域 Resource，再用 controller-runtime 观察领域对象及其依赖。
-领域 Resource 保存目标、进度和完成条件；Task 不复制 Query、完整 History 或高频流式事件。
+Conv CRD 是协作边界，名称等于 Conversation ID。每位参与者分别拥有最新消息信号和 Listen
+游标。信号只负责唤醒，Listen 仍按 DB 查询新消息，不把信号作为读取上限。
 
-`Task.Watch` 负责按目标过滤并接入 Controller。事件只负责唤醒，同一对象的多次变化可以合并，
-Reconcile 必须重新读取事实。完成后删除 Task 的事件不作为新工作入队，避免把仍然存在的聊天
-记录再次当成待执行请求。
+`Conv.Listen(ctx, convID, ListenRequest{Actor: actor, Limit: limit})` 是 write Verb，返回定向或显式
+广播的新消息，并推进该参与者的游标。Operator 自己决定何时 Listen、如何合并发言或启动新工作。
+`Conv.Read` 是 read Verb，只读共享历史，不改变游标、不自动调度其他参与者。
 
-`Task.Get` 通过 server 解析当前 input、response、Conversation 和截至 input 的有界 History。
-Task 可能先于聊天事务提交可见，此时上下文暂时不存在，Reconciler 应返回可重试结果，不能将其
-解释为业务失败。提交窗口与服务端上下文组装规则见 [Task 交付](../server/docs/task-delivery.md)。
+`Chat.Context(ctx, taskID)` 读取某次页面交付的原始输入、目标及有界历史，默认回答可以不存在。
+`Chat.Messages` 分页读取该交付全部可见消息；`Chat.History` 只读取指定会话，不递归合并详情。
+这些读取不是完整执行审计，也不是 Operator 领域 checkpoint。
 
-Conversation 的历史跨 Operator/Harness 共享。`Chat.Conversation`、`Chat.History` 提供显式读取
-入口；需要更早消息时按返回的水位和截断信息补读，需要固定长期输入时由领域 Resource 保存相关
-Message 引用。内存中的 TaskContext 不承担领域 checkpoint，也不能替代外部系统的当前事实。
-
-`Task.Messages(ctx, taskID, after, limit)` 分页读取这次任务的全部可见 Message，包含主会话中的
-输入、回答和 Human 交互，以及工作会话中的协作输出；每条结果保留自己的 conversation_id。
-`Chat.History` 只读取指定 Conversation，不递归合并工作会话，主会话历史可以跨多个 Task。
-二者都是当前持久消息的读取，不是 AgentLedger 完整执行轨迹，也不隐式等待消息完成。
-按 ID 翻页不负责感知已读消息后续修订；观察实时变化使用 Chat 流，读取 Human 权威状态使用 handle.Get。
-
-Reconcile 用 Task ID 读取事实后调用 Verb 推进工作，无需额外 Task 表。当前问题仍按显式 input 身份
-定位，不能把后来的 user 回复当作原始问题；固定输入上下文用 Task.Get 的历史截止点，后续交互
-使用 Task.Messages 或 Human handle 读取最新状态。
+Listen 游标确认接收而非完成。HTTP 响应丢失可能发生在游标提交之后，不能把再次 Listen 当作
+业务执行重试；Operator 可 Read 找回事实，需要持久执行时自行保存领域状态。
+UUIDv7 顺序、并发和恢复边界见 [Conversation](../server/docs/conversation.md)。
 
 ## Verb 与 Effect
 
@@ -132,8 +121,8 @@ runtime 提供给 Operator 的协作操作统一称为 **Verb**。Verb 表达“
 
 | 能力 | 操作与读取边界 |
 |---|---|
-| Task | `Get` 读取初始上下文；`Messages` 读取任务全部可见消息；`Watch` 订阅任务变化 |
-| Chat | `Conversation/History` 读取会话；带 task_id 的 `Send` 观察已有任务 |
+| Conv | `Read` 读取共享消息；`Watch` 订阅参与者信号 |
+| Chat | `Context/Messages` 按交付 ID 读取；`Conversation/History` 读取会话；带 task_id 的 `Send` 续接 |
 | Harness Call | `Value/Stream/Wait` 观察已有执行；本地观察不是持久订阅 |
 | Human handle | `Get/Wait` 读取或等待权威问题状态；停止等待不等于忽略问题 |
 
@@ -141,18 +130,18 @@ runtime 提供给 Operator 的协作操作统一称为 **Verb**。Verb 表达“
 
 | Verb | 身份与重试边界 |
 |---|---|
-| `Harness.Prompt` | task ID + EffectKey；同参数复用，变化冲突，跨重启去重由持久 Adapter 保证 |
+| `Conv.Listen` | DB 新消息按 ID 排序，非空批次推进当前参与者 CRD 游标；接收不等于执行完成 |\n| `Harness.Prompt` | task ID + EffectKey；同参数复用，变化冲突，跨重启去重由持久 Adapter 保证 |
 | `Human.Ask/Confirm` | task ID + EffectKey；复用原问题、deadline 和结果，变化冲突 |
 | `Chat.Output` | task ID + Key；创建或复用工作会话中的 Message，发送者不可变，同一发送者可有多条输出 |
 | `Chat.EmitMessage` | 按 Message 发布；该 Message 内的 seq 保持幂等，block ID 不跨消息唯一 |
-| `Chat.Emit` | 发布到初始主回答的便捷入口，与 EmitMessage 共用消息序号分配 |
+| `Chat.Emit` | 首次有效发布时懒创建默认回答；与显式 EmitMessage 不混用本地序号分配 |
 | `Chat.Complete` | 按 task_id 重试同一收口意图；固化所有输出并完成任务，不由某条消息的 end 自动触发 |
 | `Chat.CreateConversation` | 每个 Task 最多一个工作会话，重复创建冲突；不带 Task ID 每次创建新主会话 |
 | 不带 task_id 的 `Chat.Send` | 每次提交创建新工作；取得 task_id 后可续接观察 |
 | `Operator.Register/Harness.Register` | 按参与者类型与稳定 key 更新注册，后台续租随 runtime 生命周期运行 |
 
 Effect 的 read/write 分类不增加统一 Verb/Effect CRD 或执行引擎，也不要求在 API 中增加一层
-`Verbs` 容器；`Loop.Task`、`Loop.Chat`、`Loop.Human` 等仍按协作对象组织 Verb。
+`Verbs` 容器；`Loop.Conv`、`Loop.Chat`、`Loop.Human` 等仍按协作对象组织 Verb。
 Verb 名称不是调用身份：例如 `Harness.Prompt` 是 Verb，`plan`、`work/0` 是任务内的步骤 key；
 `EffectKey` 继续用于需要稳定调用身份的操作。Operator 直接访问业务 API 时，
 幂等、结果核对与补偿仍由相应 Connector 和事实 owner 承担。
@@ -178,7 +167,7 @@ Harness 执行；本地调用与观察的生命周期由 runtime 管理，持久
 
 当剩余工作只有等待结果时，可以在 Reconcile 内调用 `Wait`，但它会占用 Controller 的一个并发位。
 需要释放该位置时，Reconciler 可以观察当前状态后返回 `RequeueAfter`；有领域资源变化时，也可以
-通过自己的 Watch 再次唤醒。当前 Task watch 不会自动将 Harness 完成事件映射成 Reconcile 请求，
+通过自己的 Watch 再次唤醒。Conv watch 不会自动将 Harness 完成事件映射成 Reconcile 请求，
 不能返回空结果后假定结果到达就会自动继续。Call 的本地 Stream 也不是持久事件订阅。
 
 controller-runtime 根据 Reconcile 返回的 error 或 Result 处理调度。Operator 判断某次失败应重试、
@@ -270,7 +259,7 @@ Actor 或 task_id 推断。引用缺失时不自动配对；Human 答复必须�
 消息分页、交错展示和乱序到达都不改变这一契约。
 
 回复关系限制在同一 Conversation 与 Task 内；普通消息可以有多条回复，Human 问题只接受一次
-有效终态答复。主 input/response 保持创建时确定的身份，不能按最后一条 user/非 user 消息猜测，
+有效终态答复。input 与实际发布的 response 各有显式身份，不能按最后一条 user/非 user 消息猜测，
 也不能将后到的反问或答复替换成原始问题。
 
 ### 用 AgentUE block 表达交互
@@ -311,17 +300,13 @@ typed reply 入口接收问题 Message ID 和 answer/dismiss，server 校验可�
 不能将并行问题与答复的 block 折叠到同一个主 response。loopd 的交付封装携带 message_id，内层
 保持标准 AgentUE event；每条 Message 分别维护 model 与语义序号，Task 只聚合分发。Human Message 使用独立 revision，重连发送当前快照；主回答继续使用现有 Redis 交付。
 
-答复、忽略或超时先持久化请求终态，再发布目标消息更新并推进 Task revision。数据库与 Kubernetes
-不共享事务，server 在 Message 上持久记录待交付通知并重试；并行终态通知可以合并唤醒，Reconciler 每次读取
-各问题的权威状态。内容不写入 Task CRD，投影或 Redis 丢失后从 Message 恢复。
+卡片答复先持久化请求终态与 user Message，再通过 Conv 通知原提问者；通知失败由后台重试。
+超时只改变问题状态，不伪造消息。Operator 通过 handle.Get/Wait 或按 deadline 安排 RequeueAfter
+读取结果，不假设每次状态变化都产生一条新消息。
 
-Operator 可以返回等待 Task 变化或使用 `RequeueAfter`；复杂 Operator 将变化映射到领域 Resource。
-重启后以原 EffectKey 取回结果，并核对领域对象 UID、计划版本和前提。Baton 保留 live execution
-continuation；loopd 通过持久 Message 重新调谐，进程消失本身不让请求进入 failure。
-
-交互创建、答复与 Task 收口需协调并发。正常完成前仍有 pending 问题时，`Chat.Complete` 返回
-冲突；dismissed/timeout 已是终态，Operator 可以完成兜底后正常收口。Task 失败结束前，将剩余
-pending 问题标成 `failure(task_ended)`；结束后禁止新问题或迟到答复重新唤醒 Task。
+创建、答复与 Chat 收口通过输入行锁协调。正常完成前仍有 pending 问题时，Chat.Complete 返回
+冲突；失败收口将剩余问题标为 failure。结束后的交付不接受新问题或迟到答复，但 Conv 继续存在，
+参与者可以继续发送新的 Chat 发言。
 
 ### 接入示例与身份边界
 
@@ -353,8 +338,8 @@ Quick Start 为浏览器签发不透明 HttpOnly Cookie，以其摘要作为 use
 接入可信登录身份，创建问题和答复必须使用同一身份解析规则。该身份契约只约束 Human 答复；
 现有 Operator 写入、发现和历史读取 API 仍沿用可信部署边界，不提供完整多租户访问控制。
 
-server.Run 负责无人在线时的 deadline 与通知重试，必须随服务进程启动。TaskClient 的 Exists
-用于拒绝向已退休问答追加新问题，Wake 只增加现有 Task revision；部署 RBAC 需允许更新 Task。
+server.Run 负责无人在线时的 deadline、Conv 通知与交付收尾重试，必须随服务进程启动。
+是否允许追加交互由 Chat 交付状态决定，不查询 Task CRD。
 
 ### 实现验收场景
 
@@ -374,7 +359,7 @@ server.Run 负责无人在线时的 deadline 与通知重试，必须随服务�
 ## 可见过程与回答
 
 `Chat.Output` 为工作输出建立 Message，随后用 `Chat.EmitMessage` 向它发布 AgentUE 事件。
-`Chat.Emit` 仅是向初始主回答发布的便捷入口；发送者、block 内容和 Call ID 不决定投递目标。
+`Chat.Emit` 是懒创建默认回答并发布的便捷入口；发送者、block 内容和 Call ID 不决定投递目标。
 `Chat.Complete` 请求固化全部输出并完成任务。内部 Harness 可以
 贡献工具状态和处理详情，主回答由用户选中的 Operator 汇总。工作 Conversation 关联本次 Task，
 其聊天存储关系见 [聊天持久化](../server/docs/persistence.md)。
@@ -384,7 +369,7 @@ server.Run 负责无人在线时的 deadline 与通知重试，必须随服务�
 传输位置，不能拿来替代 seq 或 Harness EffectKey。
 
 `Chat.Complete` 成功意味着 server 已完成回答交付；失败时调用方保留同一 Task 重试完成。
-server 负责固化 Message、终结 Stream、删除 Task 的顺序与补偿，runtime 不直接操作这些存储。
+server 负责固化 Message、终结 Stream、标记交付关闭的顺序与补偿，runtime 不直接操作这些存储。
 完成契约与页面续接协议见 [Task 交付](../server/docs/task-delivery.md)。
 
 页面事件只承载可见信息，完整 prompt、模型事件、工具调用、重试与成本属于执行轨迹。AgentLedger
@@ -392,14 +377,21 @@ server 负责固化 Message、终结 Stream、删除 Task 的顺序与补偿，r
 
 ## 用业务代码表达编排
 
-Router 直接处理 Task：读取 Query/History，按 `plan`、`work/<index>`、`summarize` 三类稳定 key
-规划、并行发起子任务并汇总。当前阶段之间用 `Wait` 串联，调用配置的临时 Harness，不从注册表
-预留执行者。更复杂的 Operator 可以用领域 Resource 保存计划与验证状态；角色、依赖和完成条件
-属于业务，公共协作能力由 runtime 提供。
+Router 直接 Reconcile Conv，不创建 Work CRD。它先 Listen 一个输入，读取上下文并运行
+plan → 有界并行 Harness → 汇总。当前批 Harness 完成后再次 Listen：若有新发言，带着累计结果
+重新 plan，决定直接 summary，还是继续分派。汇总生成期间到达的补充也会在发布前触发重新计划。
+
+每轮调用使用不同的稳定 EffectKey；一轮执行只发布一条主回答，所有被接收发言的 Chat 流均收尾。
+这只是 Router 的业务策略，不是 runtime 为所有 Operator 定义的任务边界。当前使用 Wait，
+不接入 steer/followup；这些能力由支持它们的 Harness Adapter 及 Operator 策略扩展。
+
+Router 是单进程示例，接收后的循环状态位于内存，不宣称进程重启后自动恢复。
+Conv 游标持久化不等于计划/结果持久化；需要跨重启保证时由业务保存领域进度。
+所有 Harness 临时创建；注册 Harness 的选择、转发和分派策略由 Router 后续自行扩展。
 
 ## 实现与验证入口
 
-[Runtime](../runtime/runtime.go) 装配 [Task](../runtime/task.go)、[Harness](../runtime/harness.go)、
+[Runtime](../runtime/runtime.go) 装配 [Conv](../runtime/conversation.go)、[Harness](../runtime/harness.go)、
 [Chat](../runtime/chat.go) 、[Human](../runtime/human.go) 与 [Registry](../runtime/registry.go)；执行扩展点见
 [Adapter](../harness/harness.go)，接入示例见 [Router](../operators/router/internal/router/router.go)。
 现有回归入口是 `runtime/*_test.go`、`harness/agentgo/adapter_test.go` 和 Router 测试，

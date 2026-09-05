@@ -1,11 +1,12 @@
 package loopd
 
-// TaskContext is the loop-server view resolved from the visible messages that
-// share a Task CRD identity. It is computed on read and is not stored in a
-// separate tasks table.
-type TaskContext struct {
-	ID           string       `json:"id"`
-	Conversation Conversation `json:"conversation"`
+// ChatContext is the read projection of messages sharing a UI chat delivery ID.
+// It does not define an Operator's business task or require a tasks table.
+type ChatContext struct {
+	Target        ActorRef     `json:"target"`
+	DeliveryState string       `json:"delivery_state,omitempty"`
+	ID            string       `json:"id"`
+	Conversation  Conversation `json:"conversation"`
 	// Input and Response identify the initial question and main answer, not the latest turn.
 	Input                Message   `json:"input"`
 	Response             Message   `json:"response"`

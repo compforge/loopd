@@ -36,11 +36,11 @@ type Runtime struct {
 // facts) or write (initiate work or change collaboration state). Identity and
 // retry guarantees belong to each Verb, not to a generic persistent Effect engine.
 type Loop struct {
+	Conv     Conv
 	Human    Human
 	Chat     Chat
 	Harness  Harness
 	Operator Operator
-	Task     Task
 }
 
 func New(baseURL string, options Options) (*Runtime, error) {
@@ -78,7 +78,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	loop.Operator = Operator{registry: newRegistry(
 		runCtx, c, "operator", "operators", options.RegistryLeaseDuration, options.Logger,
 	)}
-	loop.Task = Task{client: c}
+	loop.Conv = Conv{client: c}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }
 

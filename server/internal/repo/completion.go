@@ -11,12 +11,12 @@ import (
 )
 
 // BeginCompletion closes the create/reply gate durably before external delivery.
-// completion is persisted so Run can retry after process death or delete failure.
+// completion is persisted so Run can retry after process death or delivery failure.
 func (store *Store) BeginCompletion(ctx context.Context, taskID string, completion []byte, failed bool) error {
 	blocked := false
-	err := store.withTask(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
-		if response.DeliveryState != "" {
-			if string(response.Completion) != string(completion) {
+	err := store.withChat(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
+		if input.DeliveryState != "" {
+			if string(input.Completion) != string(completion) {
 				return ErrConflict
 			}
 			return nil
@@ -57,7 +57,7 @@ func (store *Store) BeginCompletion(ctx context.Context, taskID string, completi
 		if err := tx.Model(&model.Message{}).Where("task_id = ? AND wake_pending = ?", taskID, true).Update("wake_pending", false).Error; err != nil {
 			return err
 		}
-		return tx.Model(&response).Updates(map[string]any{"delivery_state": "closing", "completion": completion}).Error
+		return tx.Model(&input).Updates(map[string]any{"delivery_state": "closing", "completion": completion}).Error
 	})
 	if err == nil && blocked {
 		return ErrConflict
@@ -67,13 +67,13 @@ func (store *Store) BeginCompletion(ctx context.Context, taskID string, completi
 func (store *Store) FinishCompletion(ctx context.Context, taskID string) error {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	return store.db.WithContext(ctx).Model(&model.Message{}).Where("task_id = ? AND purpose = ?", taskID, "response").Update("delivery_state", "closed").Error
+	return store.db.WithContext(ctx).Model(&model.Message{}).Where("task_id = ? AND purpose = ?", taskID, "input").Update("delivery_state", "closed").Error
 }
 
 func (store *Store) PendingCompletions(ctx context.Context) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []model.Message
-	err := store.db.WithContext(ctx).Where("purpose = ? AND delivery_state = ?", "response", "closing").Order("id ASC").Find(&rows).Error
+	err := store.db.WithContext(ctx).Where("purpose = ? AND delivery_state = ?", "input", "closing").Order("id ASC").Find(&rows).Error
 	return rows, mapError(err)
 }

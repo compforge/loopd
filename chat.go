@@ -15,6 +15,9 @@ type Conversation struct {
 }
 
 type Message struct {
+	DeliveryState    string          `json:"delivery_state,omitempty"`
+	TargetKind       Role            `json:"target_kind,omitempty"`
+	TargetKey        string          `json:"target_key,omitempty"`
 	ReplyToMessageID string          `json:"reply_to_message_id,omitempty"`
 	Purpose          string          `json:"purpose,omitempty"`
 	Revision         uint64          `json:"revision,omitempty"`
@@ -30,6 +33,7 @@ type Message struct {
 // OutputRequest identifies one independently published message in the Task's work conversation.
 // Key is stable within the Task; separate outputs by the same actor use different keys.
 type OutputRequest struct {
-	Key   string   `json:"key"`
-	Actor ActorRef `json:"actor"`
+	ConversationID string   `json:"conversation_id,omitempty"`
+	Key            string   `json:"key"`
+	Actor          ActorRef `json:"actor"`
 }

@@ -7,11 +7,11 @@ import (
 	loopd "github.com/compforge/loopd"
 )
 
-func TestTaskContextComesFromMessages(t *testing.T) {
+func TestChatContextDoesNotRequireResponse(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
-	chat := NewChatService(store, nopTaskClient{}, nopChatRunner{}, nil)
-	tasks := NewTaskService(store, nil)
+	chat := NewChatService(store, nopChatRunner{}, nil, nil)
+	tasks := NewChatContextService(store, nil)
 	ctx := context.Background()
 
 	conversation, err := conversations.CreateConversation(ctx, "Planning", "user-1", "")
@@ -42,7 +42,7 @@ func TestTaskContextComesFromMessages(t *testing.T) {
 	if taskContext.ID != answer.TaskID || taskContext.Conversation.ID != conversation.ID {
 		t.Fatalf("Task context identity = %#v", taskContext)
 	}
-	if taskContext.Input.Kind != loopd.RoleUser || taskContext.Response.ID != answer.ID {
+	if taskContext.Input.Kind != loopd.RoleUser || taskContext.Response.ID != "" || taskContext.Input.ID != answer.ID {
 		t.Fatalf("Task messages = input %#v response %#v", taskContext.Input, taskContext.Response)
 	}
 	if len(taskContext.History) != 1 || taskContext.History[0].ID != taskContext.Input.ID || taskContext.HasEarlier {
@@ -57,10 +57,10 @@ func TestTaskContextComesFromMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	all, err := tasks.ListMessages(ctx, answer.TaskID, "", 100)
-	if err != nil || len(all) != 4 {
+	if err != nil || len(all) != 3 {
 		t.Fatalf("task messages = %+v, error = %v", all, err)
 	}
-	if all[2].ConversationID != detail.ID || all[3].Kind != loopd.RoleUser {
+	if all[1].ConversationID != detail.ID || all[2].Kind != loopd.RoleUser {
 		t.Fatalf("task scopes = %+v", all)
 	}
 	page, err := tasks.ListMessages(ctx, answer.TaskID, all[1].ID, 1)
@@ -68,7 +68,7 @@ func TestTaskContextComesFromMessages(t *testing.T) {
 		t.Fatalf("page = %+v, error = %v", page, err)
 	}
 	main, err := messages.ListMessages(ctx, conversation.ID, "", 100)
-	if err != nil || len(main) != 5 {
+	if err != nil || len(main) != 3 {
 		t.Fatalf("main history = %+v, error = %v", main, err)
 	}
 	again, err := tasks.GetContext(ctx, answer.TaskID)

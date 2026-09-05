@@ -15,8 +15,6 @@ import (
 	"github.com/compforge/loopd/server/internal/service"
 )
 
-func (nopTaskClient) Wake(context.Context, string) error           { return nil }
-func (nopTaskClient) Exists(context.Context, string) (bool, error) { return true, nil }
 func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	ctx := context.Background()
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "human.db")})
@@ -25,10 +23,10 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	defer store.Close()
 	convs := service.NewConversationService(store, nil)
-	chat := service.NewChatService(store, nopTaskClient{}, completedChatRunner{}, nil)
-	tasks := service.NewTaskService(store, nil)
+	chat := service.NewChatService(store, completedChatRunner{}, nil, nil)
+	tasks := service.NewChatContextService(store, nil)
 	server := New(service.NewActorService(store, nil), convs, service.NewMessageService(store, nil), chat, tasks, nil)
-	server.Human = service.NewHumanService(store, nopTaskClient{}, nil)
+	server.Human = service.NewHumanService(store, nil)
 	actor := "alice"
 	server.HumanIdentity = func(context.Context, *hertzapp.RequestContext) (string, error) { return actor, nil }
 	engine := route.NewEngine(config.NewOptions(nil))

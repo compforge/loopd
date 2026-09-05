@@ -28,7 +28,6 @@ type Chat struct {
 type chatState struct {
 	mu        sync.Mutex
 	sequences map[string]*messageSequence
-	responses map[string]string
 }
 
 type messageSequence struct {
@@ -37,7 +36,7 @@ type messageSequence struct {
 }
 
 func newChat(client *client) Chat {
-	return Chat{client: client, state: &chatState{sequences: make(map[string]*messageSequence), responses: make(map[string]string)}}
+	return Chat{client: client, state: &chatState{sequences: make(map[string]*messageSequence)}}
 }
 
 type CreateConversationRequest struct {
@@ -189,26 +188,10 @@ func (chat Chat) History(
 	return result.Data, err
 }
 
-// Emit is a Verb (effect: write) publishing to the initial main answer. Other messages
-// use EmitMessage; each message owns its AgentUE sequence.
+// Emit is a write Verb. The server creates the default answer lazily on first
+// publication; no answer Message is needed to start or observe a Chat.
 func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (loopd.Event, error) {
-	chat.state.mu.Lock()
-	messageID := chat.state.responses[taskID]
-	chat.state.mu.Unlock()
-	if messageID == "" {
-		task, err := (Task{client: chat.client}).Get(ctx, taskID)
-		if err != nil {
-			return loopd.Event{}, err
-		}
-		messageID = task.Response.ID
-		if messageID == "" {
-			return loopd.Event{}, fmt.Errorf("task %q has no initial response", taskID)
-		}
-		chat.state.mu.Lock()
-		chat.state.responses[taskID] = messageID
-		chat.state.mu.Unlock()
-	}
-	return chat.EmitMessage(ctx, taskID, messageID, event)
+	return chat.emit(ctx, "answer/"+taskID, "/v1/tasks/"+url.PathEscape(taskID)+"/events", event)
 }
 
 // Output is a Verb (effect: write) creating or reusing a message by stable Task/key.
@@ -278,5 +261,5 @@ func IsEnd(event loopd.Event) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return parsed.Op == agentueui.OpEnd && (event.Message == nil || event.Message.Purpose == "response"), nil
+	return parsed.Op == agentueui.OpEnd && event.MessageID == "" && event.Message == nil, nil
 }

@@ -17,7 +17,7 @@ import (
 )
 
 var ErrInvalidHuman = errors.New("invalid Human request")
-var ErrForbidden = errors.New("responder cannot answer this task")
+var ErrForbidden = errors.New("actor cannot answer this chat")
 
 type humanContent struct {
 	Version string `json:"version"`
@@ -76,7 +76,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	return result, nil
 }
 func publicMessage(m model.Message) loopd.Message {
-	return loopd.Message{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -106,7 +106,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 	data, _ := json.Marshal(r)
 	sum := sha256.Sum256(data)
 	fingerprint := hex.EncodeToString(sum[:])
-	err = store.withTask(ctx, r.TaskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withChat(ctx, r.TaskID, func(tx *gorm.DB, input, response model.Message) error {
 		var existing []model.Message
 		if err := tx.Where("task_id = ? AND purpose = ?", r.TaskID, "human_request").Find(&existing).Error; err != nil {
 			return err
@@ -122,13 +122,13 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 			if c.Meta.Human.Fingerprint != fingerprint {
 				return ErrConflict
 			}
-			if err := expireHuman(tx, &m, &c, time.Now().UTC(), response.DeliveryState == ""); err != nil {
+			if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
 				return err
 			}
 			result, err = humanResult(tx, m, c)
 			return err
 		}
-		if !active || response.DeliveryState != "" || response.Kind != "operator" {
+		if !active || input.DeliveryState != "" || input.TargetKind != "operator" {
 			return ErrConflict
 		}
 		now := time.Now().UTC()
@@ -142,7 +142,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: input.ConversationID, TaskID: r.TaskID, Kind: "operator", ActorKey: response.ActorKey, ReplyToMessageID: input.ID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m := model.Message{ID: uuid.V7(), ConversationID: input.ConversationID, TaskID: r.TaskID, Kind: "operator", ActorKey: input.TargetKey, TargetKind: input.Kind, TargetKey: input.ActorKey, ReplyToMessageID: input.ID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 	if err != nil {
 		return result, err
 	}
-	err = store.withTask(ctx, m.TaskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withChat(ctx, m.TaskID, func(tx *gorm.DB, input, response model.Message) error {
 		if err := tx.First(&m, "id = ?", id).Error; err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 		if err != nil {
 			return err
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), response.DeliveryState == ""); err != nil {
+		if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -177,7 +177,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 // +spec=`答复只依 reply_to_message_id；deadline、答复和 Complete 竞争时只有一个终态`
 func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, actor string, r loopd.HumanReply) (result loopd.HumanResult, err error) {
 	rejected := false
-	err = store.withTask(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withChat(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
 		if input.ConversationID != conversationID {
 			return ErrNotFound
 		}
@@ -195,7 +195,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 		if err := humanRequest(m, c).ValidateReply(r); err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalidHuman, err)
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), response.DeliveryState == ""); err != nil {
+		if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -207,7 +207,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 			previous = &domain.HumanAnswer{Actor: result.Reply.Key, Outcome: result.Status, Value: result.Value}
 		}
 		question := humanQuestion(m, c)
-		changed, resolveErr := question.Resolve(r, actor, previous, response.DeliveryState != "")
+		changed, resolveErr := question.Resolve(r, actor, previous, input.DeliveryState != "")
 		if errors.Is(resolveErr, domain.ErrHumanConflict) {
 			// Persist an observed timeout even when the late reply is rejected.
 			rejected = true
@@ -225,7 +225,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 			Meta    map[string]any `json:"meta"`
 			Blocks  []replyBlock   `json:"blocks"`
 		}{"1.0", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID, Kind: "user", ActorKey: actor, ReplyToMessageID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToMessageID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
 		if err := tx.Create(&reply).Error; err != nil {
 			return err
 		}

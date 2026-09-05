@@ -24,6 +24,7 @@ type MessageRepository interface {
 	ListMessagesByTask(context.Context, string, string, int) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	EnsureOutput(context.Context, string, loopd.OutputRequest) (model.Message, error)
+	EnsureResponse(context.Context, string) (model.Message, error)
 	SaveOutput(context.Context, string, []byte, uint64) error
 	ObserveMessageActivity(context.Context, string, time.Time) error
 }
@@ -80,7 +81,10 @@ func (coordinator *Coordinator) Output(ctx context.Context, taskID string, reque
 
 // Emit is the main-answer convenience path; block content never determines its destination.
 func (coordinator *Coordinator) Emit(ctx context.Context, taskID string, data json.RawMessage) (string, error) {
-	response, err := coordinator.response(ctx, taskID)
+	if _, err := parseOutputEvent(data); err != nil {
+		return "", err
+	}
+	response, err := coordinator.repo.EnsureResponse(ctx, taskID)
 	if err != nil {
 		return "", err
 	}
@@ -99,25 +103,16 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, taskID, message
 	if message.Purpose != "response" && message.Purpose != "output" {
 		return "", fmt.Errorf("%w: message is not an output", ErrInvalidEvent)
 	}
-	response, err := coordinator.response(ctx, taskID)
+	input, err := coordinator.input(ctx, taskID)
 	if err != nil {
 		return "", err
 	}
-	if response.DeliveryState != "" {
+	if input.DeliveryState != "" {
 		return "", repo.ErrConflict
 	}
-	event, err := agentueui.Parse(data)
+	event, err := parseOutputEvent(data)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidEvent, err)
-	}
-	if t, _ := event.Block["type"].(string); t == "ask" || t == "confirm" || t == "human_reply" {
-		return "", fmt.Errorf("%w: Human blocks require typed actions", ErrInvalidEvent)
-	}
-	if _, exists := event.Meta["human"]; exists {
-		return "", fmt.Errorf("%w: reserved Human metadata", ErrInvalidEvent)
-	}
-	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend {
-		return "", fmt.Errorf("%w: only set and append events may be emitted", ErrInvalidEvent)
+		return "", err
 	}
 	if err := coordinator.ensureStream(ctx, message); err != nil {
 		return "", err
@@ -129,10 +124,10 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, taskID, message
 	return id, err
 }
 
-// The main-answer stream retains the Task transport cursor. Additional messages
-// own independent bridge keys and are replayed independently on reconnect.
+// Only transport control owns the Chat cursor. Every actual Message has an
+// independent bridge key, including the optional default answer.
 func streamKey(message model.Message) string {
-	if message.Purpose == "response" {
+	if message.Purpose == "transport" {
 		return message.TaskID
 	}
 	return "message/" + message.ID
@@ -163,10 +158,10 @@ func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.
 	return err
 }
 
-// Complete persists all independently addressed outputs before ending the main
-// stream. Ending a message is not permission to retire its Task.
+// Complete persists every independently addressed output, then ends only the
+// UI transport. It never creates an answer to carry lifecycle state.
 func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, failure *Failure) error {
-	response, err := coordinator.response(ctx, taskID)
+	input, err := coordinator.input(ctx, taskID)
 	if err != nil {
 		return err
 	}
@@ -175,24 +170,76 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 		return err
 	}
 	for _, row := range rows {
-		if row.Purpose == "output" {
+		if row.Purpose == "output" || row.Purpose == "response" {
 			if err := coordinator.finishMessage(ctx, row, nil); err != nil {
 				return err
 			}
 		}
 	}
-	return coordinator.finishMessage(ctx, response, failure)
+	control := transportMessage(input)
+	if err := coordinator.ensureStream(ctx, control); err != nil {
+		return err
+	}
+	state, err := coordinator.events.State(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if state.Status.Terminal() {
+		return nil
+	}
+	seq, status := uint64(2), agentuerunner.StatusCompleted
+	if failure != nil {
+		status = agentuerunner.StatusFailed
+		data, err := agentueui.Failure(seq, failure.Code, failure.Message).Marshal()
+		if err != nil {
+			return err
+		}
+		if _, err := coordinator.events.Publish(ctx, taskID, data, seq); err != nil {
+			return err
+		}
+		seq++
+	}
+	data, err := agentueui.End(seq).Marshal()
+	if err != nil {
+		return err
+	}
+	if _, err := coordinator.events.Publish(ctx, taskID, data, seq); err != nil {
+		return err
+	}
+	return coordinator.events.MarkTerminal(ctx, taskID, status)
 }
 
-func (coordinator *Coordinator) response(ctx context.Context, taskID string) (model.Message, error) {
+func (coordinator *Coordinator) input(ctx context.Context, taskID string) (model.Message, error) {
 	rows, err := coordinator.repo.ListRootMessagesByTask(ctx, taskID)
 	if err != nil {
 		return model.Message{}, err
 	}
-	_, response, err := repo.TaskPair(rows)
-	return response, err
+	input, _, err := repo.ChatMessages(rows)
+	return input, err
+}
+
+func transportMessage(input model.Message) model.Message {
+	return model.Message{TaskID: input.TaskID, ConversationID: input.ConversationID, Purpose: "transport", Revision: 1,
+		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 }
 
 func visibleMessage(m model.Message) loopd.Message {
-	return loopd.Message{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+}
+
+func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {
+	event, err := agentueui.Parse(data)
+	if err != nil {
+		return agentueui.Event{}, fmt.Errorf("%w: %v", ErrInvalidEvent, err)
+	}
+	if t, _ := event.Block["type"].(string); t == "ask" || t == "confirm" || t == "human_reply" {
+		return agentueui.Event{}, fmt.Errorf("%w: Human blocks require typed actions", ErrInvalidEvent)
+	}
+	if _, exists := event.Meta["human"]; exists {
+		return agentueui.Event{}, fmt.Errorf("%w: reserved Human metadata", ErrInvalidEvent)
+	}
+	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend {
+		return agentueui.Event{}, fmt.Errorf("%w: only set and append events may be emitted", ErrInvalidEvent)
+	}
+	return event, nil
 }

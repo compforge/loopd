@@ -52,7 +52,7 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 		Op: agentueui.OpSet, Seq: 2,
 		Block: map[string]any{"id": "answer", "type": "text", "content": "hello"},
 	})
-	cursor, err := producer.Emit(ctx, "task-1", set)
+	_, err = producer.Emit(ctx, "task-1", set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,28 +81,32 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	}
 
 	var delivered []Event
-	if err := consumer.Stream(ctx, "task-1", "conversation-1", cursor, func(event Event) error {
+	if err := consumer.Stream(ctx, "task-1", "conversation-1", "", func(event Event) error {
 		delivered = append(delivered, event)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(delivered) != 3 {
-		t.Fatalf("got %d deliveries, want reconstructed start, append, and end", len(delivered))
+	// Output event IDs belong to their Message; only the control stream
+	// supplies a Chat replay cursor.
+	var cursor string
+	foundOutput := false
+	for _, item := range delivered {
+		if item.MessageID == "message-2" {
+			foundOutput = true
+			if item.ID != "" {
+				t.Fatal("message cursor escaped into Chat transport")
+			}
+		} else if item.ID != "" && cursor == "" {
+			cursor = item.ID
+		}
 	}
-	first, err := agentueui.Parse(delivered[0].Data)
-	if err != nil {
-		t.Fatal(err)
+	last, err := agentueui.Parse(delivered[len(delivered)-1].Data)
+	if err != nil || last.Op != agentueui.OpEnd || delivered[len(delivered)-1].Message != nil || !foundOutput || cursor == "" {
+		t.Fatalf("incomplete multiplexed delivery: %+v %v", delivered, err)
 	}
-	if first.Op != agentueui.OpStart || first.Seq != 2 || delivered[0].Persisted {
-		t.Fatalf("first delivery = %#v, parsed=%#v", delivered[0], first)
-	}
-	last, err := agentueui.Parse(delivered[2].Data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if last.Op != agentueui.OpEnd || !delivered[2].Persisted {
-		t.Fatalf("last delivery = %#v, parsed=%#v", delivered[2], last)
+	if err := consumer.Stream(ctx, "task-1", "conversation-1", cursor, func(Event) error { return nil }); err != nil {
+		t.Fatalf("resume by transport cursor: %v", err)
 	}
 }
 
@@ -149,8 +153,8 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	ended := false
 	completed := false
 	err = coordinator.Stream(ctx, "task", "conv", "", func(value Event) error {
-		if value.MessageID == "" {
-			t.Fatal("missing Message identity")
+		if value.MessageID != "" && value.Message == nil {
+			t.Fatal("missing Message envelope")
 		}
 		event, err := agentueui.Parse(value.Data)
 		if err != nil {

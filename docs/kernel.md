@@ -1,120 +1,72 @@
 # loopd Kernel
 
 loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-Human 在持久 Conversation 中提出目标，server 创建 Task 唤醒选中的执行目标，Harness 或
-Operator 完成工作并将过程与结果带回 Conversation。
+参与者在持久 Conversation 中发言；server 保存 Message，通过 Conv CRD 唤醒收件者；
+Operator 用 runtime Verb 读取、执行、协作并发布结果。
 
-## 定位与组件
+## 定位与边界
 
-loopd 位于 Agent 技术体系的 Orchestrator 层。模型推理、工具循环和 Sandbox 由外部 Harness
-及基础设施提供；loopd 协调参与者、持久聊天、Task 分发和可见结果。
+- loop-server 拥有页面可见 Conversation、Message、在线注册和消息交付。
+- loop-runtime 是嵌入 Operator 的 Go toolkit，复用 controller-runtime，提供协作 Verb。
+- Operator 决定业务含义、消息如何组成工作、何时接收补充信息及何时完成。
+- Harness 通过 Adapter 提供智能执行；执行状态与恢复属于 Harness。
+- AgentLedger 承载完整执行轨迹，不替代可见聊天记录。
 
-- loop-server 提供 Chat API 和页面协作状态，拥有 Conversation、Message 与 Task 分发。
-- loop-runtime 是 Operator 的协作 toolkit，复用 controller-runtime 的资源控制循环，提供类型化 Verb；Verb 的 Effect 分为 read 与 write。
-- Operator 实现具体编排策略，可按复杂度拥有自己的领域 Resource。
-- Harness 拥有智能执行状态，通过 Adapter 接入，可被 Operator 调用或直接回答 Human。
+Operator 不依赖 server 的私有 model/repo，不直接操作聊天数据库或 Redis。
+server 不导入 Operator 领域 CRD，也不执行 Harness Adapter。
 
-Operator 依赖 runtime 公共契约，不依赖 server 私有实现；server 不导入 Operator 领域 CRD，
-也不执行 Harness Adapter。新增业务编排或 Harness provider 不应要求修改聊天核心模型。
+## 参与者与会话
 
-## 参与者与事实归属
+公开角色只有 `user`、`operator`、`harness`。Message 的发送者和收件者各有 kind/key，
+回复引用表达“回应哪条消息”，不定义执行依赖，也不等于一次业务任务。
 
-公共消息角色只有 `user`、`operator`、`harness`。模型协议中的 assistant/system/tool 等术语
-止于 Adapter，不成为新的公共角色。ActorRef 的 kind/key 表达身份，target 表达本次问答目标。
+Conversation 是一个对话框。习惯上称用户的主会话为 **User conv**，Operator 组织的工作会话为
+**Operator conv**。这两个名称表达组织归属，不是两套模型，也不限制其中的消息发送者。
+内部协作进入 Operator conv，用户问题、反问卡片与最终回答可以进入 User conv，避免复杂过程干扰主对话。
 
-| 对象 | 语义与 owner |
-|---|---|
-| Conversation | server 拥有的持久对话空间，历史跨 Operator/Harness 共享 |
-| Message | server 保存的一条页面可见表达，content 是 AgentUE 语义快照 |
-| Task | server 创建的通用 CRD，提供一次问答的持久路由与唤醒入口 |
-| Operator Resource | Operator 拥有的领域目标、状态与完成条件 |
-| Harness Execution | Harness 拥有的智能执行及恢复状态 |
-| Registration | server 保存的 Operator/Harness 在线发现租约 |
+User conv 不绑定固定执行者，每次发言可以选择不同 Operator/Harness。定向发给 A 的消息只唤醒 A；
+其他参与者可以主动 Read 历史，自行决定是否参与，而不是被隐式广播调度。
+工作会话当前按 Chat 交付 ID 关联详情；该存储关系不定义 Operator 的业务工作生命周期。
 
-Message 记录 Actor 发出的消息，记录顺序不定义 Actor 的执行顺序。同一 Task 可以包含多轮问答和并行工作；
-消息回复只表达回答关系，执行依赖、等待与调度由 Operator 和 Harness 决定。
-
-Activity、Artifact 和流式事件是过程记录或投影，不独立拥有业务执行状态。在线发现也不代替
-任务生命周期；注册与 Actor 发现是 runtime 的公共能力，记录由 server 保存。
-
-Conversation 是一个对话框，actor 表达会话的组织归属，Message 的 actor 表达具体发送者。
-习惯上将用户的主会话称为 **User conv**，将 Operator 组织的任务工作会话称为 **Operator conv**。
-这两个叫法表达组织归属，不是两套模型，也不限定其中只能由 User 或 Operator 发消息。
-User Conversation 每次提问可以更换目标，但会话归属不变。工作 Conversation 关联一次 Task，
-归属于该 Task 的 Operator/Harness，内部允许多个参与者发消息；同一 Task 的消息共享处理详情。
-最终回答仍由该次问答的目标负责。可见历史属于 server，完整 prompt、
-模型事件、tool call/result、重试与成本由 AgentLedger 承载。
-
-## Loop is a CRD
-
-需要跨时间持续收敛的领域 Loop 由 Resource 的 spec/status 与 Reconcile 表达：
+## Loop、Reconcile 与 Verb
 
 ```text
 Loop = Resource(spec + status) + Reconcile
 ```
 
-spec 表达目标和约束，status 表达最新观测；Reconciler 读取权威事实，判断继续、等待、重试
-还是完成。Event 只提示变化，不能取代状态读取。
+CRD 持有状态，Reconcile 判断下一步，Verb 将判断连接到实际协作能力。仅对资源做 CRUD 不足以
+完成编排；runtime 联合 server 提供读取数据、调用 Harness、Ask/Confirm、发布与持久化流式输出、
+间接送达页面等机制。Verb 的 Effect 分为 read 与 write，不增加通用持久 Effect 引擎。
 
-CRD 与 Reconcile 提供持续收敛的结构，但仅对资源做 CRUD 不足以完成协作。CRD 承载状态，
-Reconcile 决定下一步，Verb 将判断连接到实际能力：读取会话、调用 Harness、向 Human 发起
-Ask/Confirm，以及发布过程和回答。loop-runtime 与 server 共同提供这些协作机制，通过类型化
-Verb 向 Operator 暴露；Verb 的 Effect 分为 read 与 write。
+Conv CRD 是 server 与参与者之间的协作边界，只保存定向唤醒信号和接收游标，不复制消息正文。
+Listen 是 write Verb：读出发给该参与者的新消息并推进游标；Read 读取共享历史，不改变接收状态。
+最新消息 ID 只是触发信号，Listen 仍从数据库查询。接收不是业务完成，不是领域 checkpoint。
 
-这层基础设施承接数据读取、流式输出的交付与持久化，以及经 server 间接送达前端的链路，
-并提供扩展接入。Operator 开发者专注业务判断与编排，不必自行处理聊天存储、事件传输
-和页面连接细节。
+Operator 自己决定何时 Listen、如何处理补充发言，以及是否需要自己的领域 CRD。
+Router 示例在同一次执行中等当前批 Harness 完成，再 Listen 并重新 plan；不强制一条消息对应
+一个业务任务，也不要求额外 Work CRD。LongHorizon 的角色和领域状态由其 Operator 自行定义。
 
-恢复责任分层：编排层依靠 CRD 持久化领域进度，Operator 重启后通过 Reconcile 读取状态并继续
-收敛；Harness 层由 Adapter 及其执行端保证执行恢复，loopd 不接管这层责任。agentd 是持久执行
-的承载方，agentgo 仅用于进程内模拟，不提供跨重启执行恢复。消息续接与交付重试属于聊天交付
-机制，不替代这两层的恢复。
+## 交付与恢复
 
-通用 Task 携带问答身份、目标路由与唤醒信息，不复制 Query、History、回答或 Operator 领域
-状态。简单 Operator 直接 Reconcile Task；复杂 Operator 再创建自己的领域 CRD。LongHorizon
-的 Manager、Executor、Auditor 等角色可以由其 Operator 定义，不进入通用内核。
+Chat 首次提交只创建真实的 user Message；Operator/Harness 回答、Ask、Confirm 在实际发起时
+各自创建 Message，不预建空回答。一个执行循环可以接收多次发言，最后只发布一条汇总回答。
 
-Task 只标记活跃工作，不与某条 Message 共用身份。全部输出固化后结束聚合流并删除 Task；领域长期状态留在 Operator Resource，
-完整执行状态留在 Harness。HTTP/SSE 连接只负责观察，断开连接不取消执行。
+`task_id` 是 UI/Redis 流的身份：不带它发起 Chat，带它 replay。它不对应通用 Task CRD 或 task 表，
+也不决定消息是新业务工作、补充信息还是确认答复。显式卡片回复给 typed Verb 返回值，
+普通发言交给 Operator 判断，不自动解释为批准。
 
-## 两条协作路径
+每条 Message 独立寻址、更新和持久化；Chat 流只聚合传输。回答 Message 的 end 不等于 Chat end。
+连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
 
-Human 可以直接请求 Harness，也可以请求 Operator。两条路径都从主 Conversation 的问题
-Message、目标的回答 Message 和同一 task_id 的 Task 开始。
+恢复责任分层：
 
-```text
-Human → Conversation / Message → Task
-                                  ├─ Harness → 过程与回答
-                                  └─ Operator Reconcile
-                                       ├─ 读取会话与领域事实
-                                       ├─ 调用一个或多个 Harness
-                                       └─ 汇总过程与回答
-                              → server → Human
-```
-
-Operator 的内部输出可以贡献处理详情，主回答由 Operator 显式汇总。图描述协作边界；
-具体 Harness 要成为可直聊目标，还需实现注册、Task 消费和结果发布。
-
-一次问答可以持续几十分钟乃至数天。同一动作重试必须保持稳定身份；收到事件只表示有进展，
-不表示成功完成。调用、等待与恢复契约由 [Runtime](runtime.md) 定义。
-
-## 状态与交付边界
-
-数据库保存聊天事实，Kubernetes 保存 Task，Redis 承载活跃问答的页面事件。它们不共享一个
-数据库事务，server 负责创建失败的补偿与完成顺序。TaskContext 从主会话即时组装，server
-不建立平行的 tasks 表，也不保存 Operator 领域表。
-
-AgentUE 拥有页面语义模型、Reducer、Redis Bridge 和续接。runtime 向任意 server 实例发布
-事件，页面按 task_id 从任意实例观察；server 在完成阶段固化 Message。事件传输标识与语义
-顺序分别负责续接和幂等，不能将事件流当作完整执行历史。
-
-流式观察跨实例不等于编排或 Harness 执行恢复；前者依靠 CRD 状态重新调谐，后者依靠 Adapter
-及执行端的持久状态。调用契约与消息交付边界分别见 Runtime 和 Task 交付文档。
+- 编排恢复依赖 Operator 持久化的 CRD 领域进度；Conv 游标不能恢复 Go 调用栈。
+- Harness 恢复由 Adapter 和执行端保证；agentd 可承载持久执行，agentgo 是进程内 demo。
+- 聊天层负责消息快照、通知重试、流式续接与交付收尾，不接管以上执行恢复。
 
 ## 领域设计入口
 
-- [Runtime](runtime.md)：相对 Operator 的定位、注册发现、上下文、Harness Call 与结果发布。
-- [聊天持久化](../server/docs/persistence.md)：Conversation、Message、详情会话与游标。
-- [Task 交付](../server/docs/task-delivery.md)：创建补偿、流式续接、完成与重试。
-
-领域流程和局部约束由以上文档维护；本文件只定义共享模型、主流程与 owner 边界。
+- [Runtime](runtime.md)：Operator Verb、注册、Listen、Harness 与 Human 协作。
+- [Conversation](../server/docs/conversation.md)：定向接收、游标与恢复边界。
+- [聊天持久化](../server/docs/persistence.md)：可见记录与处理详情。
+- [Chat 交付](../server/docs/task-delivery.md)：提交、流式续接与完成重试。

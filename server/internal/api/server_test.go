@@ -30,8 +30,8 @@ func TestChatHTTPFlow(t *testing.T) {
 		service.NewActorService(store, nil),
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
-		service.NewChatService(store, nopTaskClient{}, completedChatRunner{}, nil),
-		service.NewTaskService(store, nil),
+		service.NewChatService(store, completedChatRunner{}, nil, nil),
+		service.NewChatContextService(store, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))
@@ -75,11 +75,11 @@ func TestChatHTTPFlow(t *testing.T) {
 	if taskResponse.StatusCode() != 200 {
 		t.Fatalf("task status=%d body=%s", taskResponse.StatusCode(), taskResponse.Body())
 	}
-	var task loopd.TaskContext
+	var task loopd.ChatContext
 	if err := json.Unmarshal(taskResponse.Body(), &task); err != nil {
 		t.Fatal(err)
 	}
-	if task.ID != taskID || task.Input.Kind != loopd.RoleUser || task.Response.Kind != loopd.RoleOperator {
+	if task.ID != taskID || task.Input.Kind != loopd.RoleUser || task.Response.ID != "" || task.Target.Kind != loopd.RoleOperator {
 		t.Fatalf("task = %#v", task)
 	}
 
@@ -91,7 +91,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(history.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data) != 2 || result.Data[0].TaskID != taskID || result.Data[1].ID != task.Response.ID {
+	if len(result.Data) != 1 || result.Data[0].TaskID != taskID || result.Data[0].ID != task.Input.ID {
 		t.Fatalf("history = %#v", result.Data)
 	}
 
@@ -139,7 +139,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if childMessages.StatusCode() != 200 || !strings.Contains(string(childMessages.Body()), "detail output") {
 		t.Fatalf("child messages=%s", childMessages.Body())
 	}
-	taskMessages := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID+"/messages?after="+task.Response.ID+"&limit=1", nil).Result()
+	taskMessages := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID+"/messages?after="+task.Input.ID+"&limit=1", nil).Result()
 	var taskPage page[loopd.Message]
 	if err := json.Unmarshal(taskMessages.Body(), &taskPage); err != nil {
 		t.Fatal(err)
@@ -148,11 +148,6 @@ func TestChatHTTPFlow(t *testing.T) {
 		t.Fatalf("task messages = %s", taskMessages.Body())
 	}
 }
-
-type nopTaskClient struct{}
-
-func (nopTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
-func (nopTaskClient) Delete(context.Context, string) error                 { return nil }
 
 type completedChatRunner struct{}
 

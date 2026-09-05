@@ -30,8 +30,8 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	defer client.Close()
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
-	chat := service.NewChatService(store, nopTaskClient{}, delivery.New(bridge, store, nil), nil)
-	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, service.NewTaskService(store, nil), nil)
+	chat := service.NewChatService(store, delivery.New(bridge, store, nil), nil, nil)
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, service.NewChatContextService(store, nil), nil)
 	engine := route.NewEngine(config.NewOptions(nil))
 	api.Register(engine)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
