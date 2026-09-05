@@ -32,7 +32,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	defer client.Close()
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
 	chat := service.NewChatService(store, delivery.New(bridge, store, nil), nil, nil)
-	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, service.NewContextService(store, nil), nil)
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, nil)
 	engine := route.NewEngine(config.NewOptions(nil))
 	api.Register(engine)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
@@ -85,12 +85,18 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if ended.StatusCode() != 202 {
 		t.Fatalf("end=%d %s", ended.StatusCode(), ended.Body())
 	}
-	view := performJSON(t, engine, "GET", "/v1/conversations/root/messages/"+spoken.ID+"/context", "")
-	var messageContext loopd.MessageContext
-	if err := json.Unmarshal(view.Body(), &messageContext); err != nil {
+	view := performJSON(t, engine, "GET", "/v1/conversations/root/messages", "")
+	var history struct {
+		Data []loopd.Message `json:"data"`
+	}
+	if err := json.Unmarshal(view.Body(), &history); err != nil {
 		t.Fatal(err)
 	}
-	if view.StatusCode() != 200 || messageContext.Message.ID != spoken.ID || len(messageContext.History) < 2 {
-		t.Fatalf("context=%d %s", view.StatusCode(), view.Body())
+	if view.StatusCode() != 200 || len(history.Data) != 2 || history.Data[1].ID != spoken.ID {
+		t.Fatalf("history=%d %s", view.StatusCode(), view.Body())
+	}
+	removed := performJSON(t, engine, "GET", "/v1/conversations/root/messages/"+spoken.ID+"/context", "")
+	if removed.StatusCode() != 404 {
+		t.Fatalf("removed context route=%d", removed.StatusCode())
 	}
 }

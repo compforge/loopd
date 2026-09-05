@@ -15,7 +15,6 @@ type MessageRepository interface {
 	GetMessage(context.Context, string) (model.Message, error)
 	ListMessages(context.Context, string, string, int) ([]model.Message, error)
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
-	ListMessagesThrough(context.Context, string, string, int) ([]model.Message, bool, error)
 	UpdateMessageContent(context.Context, string, string, []byte) (model.Message, error)
 }
 
@@ -60,33 +59,6 @@ func (store *Store) ListMessagesByTask(ctx context.Context, taskID, after string
 	var messages []model.Message
 	err := query.Order("id ASC").Limit(limit).Find(&messages).Error
 	return messages, mapError(err)
-}
-
-func (store *Store) ListMessagesThrough(
-	ctx context.Context,
-	conversationID string,
-	throughID string,
-	limit int,
-) ([]model.Message, bool, error) {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-
-	var messages []model.Message
-	if err := store.db.WithContext(ctx).
-		Where("conversation_id = ? AND id <= ?", conversationID, throughID).
-		Order("id DESC").
-		Limit(limit + 1).
-		Find(&messages).Error; err != nil {
-		return nil, false, err
-	}
-	hasEarlier := len(messages) > limit
-	if hasEarlier {
-		messages = messages[:limit]
-	}
-	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
-		messages[left], messages[right] = messages[right], messages[left]
-	}
-	return messages, hasEarlier, nil
 }
 
 func (store *Store) GetMessage(ctx context.Context, id string) (model.Message, error) {

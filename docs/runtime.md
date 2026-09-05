@@ -40,7 +40,7 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 
 | 分组 | Verb | Effect 与语义 |
 |---|---|---|
-| Conv | Read / Context | read：共享历史／截至某条 Message 的有界上下文 |
+| Conv | Read | read：分页读取共享消息历史 |
 | Conv | Poll | write：拉取收件消息，记录 Position，不自动提交 |
 | Conv | Commit | write：确认连续安全消费前缀 |
 | Conv | Speak | write：Actor 在指定 Conv 中发一条消息 |
@@ -55,10 +55,39 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 read 表达观察意图；server 在读取 Human 状态时推进已到期问题，不等于调用者发起新工作。
 Effect 分类不增加额外的 Verbs 容器或独立 CRD。
 
+## 一个 Reconcile 能做什么
+
+下面是能力速览伪代码，不是可直接运行的 Go：省略 context、请求结构、稳定动作身份、错误处理
+与恢复分支。每行展示一种协作能力，真实 Operator 按需选择，不必把所有 Verb 串成固定流程。
+
+```go
+func Reconcile(convID) {
+    inbox := Loop.Conv.Poll(convID)                         // 收到发给自己的消息，不代表处理完成
+    history := Loop.Conv.Read(convID)                       // 主动查看共享历史，不改变消费位置
+    workspace := Loop.Conv.Workspace(convID, self)          // 复用内部工作会话，不干扰主会话
+    question := Loop.Human.Ask(convID, "希望怎样处理？")     // 反问用户；handle.Get / Wait 获取选择
+    approval := Loop.Human.Confirm(convID, "确认执行吗？")   // 请求确认；普通追加发言不等于同意
+    call := Loop.Harness.Prompt(workspace, prompt, tools)   // 按选择与确认结果调用 Harness，立即取得句柄
+    progress := call.Value(); events := call.Stream()      // 查看执行状态或持续观察增量
+    result := call.Wait()                                  // 需要结果时再等；也可以先返回，之后再调谐
+    message := Loop.Conv.Speak(convID, result)              // 发言，可多次回应，不暗示整个工作结束
+    Loop.Delivery.EmitMessage(message.ID, event)            // 按消息更新可见内容，间接送达页面
+    Loop.Delivery.Complete(deliveryID)                      // 按需关闭页面流，不结束 Conv 或 Operator
+    Loop.Conv.Commit(convID, inbox.Position)               // 仅提交已经安全处理的连续消息前缀
+}
+```
+
+Ask/Confirm 得到有效结果后才进入依赖它们的步骤；取消、超时和拒绝由 Operator 决定如何收口。
+Harness 的可见输出由 runtime 自动交付，`call.Stream` 用于 Operator 自己观察，不必再转发一遍；
+`EmitMessage` 展示的是 Operator 自己更新消息的能力。追加消息何时再次 Poll，也由业务决定。
+
+`Loop.Operator.Register(...)` 与可选的 `Loop.Harness.Register(...)` 在启动时登记在线身份并续租，
+不在每次 Reconcile 里调用。Watch 属于 controller-runtime 的启动配置，不是 Verb。
+
 ## 会话、消息与发言
 
-Conv.Context 按 conversationID + messageID 返回 MessageContext，内容是会话、当前消息与截至该
-消息的有界 History，不预设 input/response 配对。Conv.Read 分页读整个会话，不递归合并内部会话。
+Poll 返回本次接收的消息，Conv.Read 分页读取会话历史，不递归合并内部会话，也不改变消费位置。
+Operator 自行选择历史范围并组装执行上下文，runtime 不定义独立的上下文模型或问答配对。
 
 Conv.Speak 创建或复用一条 Actor-owned Message，稳定 Key 的范围是 Conv + Actor。
 同 key 重试返回既有消息，不覆盖已有正文；改变收件者或回复引用会冲突。需要新发言用新 key，
@@ -134,7 +163,7 @@ Operator API 与历史读取仍是可信部署边界，不提供完整多租户 
 ## Delivery：页面传输而非业务回合
 
 Delivery 封装提交／replay、按 Message 发事件、以及 UI 交付关闭。task_id 只关联 Redis 与页面流。
-消息上下文统一通过 Conv.Context/Read 获取，不提供按 task_id 推断问答上下文的入口。
+当前输入来自 Poll，历史通过 Conv.Read 获取，不提供按 task_id 推断问答上下文的入口。
 
 发言使用 Conv.Speak，再用 Delivery.EmitMessage 指定 Message ID，不需要传入 task_id。
 每条消息独立更新，不受某条 UI 流的开放状态限制。
@@ -155,7 +184,7 @@ server 的 actors 接口只列未过期 Operator/Harness；Human 不需要注册
 
 ## Router 示例策略
 
-Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 MessageContext 读取历史，
+Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Read 选取该输入之前的历史，
 执行 plan → 有界并行 Harness。当前批结束后再 Poll：有追加输入时先发阶段结果，再带累计证据
 重新 plan，决定继续分派或汇总。没有新输入则发出该输入快照的汇总结果。
 

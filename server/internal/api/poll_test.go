@@ -41,7 +41,7 @@ func TestConversationPollHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil),
-		chat, service.NewContextService(store, nil), nil)
+		chat, nil)
 	api.Poll = poll
 	engine := route.NewEngine(config.NewOptions(nil))
 	api.Register(engine)

@@ -98,14 +98,41 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
 			loopd.CommitRequest{Actor: routerActor, Through: inbox.Position})
 	}
-	scope, err := reconciler.loop.Conv.Context(ctx, request.Name, message.ID)
+	history, err := reconciler.readHistory(ctx, request.Name, message.ID)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if scope.Conversation.ID != request.Name {
+	if message.ConversationID != request.Name {
 		return ctrl.Result{}, errors.New("Router input belongs to another conversation")
 	}
-	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, scope)
+	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, message, history)
+}
+
+// readHistory is Router policy, not a runtime context model. Keep a bounded
+// tail before the polled input; later messages must enter through Poll instead.
+func (reconciler *Reconciler) readHistory(ctx context.Context, convID, before string) ([]loopd.Message, error) {
+	const limit = 100
+	var history []loopd.Message
+	after := ""
+	for {
+		page, err := reconciler.loop.Conv.Read(ctx, convID, after, limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, message := range page {
+			if message.ID >= before {
+				return history, nil
+			}
+			history = append(history, message)
+			if len(history) > limit {
+				history = history[len(history)-limit:]
+			}
+		}
+		if len(page) < limit {
+			return history, nil
+		}
+		after = page[len(page)-1].ID
+	}
 }
 
 type plan struct {
@@ -189,12 +216,9 @@ func modelText(content json.RawMessage) (string, error) {
 	return strings.Join(values, "\n"), nil
 }
 
-func conversationText(scope loopd.MessageContext) (string, error) {
+func conversationText(history []loopd.Message) string {
 	var lines []string
-	for _, message := range scope.History {
-		if message.ID == scope.Message.ID {
-			continue
-		}
+	for _, message := range history {
 		value, err := modelText(message.Content)
 		if err != nil {
 			// History also includes typed Human cards and non-text output.
@@ -203,9 +227,9 @@ func conversationText(scope loopd.MessageContext) (string, error) {
 		lines = append(lines, fmt.Sprintf("%s/%s: %s", message.Kind, message.Key, value))
 	}
 	if len(lines) == 0 {
-		return "(no earlier messages)", nil
+		return "(no earlier messages)"
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n")
 }
 
 func planningPrompt(query, history string, maxSubtasks int) string {

@@ -169,7 +169,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			value.mu.Lock()
 			var messages []loopd.Message
 			if value.polls == 0 {
-				messages = []loopd.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: loopd.RoleUser}}
+				messages = []loopd.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?")}}
 			} else if len(value.inbox) > 0 {
 				messages = value.inbox[0]
 				value.inbox = value.inbox[1:]
@@ -179,15 +179,10 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			_ = json.NewEncoder(response).Encode(loopd.PollResult{Messages: messages})
 		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/actors":
 			_ = json.NewEncoder(response).Encode(loopd.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: loopd.RoleOperator, ActorKey: "router"})
-		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages/message-2/context":
+		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
 			response.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(response).Encode(loopd.MessageContext{
-				Conversation: loopd.Conversation{ID: "conversation-1"},
-				Message: loopd.Message{
-					ID: "message-2", ConversationID: "conversation-1", TaskID: taskID,
-					Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?"),
-				},
-				History: []loopd.Message{
+			_ = json.NewEncoder(response).Encode(map[string]any{
+				"data": []loopd.Message{
 					{ID: "message-1", Kind: loopd.RoleOperator, Key: "router", Content: semanticModel("Earlier answer.")},
 					{ID: "message-2", Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?")},
 				},

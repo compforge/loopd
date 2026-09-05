@@ -21,7 +21,7 @@ Verb 的调用方式见 [Runtime](../../docs/runtime.md)；这里不规定 Opera
 中的参与者，不表示所有已注册 Operator 自动加入。发给 A 的消息只唤醒 A；B 可以主动 Read
 共享历史，自行决定是否参与。参与者不消费自己的广播，避免输出反过来驱动自身。
 
-Read 和 Context 是 read Verb。Context 返回截至指定 Message 的有界历史，不推断问题与答案配对。
+Read 是 read Verb，分页返回共享历史；历史范围与执行上下文由 Operator 自行组织，不推断问答配对。
 Speak 是 write Verb，在指定会话中创建或幂等复用 Actor 的一条消息；可以另发消息，也可以按消息
 身份继续更新流式内容。Speak 不承诺对方已经消费，更不表示业务完成。
 

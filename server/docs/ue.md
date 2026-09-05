@@ -47,7 +47,7 @@ Redis 初始化在输入提交边界内：失败回滚输入；数据库提交�
 不要求用户重复发送。消费契约见 [Conversation](conversation.md)。
 
 带 task_id 的请求只观察既有交付，不创建输入或通知。HTTP/SSE 断开不取消执行。
-Conv.Context 提供消息级上下文；不提供按 task_id 配对输入与回答的业务入口。
+Operator 通过 Poll 接收消息、Read 读取历史；不提供按 task_id 配对输入与回答的业务入口。
 
 ### 消息寻址与快照
 
