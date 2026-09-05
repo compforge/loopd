@@ -41,12 +41,12 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
-	listen *service.ListenService
-	store  *repo.Store
-	redis  redis.UniversalClient
-	api    *serverapi.Server
-	human  *service.HumanService
-	chat   *service.ChatService
+	poll  *service.PollService
+	store *repo.Store
+	redis redis.UniversalClient
+	api   *serverapi.Server
+	human *service.HumanService
+	chat  *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
@@ -71,17 +71,17 @@ func New(config Config) (*Server, error) {
 	actors := service.NewActorService(store, config.Logger)
 	messages := service.NewMessageService(store, config.Logger)
 	chatDelivery := delivery.New(events, store, config.Logger)
-	listen := service.NewListenService(store, config.Conversations, config.Logger)
-	chat := service.NewChatService(store, chatDelivery, config.Logger, listen)
-	tasks := service.NewChatContextService(store, config.Logger)
+	poll := service.NewPollService(store, config.Conversations, config.Logger)
+	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
+	contexts := service.NewContextService(store, config.Logger)
 	human := service.NewHumanService(store, config.Logger)
-	api := serverapi.New(actors, conversations, messages, chat, tasks, config.Logger)
+	api := serverapi.New(actors, conversations, messages, chat, contexts, config.Logger)
 	api.Human = human
-	api.Listen = listen
+	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
-		listen: listen,
-		human:  human, chat: chat,
+		poll:  poll,
+		human: human, chat: chat,
 		store: store,
 		redis: redisClient,
 		api:   api,
@@ -93,7 +93,7 @@ func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.chat.Run(ctx) })
-	workers.Go(func() { server.listen.Run(ctx) })
+	workers.Go(func() { server.poll.Run(ctx) })
 	workers.Wait()
 }
 func (server *Server) Close() error {

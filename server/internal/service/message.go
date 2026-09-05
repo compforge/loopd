@@ -26,6 +26,27 @@ func NewMessageService(repository repo.MessageRepository, logger *slog.Logger) *
 	return &MessageService{repo: repository, logger: loggerOrDefault(logger)}
 }
 
+// Speak is independent of user input and transport completion. Notification
+// retries are carried by the message's existing dispatch marker.
+func (service *MessageService) Speak(ctx context.Context, convID string, request loopd.SpeakRequest) (loopd.Message, error) {
+	if !request.Actor.ValidTarget() || strings.TrimSpace(request.Key) == "" ||
+		(request.Target != (loopd.ActorRef{}) && (!request.Target.Kind.Valid() || request.Target.Key == "")) {
+		return loopd.Message{}, ErrInvalid
+	}
+	if len(request.Content) == 0 {
+		request.Content = []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
+	}
+	if validateContent(request.Content) != nil {
+		return loopd.Message{}, ErrInvalid
+	}
+	message, err := service.repo.Speak(ctx, convID, request)
+	if err == nil {
+		service.logger.InfoContext(ctx, "actor message published", "conversation_id", convID,
+			"message_id", message.ID, "actor_kind", request.Actor.Kind, "actor_key", request.Actor.Key)
+	}
+	return messageFromModel(message), err
+}
+
 func (service *MessageService) CreateMessage(
 	ctx context.Context,
 	conversationID string,
@@ -79,7 +100,7 @@ func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
 		DeliveryState: value.DeliveryState,
 		TargetKind:    loopd.Role(value.TargetKind), TargetKey: value.TargetKey,
-		ReplyToMessageID: value.ReplyToMessageID, Purpose: value.Purpose, Revision: value.Revision,
+		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
 		Kind: loopd.Role(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},

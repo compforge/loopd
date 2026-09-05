@@ -13,7 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// +case=`执行期间的新输入在当前批次完成后重新 plan，可直接汇总或继续分派；只发一条回答`
+// +case=`执行期间的新输入在当前批次完成后重新 plan；可先发阶段结果，再汇总或继续分派`
 func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 	for _, furtherWork := range []bool{false, true} {
 		t.Run(fmt.Sprintf("dispatch_%t", furtherWork), func(t *testing.T) {
@@ -61,10 +61,10 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 				ID: "message-3", ConversationID: "conversation-1", TaskID: "task-2",
 				Kind: loopd.RoleUser, Content: semanticModel("Please include the new constraint."),
 			}}}
-			listens := server.listens
+			polls := server.polls
 			server.mu.Unlock()
-			if listens != 1 {
-				t.Fatalf("Listen ran before batch completion: %d", listens)
+			if polls != 1 {
+				t.Fatalf("Poll ran before batch completion: %d", polls)
 			}
 			if got := adapter.effectKeys(); fmt.Sprint(got) != "[plan work/0]" {
 				t.Fatalf("additional execution started early: %v", got)
@@ -104,7 +104,7 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 	}
 }
 
-func TestInputArrivingDuringSummaryReplansBeforePublishing(t *testing.T) {
+func TestInputArrivingDuringSummaryDoesNotStarveCurrentAnswer(t *testing.T) {
 	adapter := newScriptedAdapter(`{"kind":"simple","tasks":["Initial work"]}`, map[string]string{
 		"work/0":      "Evidence",
 		"summarize":   "Stale answer",
@@ -132,11 +132,39 @@ func TestInputArrivingDuringSummaryReplansBeforePublishing(t *testing.T) {
 	if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: objectKey("conversation-1")}); err != nil {
 		t.Fatal(err)
 	}
-	if got := adapter.effectKeys(); fmt.Sprint(got) != "[plan work/0 summarize plan/1 summarize/1]" {
+	if got := adapter.effectKeys(); fmt.Sprint(got) != "[plan work/0 summarize]" {
 		t.Fatalf("wrong continuation keys: %v", got)
 	}
 	answer, complete, failure := server.result()
-	if answer != "Updated answer" || !complete || failure != nil {
+	if answer != "Stale answer" || !complete || failure != nil {
 		t.Fatalf("answer=%s complete=%v failure=%v", answer, complete, failure)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.inbox) != 1 {
+		t.Fatalf("later input must remain for the next reconcile: %+v", server.inbox)
+	}
+}
+
+func TestRouterConsumesMessageWithoutUIDelivery(t *testing.T) {
+	server := newLoopServer(t, "")
+	adapter := newScriptedAdapter(`{"kind":"simple","tasks":["Work"]}`, map[string]string{"work/0": "Evidence", "summarize": "Result"}, 1)
+	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
+		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: objectKey("conversation-1")}); err != nil {
+		t.Fatal(err)
+	}
+	answer, completed, failure := server.result()
+	if answer != "Result" || completed || failure != nil {
+		t.Fatalf("message work must not require a UI delivery: answer=%q completed=%v failure=%v", answer, completed, failure)
 	}
 }

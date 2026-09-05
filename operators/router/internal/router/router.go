@@ -1,6 +1,6 @@
-// Package router implements the first loopd Operator: it plans one user
-// request, fans complex work out to temporary Harness calls, and publishes one
-// Operator-owned answer.
+// Package router implements the first loopd Operator: it consumes user
+// messages, fans complex work out to temporary Harness calls, and publishes
+// progress and results into a shared conversation.
 //
 // The v1 Router does not discover or reserve registered Harnesses. Every call
 // uses the configured transient Harness target. Once loopd has a Harness
@@ -19,7 +19,10 @@ import (
 
 	loopd "github.com/compforge/loopd"
 	loopruntime "github.com/compforge/loopd/runtime"
+	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -63,13 +66,19 @@ func New(loop loopruntime.Loop, config Config) (*Reconciler, error) {
 }
 
 // SetupWithManager watches this Router's conversation inbox. A reconciliation
-// owns one active conversation loop; it calls Listen at execution boundaries.
+// owns one active conversation loop; it calls Poll at execution boundaries.
 func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurrentReconciles int) error {
 	if maxConcurrentReconciles <= 0 {
 		return errors.New("Router reconcile concurrency must be positive")
 	}
-	return reconciler.loop.Conv.Watch(mgr, routerActor, reconciler,
-		loopruntime.ConvWatchOptions{MaxConcurrentReconciles: maxConcurrentReconciles})
+	if err := conversationv1.AddToScheme(mgr.GetScheme()); err != nil {
+		return err
+	}
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("router").
+		For(&conversationv1.Conversation{}, builder.WithPredicates(loopruntime.ConversationPredicate(routerActor))).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		Complete(reconciler)
 }
 
 var routerActor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey}
@@ -77,7 +86,7 @@ var routerActor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey}
 func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	// Receive one initial input. Further inputs join this execution only at the
 	// boundary after its current Harness batch, rather than starting another task.
-	inbox, err := reconciler.loop.Conv.Listen(ctx, request.Name, loopd.ListenRequest{Actor: routerActor, Limit: 1})
+	inbox, err := reconciler.loop.Conv.Poll(ctx, request.Name, loopd.PollRequest{Actor: routerActor, Limit: 1})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -85,20 +94,18 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind != loopd.RoleUser || message.TaskID == "" {
-		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
+	if message.Kind != loopd.RoleUser {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
+			loopd.CommitRequest{Actor: routerActor, Through: inbox.Position})
 	}
-	chat, err := reconciler.loop.Chat.Context(ctx, message.TaskID)
+	scope, err := reconciler.loop.Conv.Context(ctx, request.Name, message.ID)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if chat.Conversation.ID != request.Name {
+	if scope.Conversation.ID != request.Name {
 		return ctrl.Result{}, errors.New("Router input belongs to another conversation")
 	}
-	if chat.DeliveryState == "closed" {
-		return ctrl.Result{RequeueAfter: time.Millisecond}, nil
-	}
-	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, chat)
+	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, scope)
 }
 
 type plan struct {
@@ -182,10 +189,10 @@ func modelText(content json.RawMessage) (string, error) {
 	return strings.Join(values, "\n"), nil
 }
 
-func conversationText(task loopd.ChatContext) (string, error) {
+func conversationText(scope loopd.MessageContext) (string, error) {
 	var lines []string
-	for _, message := range task.History {
-		if message.ID == task.Input.ID {
+	for _, message := range scope.History {
+		if message.ID == scope.Message.ID {
 			continue
 		}
 		value, err := modelText(message.Content)

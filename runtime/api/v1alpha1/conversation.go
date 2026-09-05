@@ -11,8 +11,8 @@ type ConversationParticipant struct {
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
-	// LatestMessageID is the newest committed message addressed to this actor.
-	LatestMessageID string `json:"latestMessageID,omitempty"`
+	// EndOffset is the newest database message notified to this actor.
+	EndOffset string `json:"endOffset,omitempty"`
 }
 
 type ConversationSpec struct {
@@ -22,20 +22,23 @@ type ConversationSpec struct {
 	Participants []ConversationParticipant `json:"participants,omitempty"`
 }
 
-type ConversationListener struct {
+type ConversationConsumer struct {
 	// +kubebuilder:validation:Enum=operator;harness
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
-	// LastMessageID acknowledges receipt, not successful business execution.
-	LastMessageID string `json:"lastMessageID,omitempty"`
+	// Committed is the last committed message, exclusive on the next read.
+	Committed string `json:"committed,omitempty"`
+	// Position is diagnostic and bounds commits; recovery never skips
+	// messages based on this field because a Poll response may have been lost.
+	Position string `json:"position,omitempty"`
 }
 
 type ConversationStatus struct {
 	// +listType=map
 	// +listMapKey=kind
 	// +listMapKey=key
-	Listeners []ConversationListener `json:"listeners,omitempty"`
+	Consumers []ConversationConsumer `json:"consumers,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -44,7 +47,7 @@ type ConversationStatus struct {
 
 // Conversation is the durable collaboration boundary, not a business Task.
 // Its name equals the server conversation ID. Message bodies remain in SQL;
-// Operators own their business resources and choose when to call Listen.
+// Operators own their business resources and choose when to call Poll.
 type Conversation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -59,19 +62,19 @@ type ConversationList struct {
 	Items           []Conversation `json:"items"`
 }
 
-func (conversation *Conversation) LatestMessageID(kind, key string) string {
+func (conversation *Conversation) EndOffset(kind, key string) string {
 	for _, participant := range conversation.Spec.Participants {
 		if participant.Kind == kind && participant.Key == key {
-			return participant.LatestMessageID
+			return participant.EndOffset
 		}
 	}
 	return ""
 }
 
-func (conversation *Conversation) LastMessageID(kind, key string) string {
-	for _, listener := range conversation.Status.Listeners {
-		if listener.Kind == kind && listener.Key == key {
-			return listener.LastMessageID
+func (conversation *Conversation) Committed(kind, key string) string {
+	for _, consumer := range conversation.Status.Consumers {
+		if consumer.Kind == kind && consumer.Key == key {
+			return consumer.Committed
 		}
 	}
 	return ""

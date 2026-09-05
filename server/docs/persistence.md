@@ -1,136 +1,69 @@
-# loop-server Persistence
+# loop-server 持久化
 
-loop-server 数据库持久化 Conversation 与 Message 两类页面可见的聊天事实，并用 Operator/Harness
-注册表支持在线 Actor 发现，但不建立 `tasks` 表。Conv CRD 提供参与者定向通知与接收游标；AgentLedger
-保存完整运行轨迹、审计和成本事实，不替代页面聊天记录。
+数据库保存页面可见 Conversation、Message 和 Operator/Harness 在线注册。Conv CRD 保存唤醒与
+消费位置，Operator 领域进度由业务 CRD 保存；AgentLedger 承载完整执行轨迹，不替代可见消息。
 
-loop-server 通过 `DATABASE_DRIVER` 选择数据库。Helm 在配置 MySQL 时注入对应 driver 与 DSN，
-未配置时使用 SQLite。Quick Start 的 SQLite 位于临时卷，适合零依赖体验；需要跨 Pod 重建保留
-聊天记录时，由部署方提供外部 MySQL，loopd 不创建
-或管理数据库实例。Redis 只承载运行中的页面事件与断线续读，不是聊天事实源，因此内置 Redis 使用
-内存存储。
+数据库差异由 repo 的 GORM Dialector 封装，使用 DATABASE_DRIVER 与 DATABASE_DSN 配置。
+Quick Start 默认临时 SQLite，持久部署由使用方提供外部 MySQL。Redis 是事件交付桥，不是数据库
+或业务执行状态的替代品。loopd 不管理外置数据库实例。
 
-数据库配置统一为 `DATABASE_DRIVER` 与 `DATABASE_DSN`。SQLite/MySQL 的 GORM Dialector 选择只发生在
-repo 层，service 与 API 不感知数据库类型。
+## 会话归属
 
-持久化标识使用领域前缀，与 Go model 字段通过默认命名规则对应；公共 API 的 `kind/key` 表达不变。
+Conversation 是一个对话框，actor_kind/actor_key 表达组织归属，不限制谁可以在其中发言。
 
-Operator/Harness 注册与发现属于 [Runtime](../../docs/runtime.md) 的协作能力，租约与注册记录
-约束由该文档统一维护。本文只维护聊天持久化约束。
+- **User conv**：用户组织的主会话，parent_id 为空，供多个参与者持续交流。
+- **Operator conv**：Operator 的内部协作会话，parent_id 指向 User conv，归属于指定 Operator。
+  多个 Harness 和其他 Actor 可以在其中发言，避免过程淹没主会话。
 
-## Conversation
+两者是习惯用语，不是两套模型。Harness 组织的工作会话使用自身 actor_kind，不伪装成 Operator。
+Conv.Workspace 按 parent_id + actor_kind + actor_key 创建或复用内部会话，同一 Actor 跨多次输入
+共享详情。Conversation 不保存 task_id，也不依赖某条回答先存在。
 
-会话沿用以下习惯叫法：
+左侧导航只列主会话。选中消息后，按其会话与 Actor 查找内部会话；用户消息使用收件 Actor，
+其他消息使用发言 Actor。右侧显示该内部会话的消息，而不是按一次输入截出一份执行日志。
 
-- **User conv**：用户的主会话，`actor_kind=user`，`actor_key` 为用户标识，`task_id` 为空。
-- **Operator conv**：Operator 组织的工作／详情会话，`actor_kind=operator`，`actor_key` 为
-  Operator 的逻辑标识，`task_id` 为本次 Chat 交付 ID；其中可以有多个 Harness、Operator 或 User 的消息。
+## Message 是发言事实
 
-它们共用 Conversation 模型和表，不另设会话类型字段。工作会话若归属于 Harness，使用
-`actor_kind=harness`，不把它的真实归属强行标为 Operator。
+Message 用 kind/actor_key 表达发送者，target_kind/target_key 表达收件者。收件者均为空字符串
+表示对会话发言。reply_to_id 指向同一会话的具体消息，不表达任务身份或执行顺序。
 
-`conversations` 表包含：
+人可以连续追加消息，Operator 可以分多次回应；没有一问一答约束，也不预建空回答。
+Speak 的稳定 Key 以 Conversation + Actor 为范围，存储层生成全局唯一 output_key。
+同身份重试返回已有消息，新发言使用新 key；TaskID 不参与发言幂等身份。
 
-- `id`：UUIDv7 主键；
-- `name`：会话的可读名称；
-- `actor_kind`、`actor_key`：会话组织者的类型与逻辑身份，不限制其中 Message 的发送者；
-- `task_id`：可空；工作会话所属的 Chat 交付 ID；
-- `created_at`、`updated_at`：记录时间。
+消息保存 AgentUE semantic model JSON，包含 version、biz、meta 与 blocks。文字、工具展示、
+文件等可以共存一条消息；delta 不另建 Message。完整 prompt、工具原始输入输出、重试与成本
+属于执行轨迹，只有页面需要展示的部分进入 Message。
 
-User Conversation 的 `task_id` 为 `NULL`，actor 由 server 根据调用者身份确定。
-每次提问可以更换 Operator/Harness，但不会改变会话归属。工作 Conversation 关联非空 Task ID，
-actor 从该 Task 的目标推导，而不是从最近一条 Message 推断，也不是 Pod 或进程身份。
-同一 Task 在 v1 中最多关联一个工作会话，多个 Harness 共享这个会话，不按参与者拆分。
+revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状态转换在事务内递增。
+每条消息分别更新，不能因为 block ID 相同就跨消息合并。持久化与 replay 见
+[页面交付](task-delivery.md)。
 
-左侧导航只列 User Conversation。选择其中的 Message 后，按它的 `task_id` 查找工作会话，
-右侧展示该会话的 Message；没有工作会话就展示空状态。原始问题、反问、用户选择和最终回答
-可以打开同一份处理详情，页面选中项仍使用 Message ID。
+task_id 仅关联 UI／Redis 交付，可以为空。purpose=input 的消息是开启该交付的真实用户发言，
+其 delivery_state/completion 保存 UI 关闭意图；这些字段不控制 Actor 是否还可以发言。
+output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
-Conversation 只保存会话名称、组织归属等聊天信息，不承担 Task 完成意图、重试状态或 Operator
-领域状态。Conv CRD 提供定向唤醒；读取聊天事实不依赖 CRD 仍然存活。
+## Human 状态
 
-工作输出通过 task_id + output_key 唯一定位一条 Message，发送者不可变；同一 Actor 可以使用
-不同 key 发布多条输出。内部 Harness Call 使用 EffectKey 作为输出 key，actor_key 使用 Call 身份。
-同一次 Call 的文本和工具块保存在同一条 Message 中。effect_key 是可见步骤名，
-不代替身份。主回答只保存 Operator 自己的输出，不混存这些 Harness Message。
+问题与答复继续以 Message 为唯一事实来源，不新增 Interaction 表或 CRD。
+受控 ask/confirm block 保存状态和 deadline，meta 保存 EffectKey 与请求指纹。
+human_due_at、wake_pending 是维护循环使用的投影，不另存问题正文。
 
-## Message
+问题以 Conv + Actor + EffectKey 复用，期限不因重试重置。有效答复原子创建 user Message，
+收口问题并留下定向通知；重复相同答复幂等，矛盾或迟到答复拒绝。超时不伪造 user Message。
 
-`messages` 表包含：
+reply_to_id 是答复关联的唯一依据，不能用最近消息、相邻位置或 task_id 猜测。
+问题生命周期独立于 UI delivery；关闭页面流不取消问题，普通发言不自动表示批准。
+类型化契约见 [Runtime](../../docs/runtime.md)。
 
-- `id`：UUIDv7 主键，同时作为消息读取游标；
-- `conversation_id`：所属 Conversation；
-- `task_id`：一次 Chat 页面流及 Redis 交付标识，不对应业务 Task；反问、确认等可见消息继续使用同一值；
-- `kind`：发送者类型，只能是 `user`、`operator`、`harness`；
-- `actor_key`：发送者在所属系统中的稳定标识；
-- `target_kind`、`target_key`：消息收件者；两列空字符串表示显式广播，历史 NULL 不推断为广播；
-- `dispatch_pending`：消息提交后的 Conv 通知重试标记；
-- `reply_to_message_id`：精确回复引用，未回复其他消息时为空；
-- `purpose`：input/response 标记初始输入与主回答，output 标记独立工作输出，human_request/human_reply 标记交互消息；
-- `output_key`：工作输出在 Task 内的稳定身份；与 task_id 组成唯一约束，其他消息为空；
-- `revision`：消息持久快照版本；Human 交互由事务递增，流式输出保存已固化的 AgentUE seq；
-- `human_due_at`、`wake_pending`：可索引的到期调度投影与持久通知标记，不另存问题或答案；
-- `delivery_state`、`completion`：input 的交付收口状态与重试意图，用于协调交互和流关闭；
-- `content`：页面可见的 AgentUE semantic model JSON；其中 `blocks` 按顺序承载 `text`、`tool`、
-  `artifact` 等可扩展内容；
-- `created_at`、`updated_at`：创建时间与可见内容最后更新时间。
+## 时间、分页与并行展示
 
-一次 Chat 只创建真实的 user input；回答、Ask/Confirm 和工作输出在实际发起时各自创建 Message。
-跨数据库、Redis 和 Kubernetes 的提交补偿、上下文查询与完成顺序见 [Task 交付](task-delivery.md)。
+表主键使用 UUIDv7，消息按 id 排序并分页，不维护额外 sequence。
+UUIDv7 的时间顺序不是多节点数据库的全局提交顺序；当前采用人类输入通常有先后的假设，
+严格消费顺序的限制见 [Conversation](conversation.md)。
 
-详情 Message 的时间区间表达首次到最后一次可见输出。Runtime 在 Harness 输出中复用 AgentUE 的
-毫秒时间戳；server 接受事件后更新该消息的区间，完成时固化 content 不改变活动时间。重试、乱序写入
-和完成重放不会缩短区间，也不会把所有步骤的结束时间改成整个 Task 的完成时间。
+created_at 与 updated_at 表达首次到最后一次可见活动。Harness 事件携带时间戳，
+完成投影不把每条消息的结束时间改成整个页面流的完成时间，重试不缩短活动区间。
 
-右侧按相交的时间区间分组，每组有多少 actor 就展示多少列，同一 actor 的消息在列内纵向排列。
-相连的重叠区间归为同组；与前组无交集的新时间段重新从左开始，不延续整段会话的列位。
-端点相同也视作有交集。时间只决定分组，
-卡片按内容自然高度展示，不按持续时间拉伸，也不强制对齐底部。区间代表输出活动，不是精确的 Harness
-执行耗时或因果依赖。没有事件时间戳的消息保留数据库记录时间，不推测历史执行区间。
-
-每条 Message 的 content 都是页面可见的完整语义快照，而非纯文本；最小结构为：
-
-```json
-{
-  "version": "1.0",
-  "biz": "chat",
-  "meta": {},
-  "blocks": [
-    {"id": "answer", "type": "text", "content": "done"},
-    {"id": "tool-1", "type": "tool", "name": "search", "status": "completed"}
-  ]
-}
-```
-
-block 除 `id` 和 `type` 外的字段由 biz 扩展。页面无需展示的 system prompt、tool call/result、模型原始
-事件、重试与成本不进入 Message，由 AgentLedger 记录。流式 delta 也不作为独立 Message；AgentUE Redis
-Bridge 承载运行中的页面事件，任务完成时由 server 按 Message 分别折叠为可恢复的 content 快照。
-
-### Human 消息扩展
-
-Message 的可选 `reply_to_message_id`，指向同一 Conversation 与 Task 中被答复的消息。
-它是答复关联的唯一依据，与工作 Conversation 的 task_id 归属不同，也不定义执行顺序。
-不能用消息相邻、时间顺序、Actor 或 task_id 代替引用；Human 答复缺少引用或目标无效时拒绝。
-消息按时间展示不要求各 Actor 串行工作；一个 Task 可以并行产生多条提问，并按任意顺序收录答复。
-
-沿用 content JSON，以 loopd 业务 block type `ask/confirm/human_reply` 表达问题、确认和用户
-答复；问题的受控 meta 保存 EffectKey 等控制信息，block 保存请求状态与 deadline。问题和答复
-本身就是 Message，不另存一份 Interaction 事实。每条消息独立保存 model；写入有效答复与问题
-收口必须原子完成。
-
-问题正文只存在于 block，受控 meta 只保存 EffectKey、Timeout 与指纹。调度投影在问题首次写入时
-设置，在进入终态时与 block 状态一并更新；卡片答复的定向 Message 通过待通知标记更新 Conv；超时由 handle 读取或 deadline 调度感知。
-超时只更新问题状态，主动忽略才形成 user 回复。类型与行为契约统一见
-[Runtime](../../docs/runtime.md)。
-
-## UUIDv7 游标
-
-所有表主键使用 go-stdx 的 `uuid.V7()` 生成。消息列表使用 `id > after ORDER BY id`
-翻页，不维护额外 sequence。UUIDv7 在当前 loop-server 单实例进程内提供单调的时间有序 ID。
-
-UUIDv7 的时间顺序不等于多节点数据库的全局提交顺序。引入多实例写入前必须重新确认游标语义；不能
-仅凭不同进程生成的 UUIDv7 推断严格的全局先后关系。
-
-input 与实际发布的 response 分别在写入时标记 purpose。只有恰好一条 user 和一条非 user 的未标记主链路
-可以作为无歧义存量数据读取；写入 Human 交互前在同一锁下固定这两个身份。其他多消息存量数据
-拒绝猜测配对，需要先修复身份。新问题要求 input 的交付尚未开始收尾，不查询 Task CRD。
+详情按相交时间区间分组，同组按 Actor 分列。与前组无交集的时间段重新靠左，
+卡片按内容自然高度展示，不按持续时长拉伸。区间代表可见活动，不是精确执行耗时或因果关系。

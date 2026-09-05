@@ -67,7 +67,7 @@ func run() error {
 	go loopServer.Run(processCtx)
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("loop-server listening",
+		logger.Info("loop-server polling",
 			"address", config.address,
 			"database_driver", config.databaseDriver,
 			"redis_address", config.redisAddress,

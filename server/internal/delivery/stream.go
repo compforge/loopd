@@ -33,7 +33,6 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 	defer cancel()
 	incoming := make(chan messageDelivery)
 	started := map[string]bool{}
-	finished := map[string]bool{}
 	revisions := map[string]uint64{}
 	start := func(message model.Message, cursor string) error {
 		if started[message.ID] {
@@ -91,7 +90,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			if row.Purpose == "input" {
 				continue
 			}
-			if (row.Purpose == "output" || row.Purpose == "response") && input.DeliveryState != "closed" {
+			if row.Purpose == "output" && input.DeliveryState != "closed" {
 				if err := start(row, ""); err != nil {
 					return err
 				}
@@ -140,19 +139,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
-	var terminal *Event
 	for {
-		if terminal != nil {
-			all := true
-			for id := range started {
-				if id != control.ID && !finished[id] {
-					all = false
-				}
-			}
-			if all {
-				return deliver(*terminal)
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -165,7 +152,6 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				if value.err != nil {
 					return value.err
 				}
-				finished[value.message.ID] = true
 				continue
 			}
 			parsed, err := agentueui.Parse(value.delivery.Data)
@@ -179,11 +165,19 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				event.ID = value.delivery.Cursor
 				event.Persisted = event.ID != ""
 				if parsed.Op == agentueui.OpEnd {
-					if err := discover(); err != nil {
+					// UI closure flushes current snapshots but never terminates message writers.
+					rows, err := coordinator.repo.ListMessagesByTask(ctx, taskID, "", -1)
+					if err != nil {
 						return err
 					}
-					terminal = &event
-					continue
+					for _, row := range rows {
+						if row.Purpose != "input" {
+							if err := snapshot(row); err != nil {
+								return err
+							}
+						}
+					}
+					return deliver(event)
 				}
 			}
 			if err := deliver(event); err != nil {

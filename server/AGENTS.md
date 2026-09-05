@@ -11,7 +11,7 @@ server 是 loop-server 组件，数据库拥有 Conversation 与 Message 两类�
 ```text
 server/
 ├── server.go               # 组件组装与资源生命周期
-├── internal/api/           # Hertz 适配；Actor 发现、Registry、Conversation、Message、Chat、Listen 分文件
+├── internal/api/           # Hertz 适配；Actor 发现、Registry、Conversation、Message、Chat、Poll 分文件
 │   ├── actor.go            # Actor 聚合发现
 │   ├── operator.go         # Operator Registry
 │   └── harness.go          # Harness Registry
@@ -31,11 +31,11 @@ server/
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
-│   ├── chat.go             # ChatService；输入提交、懒创建回答与 UI 流收尾
-│   ├── listen.go           # DB 消息接收、提交后通知与重试
+│   ├── chat.go             # ChatService；输入提交与 UI 流交付
+│   ├── poll.go             # DB 消息接收、提交后通知与重试
 │   ├── completion.go       # 通用 Task 收尾恢复，与 Human 生命周期独立
 │   ├── human.go            # Human 消息交互、持久到期与类型化答复
-│   └── chat_context.go     # 按 UI task_id 组装 Chat 消息上下文
+│   └── context.go          # 按 Message 组装有界会话历史
 └── docs/                   # 聊天持久化、Task 交付和在线发现的领域设计
 ```
 
@@ -53,7 +53,7 @@ server/
 
 - `../AGENTS.md` — loopd 全局边界与代码地图
 - `docs/persistence.md` — Conversation 与 Message 持久化设计
-- `docs/conversation.md` — Conv 定向唤醒、Listen 游标和恢复边界
-- `docs/task-delivery.md` — Chat 创建、上下文、流式续接与完成补偿
+- `docs/conversation.md` — Conv 定向唤醒、Poll/Commit 消费位置和恢复边界
+- `docs/task-delivery.md` — 用户提交、流式续接与完成补偿
 - `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
 - `../docs/kernel.md` — loopd 稳定理念和参与者边界

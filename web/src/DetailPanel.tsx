@@ -5,45 +5,46 @@ import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
 interface Detail {
-  taskID: string;
+  scope: string;
   conversation?: Conversation;
   messages: Message[];
   error?: string;
 }
 
-/** @spec 同一 Task 的消息共享工作 Conversation；切换 Task 不得显示上一个查询的结果。 */
-export function DetailPanel({ message, liveMessages, running, status }: {
+/** @spec 同一父会话/Operator 的消息共享详情；切换参与者不能泄漏上一个查询的结果。 */
+export function DetailPanel({ message, liveMessages, running }: {
   message?: Message;
   liveMessages?: Message[];
   running: boolean;
-  status?: string;
 }) {
   const [detail, setDetail] = useState<Detail>();
-  const taskID = message?.task_id;
+  const parentID = message?.conversation_id;
+  const actorKind = message?.kind === "user" ? message.target_kind : message?.kind;
+  const actorKey = message?.kind === "user" ? message.target_key : message?.key;
+  const scope = JSON.stringify([parentID, actorKind, actorKey]);
   useEffect(() => {
-    if (!taskID) return;
+    if (!parentID || !actorKind || !actorKey) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
-    // Poll only the selected active detail; deltas still come from the shared
-    // Task stream. Completion and reload use the persisted child Messages.
+    // The actor's workspace stays observable beyond any single UI delivery.
     async function refresh() {
       try {
-        const conversation = await findDetailConversation(taskID!, controller.signal);
+        const conversation = await findDetailConversation(parentID!, actorKind!, actorKey!, controller.signal);
         const messages = conversation ? await listMessages(conversation.id, controller.signal) : [];
-        if (!controller.signal.aborted) setDetail({ taskID: taskID!, conversation, messages });
+        if (!controller.signal.aborted) setDetail({ scope, conversation, messages });
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setDetail({ taskID: taskID!, messages: [], error: String(cause) });
+          setDetail({ scope, messages: [], error: String(cause) });
         }
       } finally {
-        if (running && !controller.signal.aborted) timer = setTimeout(refresh, 1_000);
+        if (!controller.signal.aborted) timer = setTimeout(refresh, running ? 1_000 : 2_000);
       }
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [taskID, running]);
+  }, [scope, parentID, actorKind, actorKey, running]);
 
-  const selected = detail?.taskID === taskID ? detail : undefined;
+  const selected = detail?.scope === scope ? detail : undefined;
   const visible = [...(selected?.messages ?? [])];
   for (const item of liveMessages ?? []) {
     if (item.conversation_id !== selected?.conversation?.id) continue;
@@ -70,8 +71,7 @@ export function DetailPanel({ message, liveMessages, running, status }: {
       ) : (
         <div className="detail-content" data-conversation-id={selected.conversation.id}>
           <div className="task-summary">
-            <div><small>TASK</small><code>{message.task_id.slice(0, 8)}…{message.task_id.slice(-4)}</code></div>
-            <span className={`run-badge ${status ?? "completed"}`}>{(status ?? "completed").toUpperCase()}</span>
+            <div><small>OPERATOR CONVERSATION</small><code>{selected.conversation.actor_key}</code></div>
           </div>
           <div className="timeline">
             {visible.length === 0 && <div className="muted-state">等待处理消息…</div>}

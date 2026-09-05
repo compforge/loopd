@@ -12,7 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestListenReadsDatabaseBeyondWakeSignal(t *testing.T) {
+func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	if err := conversationv1.AddToScheme(scheme); err != nil {
@@ -24,14 +24,14 @@ func TestListenReadsDatabaseBeyondWakeSignal(t *testing.T) {
 		WithObjects(&conversationv1.Conversation{
 			ObjectMeta: metav1.ObjectMeta{Name: "conv", Namespace: "test"},
 			Spec: conversationv1.ConversationSpec{Participants: []conversationv1.ConversationParticipant{
-				{Kind: "operator", Key: "router", LatestMessageID: "001"},
+				{Kind: "operator", Key: "router", EndOffset: "001"},
 			}},
-			Status: conversationv1.ConversationStatus{Listeners: []conversationv1.ConversationListener{
-				{Kind: "operator", Key: "router", LastMessageID: "001"},
+			Status: conversationv1.ConversationStatus{Consumers: []conversationv1.ConversationConsumer{
+				{Kind: "operator", Key: "router", Committed: "001"},
 			}},
 		}).Build()
 	c := NewClient(kube, "test", 0)
-	result, err := c.Listen(ctx, "conv", actor, func(_ context.Context, after string) ([]loopd.Message, error) {
+	result, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
 		if after != "001" {
 			t.Fatalf("cursor = %q", after)
 		}
@@ -42,23 +42,40 @@ func TestListenReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.LastMessageID != "002" || len(result.Messages) != 1 {
+	if result.Position != "002" || len(result.Messages) != 1 {
 		t.Fatalf("result = %+v", result)
 	}
 	value := &conversationv1.Conversation{}
 	if err := kube.Get(ctx, client.ObjectKey{Name: "conv", Namespace: "test"}, value); err != nil {
 		t.Fatal(err)
 	}
-	if value.LastMessageID("operator", "router") != "002" {
+	if value.Committed("operator", "router") != "001" {
 		t.Fatalf("status = %+v", value.Status)
 	}
-	empty, err := c.Listen(ctx, "conv", actor, func(_ context.Context, after string) ([]loopd.Message, error) {
+	// A lost Poll response or restarted Operator replays the uncommitted range.
+	restarted := NewClient(kube, "test", 0)
+	replayed, err := restarted.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
+		if after != "001" {
+			t.Fatalf("replay starts at %q", after)
+		}
+		return result.Messages, nil
+	})
+	if err != nil || replayed.Position != "002" {
+		t.Fatalf("replay=%+v %v", replayed, err)
+	}
+	if err := restarted.Commit(ctx, "conv", loopd.CommitRequest{Actor: actor, Through: "003"}); err == nil {
+		t.Fatal("cannot commit beyond received position")
+	}
+	if err := c.Commit(ctx, "conv", loopd.CommitRequest{Actor: actor, Through: result.Position}); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
 		if after != "002" {
 			t.Fatalf("cursor = %q", after)
 		}
 		return nil, nil
 	})
-	if err != nil || empty.LastMessageID != "002" || len(empty.Messages) != 0 {
+	if err != nil || empty.Position != "002" || len(empty.Messages) != 0 {
 		t.Fatalf("empty result = %+v, err = %v", empty, err)
 	}
 }
@@ -88,7 +105,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if err := kube.Get(ctx, key, value); err != nil {
 		t.Fatal(err)
 	}
-	if value.LatestMessageID("operator", "a") != "001" || value.LatestMessageID("operator", "b") != "002" {
+	if value.EndOffset("operator", "a") != "001" || value.EndOffset("operator", "b") != "002" {
 		t.Fatalf("signals = %+v", value.Spec)
 	}
 	if err := c.Signal(ctx, "conv", "003", loopd.ActorRef{}); err != nil {
@@ -97,8 +114,8 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if err := kube.Get(ctx, key, value); err != nil {
 		t.Fatal(err)
 	}
-	if len(value.Spec.Participants) != 2 || value.LatestMessageID("operator", "a") != "003" ||
-		value.LatestMessageID("operator", "b") != "003" {
+	if len(value.Spec.Participants) != 2 || value.EndOffset("operator", "a") != "003" ||
+		value.EndOffset("operator", "b") != "003" {
 		t.Fatalf("broadcast = %+v", value.Spec)
 	}
 }

@@ -37,7 +37,7 @@ func TestChatSendStartsAndResumesOneTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream, err := runtime.Loop.Chat.Send(context.Background(), "conversation-1", SendMessageRequest{
+	stream, err := runtime.Loop.Delivery.Send(context.Background(), "conversation-1", SendMessageRequest{
 		TaskID: "task-1",
 	}, "2-0")
 	if err != nil {
@@ -75,8 +75,6 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 	var published, completed bool
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
-		case request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/task-1":
-			_, _ = io.WriteString(response, `{"id":"task-1","response":{"id":"response"}}`)
 		case strings.HasSuffix(request.URL.Path, "/events"):
 			published = true
 			response.Header().Set("Content-Type", "application/json")
@@ -94,14 +92,14 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	event, err := runtime.Loop.Chat.Emit(context.Background(), "task-1", agentueui.Event{
+	event, err := runtime.Loop.Delivery.EmitMessage(context.Background(), "task-1", agentueui.Event{
 		Op: agentueui.OpSet, Seq: 2,
 		Block: map[string]any{"id": "answer", "type": "text", "content": "done"},
 	})
 	if err != nil || event.ID != "2-0" {
 		t.Fatalf("Emit event=%#v error=%v", event, err)
 	}
-	if err := runtime.Loop.Chat.Complete(context.Background(), "task-1", nil); err != nil {
+	if err := runtime.Loop.Delivery.Complete(context.Background(), "task-1", nil); err != nil {
 		t.Fatal(err)
 	}
 	if !published || !completed {
@@ -116,7 +114,7 @@ func TestChatLazyAnswerSharesSequenceAcrossEmits(t *testing.T) {
 			_, _ = io.WriteString(w, `{"id":"task","response":{"id":"response"}}`)
 			return
 		}
-		if r.URL.Path != "/v1/tasks/task/events" {
+		if r.URL.Path != "/v1/messages/task/events" {
 			t.Errorf("destination=%s", r.URL.Path)
 		}
 		var input struct {
@@ -135,10 +133,10 @@ func TestChatLazyAnswerSharesSequenceAcrossEmits(t *testing.T) {
 	}
 	defer runtime.Close()
 	event := agentueui.Event{Op: agentueui.OpSet, Block: map[string]any{"id": "text", "type": "text", "content": "text"}}
-	if _, err := runtime.Loop.Chat.Emit(context.Background(), "task", event); err != nil {
+	if _, err := runtime.Loop.Delivery.EmitMessage(context.Background(), "task", event); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Loop.Chat.Emit(context.Background(), "task", event); err != nil {
+	if _, err := runtime.Loop.Delivery.EmitMessage(context.Background(), "task", event); err != nil {
 		t.Fatal(err)
 	}
 	if len(sequences) != 2 || sequences[0] != 2 || sequences[1] != 3 {

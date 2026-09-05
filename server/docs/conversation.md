@@ -1,46 +1,63 @@
-# Conversation 消息接收
+# Conversation 消息消费
 
-Conversation 是参与者共享的交流空间。Message 是可见内容的事实来源，Conv CRD 保存参与者的
-唤醒信号与接收游标；Operator 的业务状态不进入这些字段。
+Conversation 是参与者共享的交流空间，Message 是可见内容的事实来源。Conv CRD 保存参与者的
+唤醒信号与消费位置，不保存消息正文或 Operator 的领域状态。
 
-Chat 的 `task_id` 用于页面流、Redis 寻址与 replay，不应解释为 Operator 的业务任务身份。
-一次 Chat 的流结束，不意味着整个 Conversation 或 Operator 的业务工作结束。
+Human 与 Operator 独立运行。人可以连续追加消息，Operator 也可以先回应一部分、继续工作，
+再发出更多消息；平台不规定一问一答，也不把一次页面流当作业务任务边界。
 
 ## 定向消息与共享历史
 
-Message 的发送者由 `kind/actor_key` 表达，收件者由 `target_kind/target_key` 表达。两列均为空字符串
-表示显式广播，不表示所有已注册 Operator 自动加入会话。发送给 A 的消息只唤醒 A；B 可以主动
-读取共享历史，自行决定是否参与，但不会因这条定向消息被隐式调度。
+发送者由 kind/key 表达，收件者由 target_kind/target_key 表达。收件者为空字符串表示广播给会话
+中的参与者，不表示所有已注册 Operator 自动加入。发给 A 的消息只唤醒 A；B 可以主动 Read
+共享历史，自行决定是否参与。参与者不消费自己的广播，避免输出反过来驱动自身。
 
-Read 返回会话历史，不改变接收状态。Listen 是 write Verb：从数据库读取发给当前参与者或广播的
-新消息，并推进该参与者在 CRD 中的游标。参与者不接收自己的广播，以免输出反过来驱动自身。
+Read 和 Context 是 read Verb。Context 返回截至指定 Message 的有界历史，不推断问题与答案配对。
+Speak 是 write Verb，在指定会话中创建或幂等复用 Actor 的一条消息；可以另发消息，也可以按消息
+身份继续更新流式内容。Speak 不承诺对方已经消费，更不表示业务完成。
 
-历史数据增加收件者列时，缺少收件者的旧行保留 SQL NULL，不推断为广播；新消息会明确写入收件者
-或两个空字符串。历史记录仍可通过 Read 查看。字段和索引由现有 GORM 迁移入口维护。
+## Poll 与 Commit
 
-## 接收流程
+消息消费参考 [Kafka Consumer](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+的日志、拉取与提交语义：DB 是保留的消息日志，CRD 保存各 Actor 在 Conv 中的消费位置。
+这是类比，不意味着接入 Kafka、消息出队删除或提供 Kafka 的分区与消费者组协议。
 
-1. server 在保存 Message 的同一事务里记录待通知标记，提交后再更新对应参与者的 CRD 唤醒信号。
-2. CRD 更新成功后清除待通知标记；失败则保留，由任一 server 实例重试。重试通知不新建 Message。
-3. Operator 的 Watch 接收自身信号变化。不同参与者的信号分别保存，避免 Kubernetes 合并更新时
-   覆盖另一参与者尚未处理的通知。
-4. Listen 从 CRD 取当前游标，再按 Message ID 升序查询 DB，返回有界批次。没有结果不推进游标；
-   有结果则保存最后一条已接收消息的 ID。
+| 位置 | 含义 |
+|---|---|
+| EndOffset | 当前参与者最新的消息通知位置，仅用于唤醒 |
+| Position | 服务端记录的最高已拉取位置，不代表已安全处理 |
+| Committed | 调用者确认可安全恢复的位置 |
 
-CRD 中的最新消息 ID 只用于唤醒，不是 Listen 查询的上限，也不能替代查询 DB。Operator 可以在
-需要时主动调用 Listen，而不必等到唤醒信号追上数据库。
+位置值是 UUIDv7 Message ID，表示包含该消息的边界；不是 Kafka 数字 offset 的“下一条”约定。
 
-## 恢复与调用边界
+1. server 保存 Message 时同事务记录待通知标记，提交后更新 CRD 的 EndOffset；失败由后台重试。
+2. controller-runtime Watch 将参与者信号映射到 Reconcile；Watch 是 Controller 配置，不是 Verb。
+3. Poll 默认从 Committed 后读取定向或广播消息，并记录 Position，不自动 Commit。
+4. 同一次执行继续拉取时显式传上次结果 Position 作为 After；丢失响应时用相同 After 重试。
+5. Operator 在持久化领域检查点、完成处理或明确记录失败结果后，Commit 连续安全前缀。
 
-游标依赖 UUIDv7 的时间顺序，采用当前人类消息通常有先后的 v1 假设，不宣称多写入节点的全局提交顺序。
-并发接收用 Kubernetes 资源版本处理冲突，冲突后重新读取游标与消息，不合并旧快照覆盖其他参与者。
+Poll 查询以数据库为准，不把 EndOffset 当作上限。Commit 单调推进，不能超过已记录的 Position；
+调用者负责保证前缀内没有尚未安全处理的消息。它不等于结束业务，也不关闭页面流。
 
-接收不是业务完成，也不是业务检查点。游标更新后若 HTTP 响应丢失，调用者可能没有拿到该批消息；
-Read 保留找回事实的途径，但 Listen 不提供 exactly-once 执行保证。Operator 决定何时接收、
-何时持久化领域进度，以及新发言属于补充信息还是另一项工作。
+## 恢复与调度
 
-Ask/Confirm 的卡片答复具有精确的消息引用和类型化返回值；普通发言不会被自动当作确认批准。
-Human 答复本身是定向 Message，其可见状态和通知仍由各自用例维护。
+进程重启或 Poll 响应丢失后，不传 After 即从 Committed 恢复未提交消息，提供至少一次消费的基础。
+这不能保证外部动作 exactly-once：Operator 仍需稳定动作身份和必要的领域检查点。
 
-Operator 通过 runtime 使用这些能力，不导入 server 的 model/repo，也不直接操作聊天数据库或 Redis。
-当前接收接口沿用 Operator API 的可信部署边界，不构成多租户身份认证或消息可见性 ACL。
+Predicate 不因 Position 更新而触发空转；启动时未提交的消息、自己的新通知或仍有积压的 Commit
+会触发调谐。其他参与者的变化不唤醒当前 Actor。相同 Actor/Conv 的消费循环应由 Operator 保证
+单一 owner；Kubernetes 资源版本解决状态更新冲突，不替代多副本执行互斥。
+
+UUIDv7 使用当前人类消息通常先后产生的时间有序假设，不宣称多节点数据库的全局提交顺序。
+多个写入节点、长事务或时钟偏移可能让较小 ID 较晚可见；需要严格日志顺序时应另行设计排序保证。
+
+## Human 与业务边界
+
+Ask/Confirm 的卡片回复有精确 reply_to_id 和类型化结果；普通发言不会被自动解释为批准。
+卡片回复也是定向 Message，Operator 可以 Poll 感知；超时不伪造消息，由 handle 或 deadline 调度感知。
+
+何时 Poll、补充消息是否合并进工作、是否需要领域 CRD，由 Operator 决定。编排恢复靠领域 CRD，
+Harness 恢复靠 Adapter；Conv 消费位置不恢复 Go 调用栈。
+
+Operator 只使用 runtime，不导入 server 的 repo/model，也不直接访问聊天数据库或 Redis。
+当前 Operator API 使用可信部署边界，不构成完整多租户身份认证或消息可见性 ACL。

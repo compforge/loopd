@@ -15,7 +15,8 @@ import (
 
 type ConversationCoordinator interface {
 	Signal(context.Context, string, string, loopd.ActorRef) error
-	Listen(context.Context, string, loopd.ActorRef, conversationclient.ReadMessages) (loopd.ListenResult, error)
+	Poll(context.Context, string, loopd.ActorRef, string, conversationclient.ReadMessages) (loopd.PollResult, error)
+	Commit(context.Context, string, loopd.CommitRequest) error
 }
 
 type InboxRepository interface {
@@ -25,25 +26,25 @@ type InboxRepository interface {
 	AcknowledgeDispatch(context.Context, string) error
 }
 
-// ListenService coordinates message notifications and Kubernetes receipt cursors.
-type ListenService struct {
+// PollService coordinates message notifications and Kubernetes receipt cursors.
+type PollService struct {
 	repo          InboxRepository
 	conversations ConversationCoordinator
 	logger        *slog.Logger
 }
 
-func NewListenService(repository InboxRepository, conversations ConversationCoordinator, logger *slog.Logger) *ListenService {
-	return &ListenService{repo: repository, conversations: conversations, logger: loggerOrDefault(logger)}
+func NewPollService(repository InboxRepository, conversations ConversationCoordinator, logger *slog.Logger) *PollService {
+	return &PollService{repo: repository, conversations: conversations, logger: loggerOrDefault(logger)}
 }
 
-func (s *ListenService) Listen(ctx context.Context, conversationID string, request loopd.ListenRequest) (loopd.ListenResult, error) {
+func (s *PollService) Poll(ctx context.Context, conversationID string, request loopd.PollRequest) (loopd.PollResult, error) {
 	if !request.Actor.ValidTarget() {
-		return loopd.ListenResult{}, ErrInvalid
+		return loopd.PollResult{}, ErrInvalid
 	}
 	if _, err := s.repo.GetConversation(ctx, conversationID); err != nil {
-		return loopd.ListenResult{}, err
+		return loopd.PollResult{}, err
 	}
-	result, err := s.conversations.Listen(ctx, conversationID, request.Actor, func(ctx context.Context, after string) ([]loopd.Message, error) {
+	result, err := s.conversations.Poll(ctx, conversationID, request.Actor, request.After, func(ctx context.Context, after string) ([]loopd.Message, error) {
 		rows, err := s.repo.ListInbox(ctx, conversationID, string(request.Actor.Kind), request.Actor.Key, after, pageSize(request.Limit))
 		if err != nil {
 			return nil, err
@@ -66,14 +67,33 @@ func (s *ListenService) Listen(ctx context.Context, conversationID string, reque
 	if err == nil && len(result.Messages) > 0 {
 		s.logger.InfoContext(ctx, "conversation messages received", "conversation_id", conversationID,
 			"actor_kind", request.Actor.Kind, "actor_key", request.Actor.Key,
-			"message_count", len(result.Messages), "cursor", result.LastMessageID)
+			"message_count", len(result.Messages), "cursor", result.Position)
 	}
 	return result, err
 }
 
+func (s *PollService) Commit(ctx context.Context, conversationID string, request loopd.CommitRequest) error {
+	err := s.conversations.Commit(ctx, conversationID, request)
+	switch {
+	case apierrors.IsNotFound(err):
+		return repo.ErrNotFound
+	case errors.Is(err, conversationclient.ErrNotParticipant):
+		return repo.ErrForbidden
+	case errors.Is(err, conversationclient.ErrInvalidCommit):
+		return ErrInvalid
+	case apierrors.IsConflict(err):
+		return ErrConflict
+	}
+	if err == nil {
+		s.logger.InfoContext(ctx, "conversation consumption committed", "conversation_id", conversationID,
+			"actor_kind", request.Actor.Kind, "actor_key", request.Actor.Key, "through", request.Through)
+	}
+	return err
+}
+
 // Notify runs only after SQL commit. Failure leaves the Message pending so any
 // server replica can retry without creating a second user message.
-func (s *ListenService) Notify(ctx context.Context, message model.Message) error {
+func (s *PollService) Notify(ctx context.Context, message model.Message) error {
 	if err := s.conversations.Signal(ctx, message.ConversationID, message.ID,
 		loopd.ActorRef{Kind: loopd.Role(message.TargetKind), Key: message.TargetKey}); err != nil {
 		return err
@@ -86,7 +106,7 @@ func (s *ListenService) Notify(ctx context.Context, message model.Message) error
 	return nil
 }
 
-func (s *ListenService) Maintain(ctx context.Context) error {
+func (s *PollService) Maintain(ctx context.Context) error {
 	rows, err := s.repo.PendingDispatches(ctx, maxPageSize)
 	if err != nil {
 		return err
@@ -103,7 +123,7 @@ func (s *ListenService) Maintain(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-func (s *ListenService) Run(ctx context.Context) {
+func (s *PollService) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {

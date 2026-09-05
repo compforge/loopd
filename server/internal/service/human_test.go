@@ -24,7 +24,7 @@ func TestHumanMaintenanceRecoversNotificationsAndCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	human := NewHumanService(store, nil)
-	q, err := human.Create(ctx, loopd.HumanRequest{TaskID: message.TaskID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
+	q, err := human.Create(ctx, loopd.HumanRequest{ConversationID: message.ConversationID, Actor: loopd.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: loopd.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, TaskID: message.TaskID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
 	if err != nil {
 		t.Fatal(err)
 	}

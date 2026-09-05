@@ -29,8 +29,8 @@ func New(factory Factory) (*Adapter, error) {
 }
 
 func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (harness.Call, error) {
-	if request.CallID == "" || request.TaskID == "" || request.IdempotencyKey == "" || request.Prompt == "" {
-		return nil, errors.New("call ID, task ID, idempotency key, and prompt are required")
+	if request.CallID == "" || request.IdempotencyKey == "" || request.Prompt == "" {
+		return nil, errors.New("call ID, idempotency key, and prompt are required")
 	}
 	instance, err := adapter.factory(ctx, request)
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	loopd "github.com/compforge/loopd"
 )
 
-var ErrHumanConflict = errors.New("Human request already resolved or task closing")
+var ErrHumanConflict = errors.New("Human request already resolved")
 
 // HumanQuestion is the state of one message-backed request, not a second persisted entity.
 // Request input and deadline are immutable; the repository encodes this state in its Message.
@@ -37,9 +37,9 @@ func (q *HumanQuestion) Expire(now time.Time) bool {
 	return true
 }
 
-// Resolve is called after Expire under the same task transaction.
+// Resolve is called after Expire under the same question transaction.
 // +spec=`相同答复重试不产生新消息，矛盾答复与迟到答复拒绝`
-func (q *HumanQuestion) Resolve(reply loopd.HumanReply, actor string, previous *HumanAnswer, closing bool) (bool, error) {
+func (q *HumanQuestion) Resolve(reply loopd.HumanReply, actor string, previous *HumanAnswer) (bool, error) {
 	if err := q.Request.ValidateReply(reply); err != nil {
 		return false, err
 	}
@@ -49,21 +49,7 @@ func (q *HumanQuestion) Resolve(reply loopd.HumanReply, actor string, previous *
 		}
 		return false, ErrHumanConflict
 	}
-	if closing {
-		return false, ErrHumanConflict
-	}
-	q.Status = reply.Outcome
-	return true, nil
-}
 
-// EndTask gates normal completion and fails outstanding questions on task failure.
-func (q *HumanQuestion) EndTask(failed bool) (bool, error) {
-	if q.Status != loopd.HumanPending {
-		return false, nil
-	}
-	if !failed {
-		return false, ErrHumanConflict
-	}
-	q.Status, q.Reason = loopd.HumanFailure, "task_ended"
+	q.Status = reply.Outcome
 	return true, nil
 }

@@ -1,56 +1,51 @@
-# Chat 与流式交付
+# Message 与页面交付
 
-`task_id` 标识一次 Chat 的页面交付，不是 Operator 的业务任务。数据库保存可见 Message，
-Conv CRD 保存定向通知与 Listen 游标，Redis 承载活跃页面事件；server 不建立 tasks 表。
+task_id 标识一次页面交付及 Redis 流，不是 Operator 的业务任务。数据库保存可见 Message，
+Conv CRD 保存消费位置与通知，Redis 承载活跃事件。server 不建立 tasks 表。
 
-## 创建与通知
+## 提交与观察
 
-首次 Chat 只创建带收件者的 user input Message，并初始化对应 Redis 流，不预建回答。
-回答、Ask/Confirm 与工作输出在参与者实际发起时创建独立 Message。
+用户提交只创建真实 Message 和对应页面流，不预建空回答。Operator/Harness 发言、
+Ask/Confirm 在实际发生时各自创建 Message。人可以连续追加，Operator 可以多次回应，
+输入与输出数量没有一对一约束。
 
-Redis 初始化位于输入提交边界内：失败回滚输入；数据库提交失败时尽力删除已初始化的流。
-这不是跨系统事务，进程崩溃可能留下无对应输入的临时流。
+Redis 初始化在输入提交边界内：失败回滚输入；数据库提交失败尽力删除已初始化流。
+这不是跨系统事务，崩溃可能留下临时孤立流。Conv 通知用同事务保存的待通知标记在提交后重试，
+不要求用户重复发送。消费契约见 [Conversation](conversation.md)。
 
-定向通知在数据库提交后更新 Conv CRD；输入的待通知标记与 Message 同事务保存，通知失败由
-server 后台重试，不要求用户再次发送。具体接收契约见 [Conversation](conversation.md)。
+带 task_id 的请求只观察既有交付，不创建输入或通知。HTTP/SSE 断开不取消执行。
+Conv.Context 提供消息级上下文；不提供按 task_id 配对输入与回答的业务入口。
 
-## 上下文与发布
+## 消息寻址与快照
 
-`Chat.Context` 按交付 ID 解析原始 input、收件者及截至 input 的有界 History；response 可不存在。
-`Chat.Messages` 读取该交付的全部可见消息；`Conv.Read` 读取会话历史；
-`Conv.Listen` 接收参与者的新消息。它们都不需要 Task CRD。
+每条 Message 有独立的 AgentUE model、block ID、seq/revision 与 Redis 流。
+Conv.Speak 建立消息地址，随后按 Message ID 写事件；TaskID 可选，不限制后续发言。
+Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批准。
 
-每条输出 Message 有独立 AgentUE model、block ID 和 seq。调用者可以先 `Chat.Output` 建立明确
-地址，再 `EmitMessage` 发布；指定 User conv 可在主会话发布，省略则使用处理详情。
-`Chat.Emit` 是单条默认回答的便捷入口，在首次有效发布时创建回答，不能依赖它预先存在。
-同一输出应选择一种发布入口，默认 Emit 和显式 EmitMessage 的本地 seq 分配不混用。
+会话级消息事件先写 Redis，再推进 SQL 可见快照。SQL 失败时以相同 seq 和内容重试，
+不分配新 seq；同一 Message 的写入者负责保持有序。Message end 固化并终结该消息流，
+不代表 Actor 或整个 Conv 完成。
 
-Human 请求与答复仍通过 typed Verb 修改。明确回复引用不能以“最近一条消息”推断，
-普通发言也不自动成为 Ask/Confirm 的返回值。
+所有输出都通过 Message 寻址。页面会持续刷新会话消息，发现晚到的发言和内容，
+不依赖某个 task_id 的观察连接仍然打开。
 
 ## 聚合流与 replay
 
-- 有消息身份的事件使用 `{message_id, message, event}` 外层；所有参与者共享客户端 Message 更新契约。
-- 每条真实 Message 使用独立 Redis 流，包括默认回答。Human 消息按 revision 发布数据库快照。
-- 不带消息身份的 Start/Error/End 是 Chat 控制事件，只管理交付生命周期，不创建页面气泡。
-- Last-Event-ID 只表示 Chat 控制流的位置；各 Message 在重连时独立重放，客户端按 ID/revision 合并。
-- 任一 Message 的 end 都不结束 Chat。全部输出和 Human 状态交付后，才发送 Chat end。
-- 同一 Conversation 可同时观察多个 task_id；完成一个不能移除其他流的 replay 记录。
+- 有消息身份的事件用 message_id、message、event 外层寻址，客户端按 ID/revision 合并。
+- 没有消息身份的 start/error/end 是 UI 控制事件，不创建气泡。
+- Last-Event-ID 是聚合控制流位置；各 Message 在重连时独立重放。
+- 一条 Message 的 end 不关闭 UI 流；不同 task_id 的观察互不替代。
+- 已关闭交付从 SQL 恢复当时及已持久化的相关消息；后续独立发言仍由会话列表呈现。
 
-不带 task_id 的 Chat 请求创建输入，带 task_id 的请求只观察，不再创建输入或通知 Operator。
-HTTP/SSE 只负责观察，断开不取消执行。已关闭交付从数据库恢复消息和失败信息，不依赖 Redis
-或 CRD 存活；尚未固化的 delta 不承诺在 Redis 丢失后恢复。
+任一 server 实例都可观察同一交付，不依赖发布时命中的实例。Redis 丢失不能恢复尚未持久化的
+增量；AgentUE Bridge 负责事件协议、幂等与续接，server 负责消息寻址和 SQL 快照。
 
 ## 完成与重试
 
-输入 Message 的行锁串行化交互写入与交付收尾；它是已经存在的聊天事实，不是空回答或领域任务。
-正常收尾拒绝未答 Human 问题；失败收尾将剩余问题标为 failure。事务保存关闭意图并停止追加，
-随后逐条固化输出、终结 Redis 控制流，最后标记输入交付 closed。完成交付不删除 Conv CRD。
+输入 Message 保存 UI 关闭意图，行锁只协调该交付收尾，不作为业务任务锁。
+server 终结控制流并标记 closed，观察方在送达 end 前刷新相关消息的当前快照；相同意图可重试，变化冲突。
+中断后的恢复由通用交付维护循环承担，不归 Human 生命周期所有。
 
-相同完成意图可重试，变化冲突。中断后的完成重试由 Chat 生命周期拥有，不归 Human 管；
-Human 只推进问题 deadline，卡片答复由定向 Message 通知，等待者也可轮询权威状态。
-
-Operator 可以将多次 Chat 发言合并成一轮业务执行。Router 将一条最终回答发布到初始 Chat，
-并结束本轮接收的所有 Chat 流；这些交付 ID 不要求各自拥有一条回答。
-
-AgentUE 拥有事件协议、Reducer、Bridge 和单流续接；server 拥有消息寻址、聚合传输与交付收尾。
+关闭交付不删除 Conv、不自动 Commit 消费位置、不终止待答问题，也不禁止 Actor 再次发言。
+Human 问题依赖自己的期限、身份和不可变终态。Operator 决定何时关闭当前页面观察，以及何时
+完成自己的业务工作，两者不能相互推断。

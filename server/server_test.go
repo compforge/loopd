@@ -27,6 +27,8 @@ func TestNewConnectsConfiguredRedis(t *testing.T) {
 type testConversations struct{}
 
 func (testConversations) Signal(context.Context, string, string, loopd.ActorRef) error { return nil }
-func (testConversations) Listen(context.Context, string, loopd.ActorRef, func(context.Context, string) ([]loopd.Message, error)) (loopd.ListenResult, error) {
-	return loopd.ListenResult{}, nil
+func (testConversations) Poll(context.Context, string, loopd.ActorRef, string, func(context.Context, string) ([]loopd.Message, error)) (loopd.PollResult, error) {
+	return loopd.PollResult{}, nil
 }
+
+func (testConversations) Commit(context.Context, string, loopd.CommitRequest) error { return nil }

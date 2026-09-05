@@ -10,7 +10,7 @@
 Loop = Resource(spec + status) + Reconcile
 ```
 
-消息通过持久 Conversation CRD 唤醒选定的 Actor，Operator 用 Listen Verb 接收输入。
+消息通过持久 Conversation CRD 唤醒选定的 Actor，Operator 用 Poll Verb 接收输入。
 复杂的 Operator 可以创建自己的领域
 CRD，保存领域状态和完成条件。loopd 通过 Conversation 和 Message 保存页面可见的
 协作内容；Harness 持有自身执行状态，AgentLedger 记录完整执行历史。

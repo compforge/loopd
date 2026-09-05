@@ -38,7 +38,7 @@ type Runtime struct {
 type Loop struct {
 	Conv     Conv
 	Human    Human
-	Chat     Chat
+	Delivery Delivery
 	Harness  Harness
 	Operator Operator
 }
@@ -71,10 +71,10 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
-	loop.Chat = newChat(c)
+	loop.Delivery = newDelivery(c)
 	loop.Human = Human{client: c}
 	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
-	loop.Harness.chat = loop.Chat
+	loop.Harness.chat = loop.Delivery
 	loop.Operator = Operator{registry: newRegistry(
 		runCtx, c, "operator", "operators", options.RegistryLeaseDuration, options.Logger,
 	)}

@@ -27,22 +27,29 @@ type HumanChoice struct {
 // HumanRequest is the immutable input to one message-backed Human effect.
 // Timeout uses Go duration nanoseconds on the JSON wire.
 type HumanRequest struct {
-	TaskID       string        `json:"task_id"`
-	EffectKey    string        `json:"effect_key"`
-	Type         string        `json:"type"`
-	Title        string        `json:"title"`
-	Prompt       string        `json:"prompt"`
-	Timeout      time.Duration `json:"timeout"`
-	Choices      []HumanChoice `json:"choices"`
-	AllowOther   bool          `json:"allow_other,omitempty"`
-	ConfirmLabel string        `json:"confirm_label,omitempty"`
-	DeclineLabel string        `json:"decline_label,omitempty"`
+	ConversationID string        `json:"conversation_id,omitempty"`
+	Actor          ActorRef      `json:"actor,omitempty"`
+	Target         ActorRef      `json:"target,omitempty"`
+	ReplyToID      string        `json:"reply_to_id,omitempty"`
+	TaskID         string        `json:"task_id"`
+	EffectKey      string        `json:"effect_key"`
+	Type           string        `json:"type"`
+	Title          string        `json:"title"`
+	Prompt         string        `json:"prompt"`
+	Timeout        time.Duration `json:"timeout"`
+	Choices        []HumanChoice `json:"choices"`
+	AllowOther     bool          `json:"allow_other,omitempty"`
+	ConfirmLabel   string        `json:"confirm_label,omitempty"`
+	DeclineLabel   string        `json:"decline_label,omitempty"`
 }
 
 // +spec=`Timeout 必须为有限正值；Ask 支持单选、单选加自由文本或纯自由文本`
 func (r HumanRequest) Validate() error {
-	if strings.TrimSpace(r.TaskID) == "" || strings.TrimSpace(r.EffectKey) == "" || strings.TrimSpace(r.Title) == "" || strings.TrimSpace(r.Prompt) == "" || r.Timeout <= 0 {
-		return fmt.Errorf("task_id, effect_key, title, prompt and positive timeout are required")
+	if strings.TrimSpace(r.ConversationID) == "" || strings.TrimSpace(r.EffectKey) == "" || strings.TrimSpace(r.Title) == "" || strings.TrimSpace(r.Prompt) == "" || r.Timeout <= 0 {
+		return fmt.Errorf("conversation_id, effect_key, title, prompt and positive timeout are required")
+	}
+	if r.Actor.Kind != RoleOperator || r.Actor.Key == "" || r.Target.Kind != RoleUser || r.Target.Key == "" {
+		return fmt.Errorf("conversation Human request requires an operator sender and user recipient")
 	}
 	switch r.Type {
 	case "ask":
@@ -70,14 +77,14 @@ func (r HumanRequest) Validate() error {
 }
 
 type HumanReply struct {
-	ReplyToMessageID string      `json:"reply_to_message_id"`
-	Outcome          HumanStatus `json:"outcome"`
-	Value            string      `json:"value,omitempty"`
+	ReplyToID string      `json:"reply_to_id"`
+	Outcome   HumanStatus `json:"outcome"`
+	Value     string      `json:"value,omitempty"`
 }
 
 func (r HumanRequest) ValidateReply(reply HumanReply) error {
-	if reply.ReplyToMessageID == "" {
-		return fmt.Errorf("reply_to_message_id is required")
+	if reply.ReplyToID == "" {
+		return fmt.Errorf("reply_to_id is required")
 	}
 	if reply.Outcome == HumanDismissed && reply.Value == "" {
 		return nil

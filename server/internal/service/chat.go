@@ -17,18 +17,16 @@ import (
 )
 
 type ChatRepository interface {
-	BeginCompletion(context.Context, string, []byte, bool) error
+	BeginCompletion(context.Context, string, []byte) error
 	FinishCompletion(context.Context, string) error
 	PendingCompletions(context.Context) ([]model.Message, error)
 	CreateChatInput(context.Context, model.Message, func(context.Context) error) (model.Message, error)
 }
 
 type ChatDelivery interface {
-	Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error)
-	EmitMessage(context.Context, string, string, json.RawMessage) (string, error)
+	EmitMessage(context.Context, string, json.RawMessage) (string, error)
 	Initialize(context.Context, string, json.RawMessage) error
 	Delete(context.Context, string) error
-	Emit(context.Context, string, json.RawMessage) (string, error)
 	Complete(context.Context, string, *delivery.Failure) error
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
@@ -127,25 +125,13 @@ func (service *ChatService) Stream(
 	return err
 }
 
-func (service *ChatService) Emit(ctx context.Context, taskID string, event json.RawMessage) (string, error) {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return "", ErrInvalid
-	}
-	eventID, err := service.delivery.Emit(ctx, taskID, event)
-	if err == nil {
-		service.logger.DebugContext(ctx, "chat event published", "task_id", taskID, "event_id", eventID)
-	}
-	return eventID, mapDeliveryError(err)
-}
-
 func (service *ChatService) Complete(ctx context.Context, taskID string, failure *delivery.Failure) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return ErrInvalid
 	}
 	intent, _ := json.Marshal(failure)
-	if err := service.repo.BeginCompletion(ctx, taskID, intent, failure != nil); err != nil {
+	if err := service.repo.BeginCompletion(ctx, taskID, intent); err != nil {
 		return err
 	}
 	if err := mapDeliveryError(service.delivery.Complete(ctx, taskID, failure)); err != nil {
@@ -198,11 +184,7 @@ func (service *ChatService) resumeCompletion(ctx context.Context, taskID string,
 	return service.Complete(ctx, taskID, failure)
 }
 
-func (service *ChatService) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
-	message, err := service.delivery.Output(ctx, taskID, request)
-	return message, mapDeliveryError(err)
-}
-func (service *ChatService) EmitMessage(ctx context.Context, taskID, messageID string, event json.RawMessage) (string, error) {
-	id, err := service.delivery.EmitMessage(ctx, taskID, messageID, event)
+func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage) (string, error) {
+	id, err := service.delivery.EmitMessage(ctx, messageID, event)
 	return id, mapDeliveryError(err)
 }

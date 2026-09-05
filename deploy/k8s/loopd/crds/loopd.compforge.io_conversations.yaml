@@ -22,7 +22,7 @@ spec:
         description: |-
           Conversation is the durable collaboration boundary, not a business Task.
           Its name equals the server conversation ID. Message bodies remain in SQL;
-          Operators own their business resources and choose when to call Listen.
+          Operators own their business resources and choose when to call Poll.
         properties:
           apiVersion:
             description: |-
@@ -49,6 +49,10 @@ spec:
                     ConversationParticipant carries a recipient-specific wake signal. A signal
                     for B must not overwrite the signal for A when Kubernetes coalesces updates.
                   properties:
+                    endOffset:
+                      description: EndOffset is the newest database message notified
+                        to this actor.
+                      type: string
                     key:
                       minLength: 1
                       type: string
@@ -56,10 +60,6 @@ spec:
                       enum:
                       - operator
                       - harness
-                      type: string
-                    latestMessageID:
-                      description: LatestMessageID is the newest committed message
-                        addressed to this actor.
                       type: string
                   required:
                   - key
@@ -73,9 +73,13 @@ spec:
             type: object
           status:
             properties:
-              listeners:
+              consumers:
                 items:
                   properties:
+                    committed:
+                      description: Committed is the last committed message, exclusive
+                        on the next read.
+                      type: string
                     key:
                       minLength: 1
                       type: string
@@ -84,9 +88,10 @@ spec:
                       - operator
                       - harness
                       type: string
-                    lastMessageID:
-                      description: LastMessageID acknowledges receipt, not successful
-                        business execution.
+                    position:
+                      description: |-
+                        Position is diagnostic and bounds commits; recovery never skips
+                        messages based on this field because a Poll response may have been lost.
                       type: string
                   required:
                   - key

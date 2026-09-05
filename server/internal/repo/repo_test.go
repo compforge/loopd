@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -77,9 +78,9 @@ func TestListConversationsReturnsOnlyRootsNewestFirst(t *testing.T) {
 	ctx := context.Background()
 	first := model.Conversation{ID: "01991f3d-1111-7000-8000-000000000000", Name: "First"}
 	second := model.Conversation{ID: "01991f3d-1112-7000-8000-000000000000", Name: "Second"}
-	taskID := "01991f3d-1113-7000-8000-000000000000"
+	parentID := first.ID
 	detail := model.Conversation{
-		ID: "01991f3d-1114-7000-8000-000000000000", Name: "Detail", TaskID: &taskID, ActorKind: "operator", ActorKey: "router",
+		ID: "01991f3d-1114-7000-8000-000000000000", Name: "Detail", ParentID: &parentID, ActorKind: "operator", ActorKey: "router",
 	}
 	for _, conversation := range []model.Conversation{first, second, detail} {
 		if _, err := store.CreateConversation(ctx, conversation); err != nil {
@@ -103,7 +104,7 @@ func TestListConversationsReturnsOnlyRootsNewestFirst(t *testing.T) {
 	}
 }
 
-func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
+func TestCreateChatInputRollsBackOnInitializationError(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	conversationID := "01991f3d-1111-7000-8000-000000000000"
@@ -123,10 +124,8 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", ActorKey: "user-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
-	response := existing
-	response.TaskID = user.TaskID
-	if _, err := store.CreateChatMessages(ctx, user, response, nil); err == nil {
-		t.Fatal("CreateChatMessages succeeded with a duplicate response ID")
+	if _, err := store.CreateChatInput(ctx, user, func(context.Context) error { return errors.New("initialize failed") }); err == nil {
+		t.Fatal("CreateChatInput succeeded despite initialization failure")
 	}
 	messages, err := store.ListMessages(ctx, conversationID, "", 100)
 	if err != nil {

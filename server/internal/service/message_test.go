@@ -20,7 +20,7 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 	store := openServiceStore(t)
 	ctx := context.Background()
 	conversations := NewConversationService(store, nil)
-	conversation, err := conversations.CreateConversation(ctx, "Planning", "alice", "")
+	conversation, err := conversations.CreateConversation(ctx, "Planning", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 func TestChatRollsBackInputWhenStreamInitializationFails(t *testing.T) {
 	store := openServiceStore(t)
 	ctx := context.Background()
-	conversation, err := NewConversationService(store, nil).CreateConversation(ctx, "Planning", "alice", "")
+	conversation, err := NewConversationService(store, nil).CreateConversation(ctx, "Planning", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	chat := NewChatService(store, nopChatRunner{}, nil, nil)
 	ctx := context.Background()
 
-	root, err := conversations.CreateConversation(ctx, "Root", "user-1", "")
+	root, err := conversations.CreateConversation(ctx, "Root", "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,18 +92,18 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := conversations.CreateConversation(ctx, "Operator work", "", answer.TaskID)
+	detail, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.TaskID != answer.TaskID || detail.ActorKind != loopd.RoleOperator || detail.ActorKey != "operator-1" {
+	if detail.ParentID != root.ID || detail.ActorKind != loopd.RoleOperator || detail.ActorKey != "operator-1" {
 		t.Fatalf("work conversation ownership = %+v", detail)
 	}
-	if root.ActorKind != loopd.RoleUser || root.ActorKey != "user-1" || root.TaskID != "" {
+	if root.ActorKind != loopd.RoleUser || root.ActorKey != "user-1" || root.ParentID != "" {
 		t.Fatalf("user conversation ownership = %+v", root)
 	}
-	if _, err := conversations.CreateConversation(ctx, "Duplicate", "", answer.TaskID); !errors.Is(err, repo.ErrConflict) {
-		t.Fatalf("duplicate detail error = %v, want %v", err, repo.ErrConflict)
+	if again, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator-1"}); err != nil || again.ID != detail.ID {
+		t.Fatalf("workspace not reused: %+v %v", again, err)
 	}
 	_, err = messages.CreateMessage(
 		ctx, detail.ID, answer.TaskID, loopd.RoleOperator, "operator-1", textContent("working"),
@@ -111,7 +111,7 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateMessage(ctx, detail.ID, "other-task", loopd.RoleHarness, "call", textContent("wrong task")); !errors.Is(err, repo.ErrConflict) {
+	if _, err := messages.CreateMessage(ctx, detail.ID, "other-task", loopd.RoleHarness, "call", textContent("another delivery")); err != nil {
 		t.Fatalf("cross-task message error = %v", err)
 	}
 	if _, err := chat.Create(ctx, detail.ID, "user-1", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("nested chat")); !errors.Is(err, repo.ErrConflict) {
@@ -123,12 +123,12 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherDetail, err := conversations.CreateConversation(ctx, "Harness work", "", other.TaskID)
+	otherDetail, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: other.TargetKind, Key: other.TargetKey})
 	if err != nil || otherDetail.ActorKind != loopd.RoleHarness || otherDetail.ActorKey != "direct" || otherDetail.ID == detail.ID {
 		t.Fatalf("other work conversation = %+v, error = %v", otherDetail, err)
 	}
 	unchanged, err := conversations.GetConversation(ctx, root.ID)
-	if err != nil || unchanged.ActorKind != root.ActorKind || unchanged.ActorKey != root.ActorKey || unchanged.TaskID != "" {
+	if err != nil || unchanged.ActorKind != root.ActorKind || unchanged.ActorKey != root.ActorKey || unchanged.ParentID != "" {
 		t.Fatalf("user conversation changed = %+v, error = %v", unchanged, err)
 	}
 }
@@ -221,7 +221,7 @@ func textContent(text string) json.RawMessage {
 	return value
 }
 
-func (failingCommitRepository) BeginCompletion(context.Context, string, []byte, bool) error {
+func (failingCommitRepository) BeginCompletion(context.Context, string, []byte) error {
 	return nil
 }
 func (failingCommitRepository) FinishCompletion(context.Context, string) error { return nil }
@@ -233,9 +233,8 @@ func completionStore(t *testing.T) *repo.Store {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conversation-1"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := store.CreateChatMessages(ctx,
-		model.Message{ID: "input", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "alice", Content: textContent("question")},
-		model.Message{ID: "response", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "router", Content: textContent("")}, nil)
+	_, err := store.CreateChatInput(ctx,
+		model.Message{ID: "input", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "alice", Content: textContent("question")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,15 +245,9 @@ func (failingCommitRepository) PendingCompletions(context.Context) ([]model.Mess
 	return nil, nil
 }
 
-func (nopChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
-	return loopd.Message{}, nil
-}
-func (nopChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+func (nopChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
 	return "", nil
 }
-func (runner *recordingChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
-	return loopd.Message{}, nil
-}
-func (runner *recordingChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+func (runner *recordingChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
 	return "", nil
 }

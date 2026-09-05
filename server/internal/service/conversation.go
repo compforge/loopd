@@ -14,7 +14,26 @@ import (
 
 type ConversationRepository interface {
 	repo.ConversationRepository
-	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
+	EnsureActorConversation(context.Context, string, loopd.ActorRef) (model.Conversation, error)
+}
+
+func (service *ConversationService) ActorConversation(ctx context.Context, parentID string, actor loopd.ActorRef) (loopd.Conversation, error) {
+	if !actor.ValidTarget() {
+		return loopd.Conversation{}, ErrInvalid
+	}
+	value, err := service.repo.EnsureActorConversation(ctx, parentID, actor)
+	return conversationFromModel(value), err
+}
+
+func (service *ConversationService) FindActorConversation(ctx context.Context, parentID, kind, key string) ([]loopd.Conversation, error) {
+	value, err := service.repo.FindActorConversation(ctx, parentID, kind, key)
+	if errors.Is(err, repo.ErrNotFound) {
+		return []loopd.Conversation{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []loopd.Conversation{conversationFromModel(value)}, nil
 }
 
 type ConversationService struct {
@@ -30,33 +49,19 @@ func (service *ConversationService) CreateConversation(
 	ctx context.Context,
 	name string,
 	userKey string,
-	taskID string,
 ) (loopd.Conversation, error) {
 	conversation := model.Conversation{
 		ID: uuid.V7(), Name: strings.TrimSpace(name),
 		ActorKind: string(loopd.RoleUser), ActorKey: strings.TrimSpace(userKey),
 	}
-	if taskID != "" {
-		rows, err := service.repo.ListRootMessagesByTask(ctx, taskID)
-		if err != nil {
-			return loopd.Conversation{}, err
-		}
-		input, _, err := repo.ChatMessages(rows)
-		if err != nil {
-			return loopd.Conversation{}, err
-		}
-		// Ownership follows the logical task target, never a worker instance
-		// or the sender of whichever message happens to arrive last.
-		conversation.ActorKind, conversation.ActorKey = input.TargetKind, input.TargetKey
-		conversation.TaskID = &taskID
-	} else if conversation.ActorKey == "" {
+	if conversation.ActorKey == "" {
 		return loopd.Conversation{}, ErrInvalid
 	}
 	conversation, err := service.repo.CreateConversation(ctx, conversation)
 	if err == nil {
 		service.logger.InfoContext(ctx, "conversation created",
 			"conversation_id", conversation.ID,
-			"task_id", taskID, "actor_kind", conversation.ActorKind,
+			"actor_kind", conversation.ActorKind,
 		)
 	}
 	return conversationFromModel(conversation), err
@@ -65,17 +70,6 @@ func (service *ConversationService) CreateConversation(
 func (service *ConversationService) GetConversation(ctx context.Context, id string) (loopd.Conversation, error) {
 	conversation, err := service.repo.GetConversation(ctx, id)
 	return conversationFromModel(conversation), err
-}
-
-func (service *ConversationService) ListDetailConversations(ctx context.Context, taskID string) ([]loopd.Conversation, error) {
-	conversation, err := service.repo.FindConversationByTask(ctx, taskID)
-	if errors.Is(err, repo.ErrNotFound) {
-		return []loopd.Conversation{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return []loopd.Conversation{conversationFromModel(conversation)}, nil
 }
 
 func (service *ConversationService) ListConversations(
@@ -100,8 +94,8 @@ func conversationFromModel(value model.Conversation) loopd.Conversation {
 		ActorKind: loopd.Role(value.ActorKind), ActorKey: value.ActorKey,
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
-	if value.TaskID != nil {
-		result.TaskID = *value.TaskID
+	if value.ParentID != nil {
+		result.ParentID = *value.ParentID
 	}
 	return result
 }

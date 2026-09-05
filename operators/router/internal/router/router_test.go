@@ -119,7 +119,7 @@ func TestReconcileCompletesInvalidPlanAsFailure(t *testing.T) {
 	}
 }
 
-func (server *loopServer) result() (string, bool, *loopruntime.TaskFailure) {
+func (server *loopServer) result() (string, bool, *loopruntime.DeliveryFailure) {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	return server.answer, server.completed, server.failure
@@ -130,8 +130,8 @@ type loopServer struct {
 	mu           sync.Mutex
 	answer       string
 	completed    bool
-	failure      *loopruntime.TaskFailure
-	listens      int
+	failure      *loopruntime.DeliveryFailure
+	polls        int
 	inbox        [][]loopd.Message
 	completedIDs []string
 }
@@ -141,25 +141,49 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 	value := &loopServer{}
 	value.Server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
-		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/listen":
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/commit"):
+			response.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/speak"):
+			var input loopd.SpeakRequest
+			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+				t.Error(err)
+			}
+			var content struct {
+				Blocks []struct {
+					ID      string
+					Content string
+				}
+			}
+			if err := json.Unmarshal(input.Content, &content); err != nil {
+				t.Error(err)
+			}
+			for _, block := range content.Blocks {
+				if block.ID == "answer" {
+					value.mu.Lock()
+					value.answer = block.Content
+					value.mu.Unlock()
+				}
+			}
+			_ = json.NewEncoder(response).Encode(loopd.Message{ID: input.Key, Content: input.Content})
+		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/poll":
 			value.mu.Lock()
 			var messages []loopd.Message
-			if value.listens == 0 {
+			if value.polls == 0 {
 				messages = []loopd.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: loopd.RoleUser}}
 			} else if len(value.inbox) > 0 {
 				messages = value.inbox[0]
 				value.inbox = value.inbox[1:]
 			}
-			value.listens++
+			value.polls++
 			value.mu.Unlock()
-			_ = json.NewEncoder(response).Encode(loopd.ListenResult{Messages: messages})
-		case request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/"+taskID:
+			_ = json.NewEncoder(response).Encode(loopd.PollResult{Messages: messages})
+		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/actors":
+			_ = json.NewEncoder(response).Encode(loopd.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: loopd.RoleOperator, ActorKey: "router"})
+		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages/message-2/context":
 			response.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(response).Encode(loopd.ChatContext{
-				ID:           taskID,
-				Response:     loopd.Message{ID: "response", Purpose: "response"},
+			_ = json.NewEncoder(response).Encode(loopd.MessageContext{
 				Conversation: loopd.Conversation{ID: "conversation-1"},
-				Input: loopd.Message{
+				Message: loopd.Message{
 					ID: "message-2", ConversationID: "conversation-1", TaskID: taskID,
 					Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?"),
 				},
@@ -168,12 +192,6 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 					{ID: "message-2", Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?")},
 				},
 			})
-		case request.Method == http.MethodPost && request.URL.Path == "/v1/tasks/"+taskID+"/outputs":
-			var input loopd.OutputRequest
-			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
-				t.Error(err)
-			}
-			_ = json.NewEncoder(response).Encode(loopd.Message{ID: input.Actor.Key, TaskID: taskID, Purpose: "output"})
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):
 			var input struct {
 				Event json.RawMessage `json:"event"`
@@ -198,7 +216,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			_, _ = fmt.Fprintf(response, `{"id":%q}`, fmt.Sprintf("%d-0", event.Seq))
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/complete"):
 			var input struct {
-				Error *loopruntime.TaskFailure `json:"error"`
+				Error *loopruntime.DeliveryFailure `json:"error"`
 			}
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
@@ -207,7 +225,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			}
 			value.mu.Lock()
 			value.completed = true
-			value.completedIDs = append(value.completedIDs, strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/tasks/"), "/complete"))
+			value.completedIDs = append(value.completedIDs, strings.TrimSuffix(strings.TrimPrefix(request.URL.Path, "/v1/deliveries/"), "/complete"))
 			value.failure = input.Error
 			value.mu.Unlock()
 			response.WriteHeader(http.StatusNoContent)
@@ -241,7 +259,7 @@ func newScriptedAdapter(plan string, results map[string]string, wantWork int) *s
 }
 
 func (adapter *scriptedAdapter) Prompt(_ context.Context, request harness.Request) (harness.Call, error) {
-	effect := strings.TrimPrefix(request.IdempotencyKey, request.TaskID+"/")
+	effect := strings.TrimPrefix(request.IdempotencyKey, "message-2/")
 	adapter.mu.Lock()
 	adapter.effects = append(adapter.effects, effect)
 	adapter.prompts[effect] = request.Prompt

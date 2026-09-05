@@ -26,7 +26,7 @@ Conversation 是一个对话框。习惯上称用户的主会话为 **User conv*
 
 User conv 不绑定固定执行者，每次发言可以选择不同 Operator/Harness。定向发给 A 的消息只唤醒 A；
 其他参与者可以主动 Read 历史，自行决定是否参与，而不是被隐式广播调度。
-工作会话当前按 Chat 交付 ID 关联详情；该存储关系不定义 Operator 的业务工作生命周期。
+工作会话按父会话与组织 Actor 复用，跨多次发言持续存在；不绑定一次页面交付。
 
 ## Loop、Reconcile 与 Verb
 
@@ -39,23 +39,24 @@ CRD 持有状态，Reconcile 判断下一步，Verb 将判断连接到实际协�
 间接送达页面等机制。Verb 的 Effect 分为 read 与 write，不增加通用持久 Effect 引擎。
 
 Conv CRD 是 server 与参与者之间的协作边界，只保存定向唤醒信号和接收游标，不复制消息正文。
-Listen 是 write Verb：读出发给该参与者的新消息并推进游标；Read 读取共享历史，不改变接收状态。
-最新消息 ID 只是触发信号，Listen 仍从数据库查询。接收不是业务完成，不是领域 checkpoint。
+Poll 是 write Verb：拉取发给参与者的消息并记录 Position；Commit 确认连续安全消费前缀。
+Read/Context 读取消息与历史，不改变消费位置；Speak 发言，不暗示工作完成。
+最新消息 ID 只是触发信号，Poll 仍从数据库查询。接收不是业务完成，不是领域 checkpoint。
 
-Operator 自己决定何时 Listen、如何处理补充发言，以及是否需要自己的领域 CRD。
-Router 示例在同一次执行中等当前批 Harness 完成，再 Listen 并重新 plan；不强制一条消息对应
+Operator 自己决定何时 Poll、如何处理补充发言，以及是否需要自己的领域 CRD。
+Router 示例在同一次执行中等当前批 Harness 完成，再 Poll 并重新 plan；不强制一条消息对应
 一个业务任务，也不要求额外 Work CRD。LongHorizon 的角色和领域状态由其 Operator 自行定义。
 
 ## 交付与恢复
 
-Chat 首次提交只创建真实的 user Message；Operator/Harness 回答、Ask、Confirm 在实际发起时
-各自创建 Message，不预建空回答。一个执行循环可以接收多次发言，最后只发布一条汇总回答。
+用户首次提交只创建真实的 user Message；Operator/Harness 回答、Ask、Confirm 在实际发起时
+各自创建 Message，不预建空回答。一个执行循环可以接收多次发言，也可以多次发布阶段结果或回应。
 
-`task_id` 是 UI/Redis 流的身份：不带它发起 Chat，带它 replay。它不对应通用 Task CRD 或 task 表，
+`task_id` 是 UI/Redis 流的身份：不带它提交新发言，带它 replay。它不对应通用 Task CRD 或 task 表，
 也不决定消息是新业务工作、补充信息还是确认答复。显式卡片回复给 typed Verb 返回值，
 普通发言交给 Operator 判断，不自动解释为批准。
 
-每条 Message 独立寻址、更新和持久化；Chat 流只聚合传输。回答 Message 的 end 不等于 Chat end。
+每条 Message 独立寻址、更新和持久化；页面流只聚合传输。Message 的 end 与页面流 end 相互独立。
 连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
 
 恢复责任分层：
@@ -66,7 +67,7 @@ Chat 首次提交只创建真实的 user Message；Operator/Harness 回答、Ask
 
 ## 领域设计入口
 
-- [Runtime](runtime.md)：Operator Verb、注册、Listen、Harness 与 Human 协作。
+- [Runtime](runtime.md)：Operator Verb、注册、Poll、Harness 与 Human 协作。
 - [Conversation](../server/docs/conversation.md)：定向接收、游标与恢复边界。
 - [聊天持久化](../server/docs/persistence.md)：可见记录与处理详情。
-- [Chat 交付](../server/docs/task-delivery.md)：提交、流式续接与完成重试。
+- [页面交付](../server/docs/task-delivery.md)：提交、流式续接与完成重试。

@@ -23,7 +23,7 @@ func testConversationCoordinator(t *testing.T) ConversationCoordinator {
 	return conversationclient.NewClient(kube, "test", 0)
 }
 
-func TestListenUsesTargetedSQLHistory(t *testing.T) {
+func TestPollUsesTargetedSQLHistory(t *testing.T) {
 	ctx := context.Background()
 	store := openServiceStore(t)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"}); err != nil {
@@ -32,7 +32,7 @@ func TestListenUsesTargetedSQLHistory(t *testing.T) {
 	a := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
 	b := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "b"}
 	coordinator := testConversationCoordinator(t)
-	listen := NewListenService(store, coordinator, nil)
+	poll := NewPollService(store, coordinator, nil)
 	for _, message := range []model.Message{
 		{ID: "001", Kind: "user", ActorKey: "alice", TargetKind: "operator", TargetKey: "a"},
 		{ID: "002", Kind: "user", ActorKey: "alice", TargetKind: "operator", TargetKey: "b"},
@@ -46,14 +46,14 @@ func TestListenUsesTargetedSQLHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Deliberately lag the wake signals behind SQL. They must not limit Listen.
+	// Deliberately lag the wake signals behind SQL. They must not limit Poll.
 	if err := coordinator.Signal(ctx, "conv", "001", a); err != nil {
 		t.Fatal(err)
 	}
 	if err := coordinator.Signal(ctx, "conv", "002", b); err != nil {
 		t.Fatal(err)
 	}
-	result, err := listen.Listen(ctx, "conv", loopd.ListenRequest{Actor: a, Limit: 2})
+	result, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,15 +63,22 @@ func TestListenUsesTargetedSQLHistory(t *testing.T) {
 	if result.Messages[0].TargetKind != loopd.RoleOperator || result.Messages[0].TargetKey != "a" {
 		t.Fatal("target lost in public message mapping")
 	}
-	result, err = listen.Listen(ctx, "conv", loopd.ListenRequest{Actor: a, Limit: 2})
+	repeated, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a, Limit: 2})
+	if err != nil || repeated.Messages[0].ID != result.Messages[0].ID {
+		t.Fatalf("uncommitted replay: %+v %v", repeated, err)
+	}
+	result, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a, Limit: 2, After: result.Position})
 	if err != nil || len(result.Messages) != 1 || result.Messages[0].ID != "006" {
 		t.Fatalf("next batch = %+v, %v", result, err)
 	}
-	result, err = listen.Listen(ctx, "conv", loopd.ListenRequest{Actor: a})
-	if err != nil || len(result.Messages) != 0 || result.LastMessageID != "006" {
+	if err := poll.Commit(ctx, "conv", loopd.CommitRequest{Actor: a, Through: result.Position}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a})
+	if err != nil || len(result.Messages) != 0 || result.Position != "006" {
 		t.Fatalf("drained = %+v, %v", result, err)
 	}
-	other, err := listen.Listen(ctx, "conv", loopd.ListenRequest{Actor: b})
+	other, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: b})
 	if err != nil || len(other.Messages) != 3 || other.Messages[0].ID != "002" {
 		t.Fatalf("independent B = %+v, %v", other, err)
 	}
@@ -94,15 +101,15 @@ func (c *interruptedCoordinator) Signal(ctx context.Context, convID, messageID s
 	return c.ConversationCoordinator.Signal(ctx, convID, messageID, actor)
 }
 
-func TestListenRetriesCommittedNotification(t *testing.T) {
+func TestPollRetriesCommittedNotification(t *testing.T) {
 	ctx := context.Background()
 	store := openServiceStore(t)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	coordinator := &interruptedCoordinator{ConversationCoordinator: testConversationCoordinator(t), fail: true}
-	listen := NewListenService(store, coordinator, nil)
-	chat := NewChatService(store, nopChatRunner{}, nil, listen)
+	poll := NewPollService(store, coordinator, nil)
+	chat := NewChatService(store, nopChatRunner{}, nil, poll)
 	target := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}
 	if _, err := chat.Create(ctx, "conv", "alice", target, textContent("hello")); err != nil {
 		t.Fatalf("notification failure must not ask the user to resend committed input: %v", err)
@@ -116,7 +123,7 @@ func TestListenRetriesCommittedNotification(t *testing.T) {
 	}
 	coordinator.fail = false
 	// A different service instance can finish the durable notification.
-	recovered := NewListenService(store, coordinator, nil)
+	recovered := NewPollService(store, coordinator, nil)
 	if err := recovered.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +134,14 @@ func TestListenRetriesCommittedNotification(t *testing.T) {
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("pending after retry = %+v, %v", pending, err)
 	}
-	result, err := recovered.Listen(ctx, "conv", loopd.ListenRequest{Actor: target})
+	result, err := recovered.Poll(ctx, "conv", loopd.PollRequest{Actor: target})
 	if err != nil || len(result.Messages) != 1 || result.Messages[0].Kind != loopd.RoleUser {
 		t.Fatalf("received = %+v, %v", result, err)
 	}
-	result, err = recovered.Listen(ctx, "conv", loopd.ListenRequest{Actor: target})
+	if err := recovered.Commit(ctx, "conv", loopd.CommitRequest{Actor: target, Through: result.Position}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = recovered.Poll(ctx, "conv", loopd.PollRequest{Actor: target})
 	if err != nil || len(result.Messages) != 0 {
 		t.Fatalf("duplicate delivery = %+v, %v", result, err)
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestHumanRequestModes(t *testing.T) {
-	base := HumanRequest{TaskID: "task", EffectKey: "effect", Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, Choices: []HumanChoice{{Value: "small", Label: "Small"}}}
+	base := HumanRequest{ConversationID: "conv", Actor: ActorRef{Kind: RoleOperator, Key: "router"}, Target: ActorRef{Kind: RoleUser, Key: "alice"}, TaskID: "task", EffectKey: "effect", Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, Choices: []HumanChoice{{Value: "small", Label: "Small"}}}
 	for _, test := range []struct {
 		name   string
 		change func(*HumanRequest)
@@ -44,7 +44,7 @@ func TestHumanRequestModes(t *testing.T) {
 	}{{false, "small", true}, {false, "other", false}, {true, "other", true}, {true, " ", false}} {
 		r := base
 		r.AllowOther = test.other
-		if err := r.ValidateReply(HumanReply{ReplyToMessageID: "question", Outcome: HumanSuccess, Value: test.value}); (err == nil) != test.valid {
+		if err := r.ValidateReply(HumanReply{ReplyToID: "question", Outcome: HumanSuccess, Value: test.value}); (err == nil) != test.valid {
 			t.Fatalf("%+v: %v", test, err)
 		}
 	}

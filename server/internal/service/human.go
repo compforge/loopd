@@ -23,17 +23,17 @@ func (s *HumanService) Create(ctx context.Context, r loopd.HumanRequest) (loopd.
 	if err := r.Validate(); err != nil {
 		return loopd.HumanResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	result, err := s.store.CreateHuman(ctx, r, true)
+	result, err := s.store.CreateHuman(ctx, r)
 	return result, humanError(err)
 }
 func (s *HumanService) Get(ctx context.Context, id string) (loopd.HumanResult, error) {
 	return s.store.GetHuman(ctx, id)
 }
-func (s *HumanService) Reply(ctx context.Context, conversationID, taskID, actor string, r loopd.HumanReply) (loopd.HumanResult, error) {
-	if r.ReplyToMessageID == "" {
+func (s *HumanService) Reply(ctx context.Context, conversationID, actor string, r loopd.HumanReply) (loopd.HumanResult, error) {
+	if r.ReplyToID == "" {
 		return loopd.HumanResult{}, ErrInvalid
 	}
-	result, err := s.store.ReplyHuman(ctx, conversationID, taskID, actor, r)
+	result, err := s.store.ReplyHuman(ctx, conversationID, actor, r)
 	return result, humanError(err)
 }
 func humanError(err error) error {

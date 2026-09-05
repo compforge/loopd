@@ -24,7 +24,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	defer store.Close()
 	convs := service.NewConversationService(store, nil)
 	chat := service.NewChatService(store, completedChatRunner{}, nil, nil)
-	tasks := service.NewChatContextService(store, nil)
+	tasks := service.NewContextService(store, nil)
 	server := New(service.NewActorService(store, nil), convs, service.NewMessageService(store, nil), chat, tasks, nil)
 	server.Human = service.NewHumanService(store, nil)
 	actor := "alice"
@@ -37,13 +37,13 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 		t.Fatal(err)
 	}
 	taskID, _ := performChat(t, server, conv.ID, `{"user_key":"forged","target":{"kind":"operator","key":"router"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`)
-	task, err := tasks.GetContext(ctx, taskID)
-	if err != nil || task.Input.Key != "alice" {
+	task, err := store.GetDeliveryInput(ctx, taskID)
+	if err != nil || task.ActorKey != "alice" {
 		t.Fatalf("trusted principal=%+v %v", task, err)
 	}
-	request := loopd.HumanRequest{TaskID: taskID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
+	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: task.ID, TaskID: taskID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
 	data, _ := json.Marshal(request)
-	created := performJSON(t, engine, "POST", "/v1/tasks/"+taskID+"/human", string(data))
+	created := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if created.StatusCode() != 200 {
 		t.Fatalf("create %d %s", created.StatusCode(), created.Body())
 	}
@@ -51,8 +51,8 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err := json.Unmarshal(created.Body(), &question); err != nil {
 		t.Fatal(err)
 	}
-	path := "/v1/conversations/" + conv.ID + "/tasks/" + taskID + "/replies"
-	payload := `{"reply_to_message_id":"` + question.Message.ID + `","outcome":"success","value":"custom","user_key":"alice"}`
+	path := "/v1/conversations/" + conv.ID + "/replies"
+	payload := `{"reply_to_id":"` + question.Message.ID + `","outcome":"success","value":"custom","user_key":"alice"}`
 	actor = "mallory"
 	forbidden := performJSON(t, engine, "POST", path, payload)
 	if forbidden.StatusCode() != 403 {
@@ -71,12 +71,31 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err := json.Unmarshal(accepted.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Value != "custom" || result.Reply.ReplyToMessageID != question.Message.ID {
+	if result.Value != "custom" || result.Reply.ReplyToID != question.Message.ID {
 		t.Fatalf("result=%+v", result)
 	}
-	taskAfter, err := tasks.GetContext(ctx, taskID)
-	if err != nil || taskAfter.Input.ID != task.Input.ID || taskAfter.Response.ID != task.Response.ID {
+	taskAfter, err := store.GetDeliveryInput(ctx, taskID)
+	if err != nil || taskAfter.ID != task.ID {
 		t.Fatalf("changed context=%+v %v", taskAfter, err)
+	}
+	// +case=`Questions are conversation-owned even without a UI delivery ID.`
+	request.TaskID = ""
+	request.EffectKey = "independent"
+	data, _ = json.Marshal(request)
+	independent := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
+	if independent.StatusCode() != 200 {
+		t.Fatalf("independent=%d %s", independent.StatusCode(), independent.Body())
+	}
+	if err := json.Unmarshal(independent.Body(), &question); err != nil {
+		t.Fatal(err)
+	}
+	if question.Message.TaskID != "" {
+		t.Fatalf("unexpected delivery dependency: %+v", question)
+	}
+	dismissed := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/replies",
+		`{"reply_to_id":"`+question.Message.ID+`","outcome":"dismissed"}`)
+	if dismissed.StatusCode() != 200 {
+		t.Fatalf("dismiss independent=%d %s", dismissed.StatusCode(), dismissed.Body())
 	}
 }
 func TestBrowserIdentityIsAnOpaqueCredential(t *testing.T) {

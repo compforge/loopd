@@ -12,7 +12,7 @@ Loop = Resource(spec + status) + Reconcile
 ```
 
 Messages wake their selected Actor through a persistent Conversation CRD.
-Operators receive new input through the Listen verb; a complex
+Operators receive new input through the Poll verb; a complex
 Operator may create domain CRDs for its own state and completion semantics.
 `loopd` keeps visible collaboration in conversations and messages. A Harness
 owns its execution state, while AgentLedger records the complete execution

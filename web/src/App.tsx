@@ -27,7 +27,6 @@ type RunStatus = "connecting" | "running" | "reconnecting" | "completed" | "fail
 
 interface LiveTask {
   messages?: Message[];
-  responseMessageID?: string;
   conversationID: string;
   taskID: string;
   lastEventID: string;
@@ -54,7 +53,6 @@ export function App() {
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
   const selectedMessage = messages.find((message) => message.id === selectedMessageID);
-  const selectedResponse = messages.find((message) => message.task_id === selectedMessage?.task_id && message.purpose === "response");
   const liveTask = Object.values(liveTasks).find((item) => item.taskID === selectedMessage?.task_id);
   const hasActiveStreams = Object.values(liveTasks).some((item) => !isTerminal(item.status));
   const selectedIsLive = Boolean(selectedMessage && liveTask?.taskID === selectedMessage.task_id);
@@ -119,13 +117,13 @@ export function App() {
     return () => controller.abort();
   }, [selectedConversationID]);
 
-  const hasPendingHuman = messages.some((message) => message.purpose === "human_request" && message.content.blocks.some((block) => block.status === "pending"));
   useEffect(() => {
-    if (!selectedConversationID || !hasPendingHuman || hasActiveStreams) return;
+    if (!selectedConversationID) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => { void refreshMessages(selectedConversationID, controller.signal); }, 1000);
+    // Actors may publish without an active user Chat; discover their snapshots too.
+    const timer = window.setInterval(() => { void refreshMessages(selectedConversationID, controller.signal); }, 2000);
     return () => { window.clearInterval(timer); controller.abort(); };
-  }, [selectedConversationID, hasPendingHuman, hasActiveStreams]);
+  }, [selectedConversationID]);
 
   async function refreshMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
     try {
@@ -218,14 +216,13 @@ export function App() {
     let lastEventID = stored?.lastEventID ?? "";
     let failed = false;
     let awaitingID = text !== undefined;
-    let responseMessageID: string | undefined;
     let liveMessages: Message[] = [];
     const target = requestedTarget ?? stored?.target ?? legacyRouter;
     const update = (status: RunStatus) => {
       if (controller.signal.aborted) return;
       setLiveTasks((current) => ({ ...current, [slot]: {
         conversationID, taskID, lastEventID, status, target,
-        responseMessageID, messages: [...liveMessages],
+        messages: [...liveMessages],
       } }));
     };
     update("connecting");
@@ -264,12 +261,11 @@ export function App() {
                 if (message.conversation_id === conversationID) {
                   const updated = liveMessages.find((item) => item.id === messageID)!;
                   setMessages((current) => mergeMessage(current, updated));
-                  if (message.purpose === "response") {
-                    responseMessageID = messageID;
+                  if (message.kind !== "user") {
                     setSelectedMessageID((current) => current ?? messageID);
                   }
                 }
-                // Even a response's END closes only that Message.
+                // A Message's END closes only that Message.
                 update("running");
                 return;
               }
@@ -369,9 +365,9 @@ export function App() {
                   {isLive && messageRun && <RunBadge status={messageRun.status} />}
                 </div>
                 <div className="bubble">
-                  {message.reply_to_message_id && <a className="reply-reference" href={`#message-${message.reply_to_message_id}`}>查看所回复的消息</a>}
+                  {message.reply_to_id && <a className="reply-reference" href={`#message-${message.reply_to_id}`}>查看所回复的消息</a>}
                   {message.purpose === "human_request" || message.purpose === "human_reply" ? (
-                    <HumanMessage message={message} replyTo={renderedMessages.find((item) => item.id === message.reply_to_message_id)} onReply={(result) => setMessages((current) => {
+                    <HumanMessage message={message} replyTo={renderedMessages.find((item) => item.id === message.reply_to_id)} onReply={(result) => setMessages((current) => {
                       let next = mergeMessage(current, result.message);
                       if (result.reply) next = mergeMessage(next, result.reply);
                       return next;
@@ -445,7 +441,6 @@ export function App() {
         message={selectedMessage}
         liveMessages={selectedIsLive ? liveTask?.messages : undefined}
         running={Boolean(selectedIsLive && liveTask && !isTerminal(liveTask.status))}
-        status={selectedIsLive ? liveTask?.status : safeModel(selectedResponse?.content)?.meta.error ? "failed" : "completed"}
       />
     </div>
   );

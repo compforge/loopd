@@ -57,7 +57,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	result := loopd.HumanResult{Message: publicMessage(m), Status: b.Status, Deadline: b.Deadline, Reason: b.Reason}
 	if b.Status == loopd.HumanSuccess || b.Status == loopd.HumanDismissed {
 		var reply model.Message
-		if err := tx.First(&reply, "reply_to_message_id = ? AND purpose = ?", m.ID, "human_reply").Error; err != nil {
+		if err := tx.First(&reply, "reply_to_id = ? AND purpose = ?", m.ID, "human_reply").Error; err != nil {
 			return result, err
 		}
 		var content struct {
@@ -76,7 +76,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	return result, nil
 }
 func publicMessage(m model.Message) loopd.Message {
-	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -98,17 +98,19 @@ func expireHuman(tx *gorm.DB, m *model.Message, c *humanContent, now time.Time, 
 	return nil
 }
 
-// +spec=`同 task/effect_key 同输入复用 Message 和 deadline；并行问题在同一事务锁下独立收口`
-func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, active bool) (result loopd.HumanResult, err error) {
+// +spec=`同 conv/actor/effect_key 同输入复用 Message 和 deadline；并行问题在同一事务锁下独立收口`
+func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (result loopd.HumanResult, err error) {
 	if e := r.Validate(); e != nil {
 		return result, fmt.Errorf("%w: %v", ErrInvalidHuman, e)
 	}
+
 	data, _ := json.Marshal(r)
 	sum := sha256.Sum256(data)
 	fingerprint := hex.EncodeToString(sum[:])
-	err = store.withChat(ctx, r.TaskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withHumanContext(ctx, r, func(tx *gorm.DB) error {
 		var existing []model.Message
-		if err := tx.Where("task_id = ? AND purpose = ?", r.TaskID, "human_request").Find(&existing).Error; err != nil {
+		query := tx.Where("conversation_id = ? AND kind = ? AND actor_key = ? AND purpose = ?", r.ConversationID, r.Actor.Kind, r.Actor.Key, "human_request")
+		if err := query.Find(&existing).Error; err != nil {
 			return err
 		}
 		for _, m := range existing {
@@ -122,13 +124,13 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 			if c.Meta.Human.Fingerprint != fingerprint {
 				return ErrConflict
 			}
-			if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
+			if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 				return err
 			}
 			result, err = humanResult(tx, m, c)
 			return err
 		}
-		if !active || input.DeliveryState != "" || input.TargetKind != "operator" {
+		if r.Actor.Kind != loopd.RoleOperator {
 			return ErrConflict
 		}
 		now := time.Now().UTC()
@@ -142,7 +144,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: input.ConversationID, TaskID: r.TaskID, Kind: "operator", ActorKey: input.TargetKey, TargetKind: input.Kind, TargetKey: input.ActorKey, ReplyToMessageID: input.ID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, TaskID: r.TaskID, Kind: "operator", ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}
@@ -153,19 +155,13 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 }
 
 func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.HumanResult, err error) {
-	m, err := store.GetMessage(ctx, id)
-	if err != nil {
-		return result, err
-	}
-	err = store.withChat(ctx, m.TaskID, func(tx *gorm.DB, input, response model.Message) error {
-		if err := tx.First(&m, "id = ?", id).Error; err != nil {
-			return err
-		}
+	err = store.withHumanMessage(ctx, id, func(tx *gorm.DB, locked model.Message) error {
+		m := locked
 		c, err := decodeHuman(m)
 		if err != nil {
 			return err
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
+		if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -174,19 +170,15 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 	return
 }
 
-// +spec=`答复只依 reply_to_message_id；deadline、答复和 Complete 竞争时只有一个终态`
-func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, actor string, r loopd.HumanReply) (result loopd.HumanResult, err error) {
+// +spec=`答复只依 reply_to_id；deadline 与答复竞争时只有一个终态`
+func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string, r loopd.HumanReply) (result loopd.HumanResult, err error) {
 	rejected := false
-	err = store.withChat(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
-		if input.ConversationID != conversationID {
+	err = store.withHumanMessage(ctx, r.ReplyToID, func(tx *gorm.DB, m model.Message) error {
+		if m.ConversationID != conversationID {
 			return ErrNotFound
 		}
-		if actor == "" || actor != input.ActorKey {
+		if actor == "" || m.TargetKind != "user" || actor != m.TargetKey {
 			return ErrForbidden
-		}
-		var m model.Message
-		if err := tx.First(&m, "id = ? AND task_id = ? AND conversation_id = ?", r.ReplyToMessageID, taskID, conversationID).Error; err != nil {
-			return err
 		}
 		c, err := decodeHuman(m)
 		if err != nil {
@@ -195,7 +187,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 		if err := humanRequest(m, c).ValidateReply(r); err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalidHuman, err)
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), input.DeliveryState == ""); err != nil {
+		if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -207,7 +199,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 			previous = &domain.HumanAnswer{Actor: result.Reply.Key, Outcome: result.Status, Value: result.Value}
 		}
 		question := humanQuestion(m, c)
-		changed, resolveErr := question.Resolve(r, actor, previous, input.DeliveryState != "")
+		changed, resolveErr := question.Resolve(r, actor, previous)
 		if errors.Is(resolveErr, domain.ErrHumanConflict) {
 			// Persist an observed timeout even when the late reply is rejected.
 			rejected = true
@@ -225,7 +217,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 			Meta    map[string]any `json:"meta"`
 			Blocks  []replyBlock   `json:"blocks"`
 		}{"1.0", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToMessageID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, TaskID: m.TaskID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
 		if err := tx.Create(&reply).Error; err != nil {
 			return err
 		}

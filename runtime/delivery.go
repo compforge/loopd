@@ -20,12 +20,12 @@ import (
 
 const taskIDHeader = "X-Loopd-Task-ID"
 
-type Chat struct {
+type Delivery struct {
 	client *client
-	state  *chatState
+	state  *deliveryState
 }
 
-type chatState struct {
+type deliveryState struct {
 	mu        sync.Mutex
 	sequences map[string]*messageSequence
 }
@@ -35,15 +35,12 @@ type messageSequence struct {
 	next uint64
 }
 
-func newChat(client *client) Chat {
-	return Chat{client: client, state: &chatState{sequences: make(map[string]*messageSequence)}}
+func newDelivery(client *client) Delivery {
+	return Delivery{client: client, state: &deliveryState{sequences: make(map[string]*messageSequence)}}
 }
 
 type CreateConversationRequest struct {
 	Name string `json:"name"`
-	// TaskID creates a work conversation owned by the Task's target. Without
-	// it, the server creates a user conversation using the caller's identity.
-	TaskID string `json:"task_id,omitempty"`
 }
 
 type SendMessageRequest struct {
@@ -53,12 +50,12 @@ type SendMessageRequest struct {
 	Content json.RawMessage `json:"content,omitempty"`
 }
 
-type TaskFailure struct {
+type DeliveryFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-func (chat Chat) CreateConversation(
+func (chat Delivery) CreateConversation(
 	ctx context.Context,
 	request CreateConversationRequest,
 ) (loopd.Conversation, error) {
@@ -67,7 +64,7 @@ func (chat Chat) CreateConversation(
 	return result, err
 }
 
-func (chat Chat) Conversation(ctx context.Context, conversationID string) (loopd.Conversation, error) {
+func (chat Delivery) Conversation(ctx context.Context, conversationID string) (loopd.Conversation, error) {
 	var result loopd.Conversation
 	err := chat.client.do(
 		ctx,
@@ -79,15 +76,14 @@ func (chat Chat) Conversation(ctx context.Context, conversationID string) (loopd
 	return result, err
 }
 
-// Send is a Verb with a write effect when creating work without TaskID, or a
-// read effect when observing existing work with TaskID. The HTTP connection only observes execution; closing the
-// stream does not cancel the Task or its Operator.
-func (chat Chat) Send(
+// Send submits a user message without TaskID, or observes its UI delivery with TaskID.
+// Closing the HTTP stream does not cancel any actor's work.
+func (chat Delivery) Send(
 	ctx context.Context,
 	conversationID string,
 	request SendMessageRequest,
 	lastEventID string,
-) (*ChatStream, error) {
+) (*DeliveryStream, error) {
 	path := "/v1/conversations/" + url.PathEscape(conversationID) + "/messages"
 	headers := map[string]string{"Accept": "text/event-stream"}
 	if lastEventID != "" {
@@ -110,7 +106,7 @@ func (chat Chat) Send(
 		_ = response.Body.Close()
 		return nil, errors.New("loop-server response omitted task ID")
 	}
-	stream := &ChatStream{
+	stream := &DeliveryStream{
 		taskID:      taskID,
 		body:        response.Body,
 		scanner:     bufio.NewScanner(response.Body),
@@ -120,17 +116,17 @@ func (chat Chat) Send(
 	return stream, nil
 }
 
-// ChatStream reads one AgentUE event at a time from the Chat SSE response.
-type ChatStream struct {
+// DeliveryStream reads one AgentUE event at a time from the Delivery SSE response.
+type DeliveryStream struct {
 	taskID      string
 	body        io.ReadCloser
 	scanner     *bufio.Scanner
 	lastEventID string
 }
 
-func (stream *ChatStream) TaskID() string { return stream.taskID }
+func (stream *DeliveryStream) TaskID() string { return stream.taskID }
 
-func (stream *ChatStream) Next() (loopd.Event, error) {
+func (stream *DeliveryStream) Next() (loopd.Event, error) {
 	eventID := stream.lastEventID
 	var data bytes.Buffer
 	for stream.scanner.Scan() {
@@ -173,9 +169,9 @@ func (stream *ChatStream) Next() (loopd.Event, error) {
 	return loopd.Event{}, io.EOF
 }
 
-func (stream *ChatStream) Close() error { return stream.body.Close() }
+func (stream *DeliveryStream) Close() error { return stream.body.Close() }
 
-func (chat Chat) History(
+func (chat Delivery) History(
 	ctx context.Context,
 	conversationID string,
 	after string,
@@ -188,28 +184,15 @@ func (chat Chat) History(
 	return result.Data, err
 }
 
-// Emit is a write Verb. The server creates the default answer lazily on first
-// publication; no answer Message is needed to start or observe a Chat.
-func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (loopd.Event, error) {
-	return chat.emit(ctx, "answer/"+taskID, "/v1/tasks/"+url.PathEscape(taskID)+"/events", event)
-}
-
-// Output is a Verb (effect: write) creating or reusing a message by stable Task/key.
-func (chat Chat) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
-	var message loopd.Message
-	err := chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/outputs", request, &message)
-	return message, err
-}
-
 // EmitMessage is a Verb (effect: write). Equal block IDs and sequence numbers in other
-// messages never collide. The server verifies the message belongs to this Task.
-func (chat Chat) EmitMessage(ctx context.Context, taskID, messageID string, event agentueui.Event) (loopd.Event, error) {
-	result, err := chat.emit(ctx, "message/"+messageID, "/v1/tasks/"+url.PathEscape(taskID)+"/messages/"+url.PathEscape(messageID)+"/events", event)
+// messages never collide. Message identity is independent of a UI delivery.
+func (chat Delivery) EmitMessage(ctx context.Context, messageID string, event agentueui.Event) (loopd.Event, error) {
+	result, err := chat.emit(ctx, "message/"+messageID, "/v1/messages/"+url.PathEscape(messageID)+"/events", event)
 	result.MessageID = messageID
 	return result, err
 }
 
-func (chat Chat) emit(ctx context.Context, sequenceKey, path string, event agentueui.Event) (loopd.Event, error) {
+func (chat Delivery) emit(ctx context.Context, sequenceKey, path string, event agentueui.Event) (loopd.Event, error) {
 	sequence := chat.sequence(sequenceKey)
 	sequence.mu.Lock()
 	defer sequence.mu.Unlock()
@@ -235,7 +218,7 @@ func (chat Chat) emit(ctx context.Context, sequenceKey, path string, event agent
 	return loopd.Event{ID: result.ID, Data: data}, nil
 }
 
-func (chat Chat) sequence(messageID string) *messageSequence {
+func (chat Delivery) sequence(messageID string) *messageSequence {
 	chat.state.mu.Lock()
 	defer chat.state.mu.Unlock()
 	sequence := chat.state.sequences[messageID]
@@ -247,15 +230,14 @@ func (chat Chat) sequence(messageID string) *messageSequence {
 	return sequence
 }
 
-// Complete is a Verb (effect: write) that persists all output Messages and
-// closes the task delivery. Repeating the same completion is safe.
-func (chat Chat) Complete(ctx context.Context, taskID string, failure *TaskFailure) error {
-	return chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/complete", struct {
-		Error *TaskFailure `json:"error,omitempty"`
+// Complete is a Verb (effect: write) that closes a UI delivery, not its messages. Repeating the same completion is safe.
+func (chat Delivery) Complete(ctx context.Context, taskID string, failure *DeliveryFailure) error {
+	return chat.client.do(ctx, http.MethodPost, "/v1/deliveries/"+url.PathEscape(taskID)+"/complete", struct {
+		Error *DeliveryFailure `json:"error,omitempty"`
 	}{Error: failure}, nil)
 }
 
-// IsEnd reports Task completion on a Chat stream, not the end of a work message.
+// IsEnd reports UI delivery completion on a Delivery stream, not the end of a work message.
 func IsEnd(event loopd.Event) (bool, error) {
 	parsed, err := agentueui.Parse(event.Data)
 	if err != nil {

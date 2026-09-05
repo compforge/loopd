@@ -20,8 +20,7 @@ type page[T any] struct {
 }
 
 type createConversationRequest struct {
-	Name   string `json:"name,omitempty"`
-	TaskID string `json:"task_id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type registrationRequest struct {
@@ -37,19 +36,19 @@ type createChatMessagesRequest struct {
 	Content json.RawMessage `json:"content,omitempty"`
 }
 
-type appendTaskEventRequest struct {
+type messageEventRequest struct {
 	Event json.RawMessage `json:"event"`
 }
 
-type appendTaskEventResponse struct {
+type messageEventResponse struct {
 	ID string `json:"id"`
 }
 
-type completeTaskRequest struct {
-	Error *taskFailure `json:"error,omitempty"`
+type completeDeliveryRequest struct {
+	Error *deliveryFailure `json:"error,omitempty"`
 }
 
-type taskFailure struct {
+type deliveryFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
