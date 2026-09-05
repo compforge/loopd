@@ -5,12 +5,16 @@ import (
 	"errors"
 	"testing"
 
+	ui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
+	loopruntime "github.com/compforge/loopd/runtime"
 	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	conversationclient "github.com/compforge/loopd/server/internal/conversation"
 	"github.com/compforge/loopd/server/internal/model"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func testConversationCoordinator(t *testing.T) ConversationCoordinator {
@@ -21,6 +25,85 @@ func testConversationCoordinator(t *testing.T) ConversationCoordinator {
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	return conversationclient.NewClient(kube, "test", 0)
+}
+
+// +case=`Actors exchange durable messages without a UI task; Poll waits for an open earlier message, End wakes it, and Commit stays actor-local.`
+func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
+	ctx := context.Background()
+	store := openServiceStore(t)
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	scheme := kuberuntime.NewScheme()
+	if err := conversationv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
+	poll := NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
+	a := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
+	b := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "b"}
+	c := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "c"}
+	say := func(key string, target loopd.ActorRef, stream bool) model.Message {
+		t.Helper()
+		message, err := store.Speak(ctx, "conv", loopd.SpeakRequest{Key: key, Actor: a, Target: target, Stream: stream, Content: textContent(key)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if message.TaskID != "" {
+			t.Fatal("speech acquired a page task")
+		}
+		return message
+	}
+	first := say("stream", b, true)
+	later := say("ready", b, false)
+	if first.ID >= later.ID {
+		t.Fatal("fixture requires ordered IDs")
+	}
+	third := say("independent", c, false)
+	if err := poll.Maintain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: b})
+	if err != nil || len(inbox.Messages) != 0 || inbox.Position != "" {
+		t.Fatalf("consumed incomplete prefix: %+v %v", inbox, err)
+	}
+	other, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: c})
+	if err != nil || len(other.Messages) != 1 || other.Messages[0].ID != third.ID {
+		t.Fatalf("unrelated actor blocked: %+v %v", other, err)
+	}
+	old := &conversationv1.Conversation{}
+	key := client.ObjectKey{Namespace: "test", Name: "conv"}
+	if err := kube.Get(ctx, key, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ProjectOutput(ctx, first.ID, ui.End(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := poll.Maintain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	next := &conversationv1.Conversation{}
+	if err := kube.Get(ctx, key, next); err != nil {
+		t.Fatal(err)
+	}
+	if next.EndOffset("operator", "b") != later.ID || old.EndOffset("operator", "b") != later.ID {
+		t.Fatal("EndOffset should remain at the later message")
+	}
+	change := event.UpdateEvent{ObjectOld: old, ObjectNew: next}
+	if !loopruntime.ConversationPredicate(b).Update(change) || loopruntime.ConversationPredicate(c).Update(change) {
+		t.Fatal("ending an earlier stream must wake only its recipient")
+	}
+	inbox, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: b})
+	if err != nil || len(inbox.Messages) != 2 || !inbox.Messages[0].Ended() || inbox.Position != later.ID {
+		t.Fatalf("complete prefix: %+v %v", inbox, err)
+	}
+	if err := poll.Commit(ctx, "conv", loopd.CommitRequest{Actor: b, Through: inbox.Position}); err != nil {
+		t.Fatal(err)
+	}
+	other, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: c})
+	if err != nil || len(other.Messages) != 1 {
+		t.Fatalf("B committed C's input: %+v %v", other, err)
+	}
 }
 
 func TestPollUsesTargetedSQLHistory(t *testing.T) {
@@ -47,10 +130,10 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 		}
 	}
 	// Deliberately lag the wake signals behind SQL. They must not limit Poll.
-	if err := coordinator.Signal(ctx, "conv", "001", a); err != nil {
+	if err := coordinator.Signal(ctx, "conv", "001", a, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := coordinator.Signal(ctx, "conv", "002", b); err != nil {
+	if err := coordinator.Signal(ctx, "conv", "002", b, 1); err != nil {
 		t.Fatal(err)
 	}
 	result, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a, Limit: 2})
@@ -94,11 +177,11 @@ type interruptedCoordinator struct {
 	fail bool
 }
 
-func (c *interruptedCoordinator) Signal(ctx context.Context, convID, messageID string, actor loopd.ActorRef) error {
+func (c *interruptedCoordinator) Signal(ctx context.Context, convID, messageID string, actor loopd.ActorRef, revision uint64) error {
 	if c.fail {
 		return errors.New("simulated Kubernetes interruption")
 	}
-	return c.ConversationCoordinator.Signal(ctx, convID, messageID, actor)
+	return c.ConversationCoordinator.Signal(ctx, convID, messageID, actor, revision)
 }
 
 func TestPollRetriesCommittedNotification(t *testing.T) {

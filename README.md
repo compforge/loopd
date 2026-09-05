@@ -2,8 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-`loopd` is an orchestration runtime for collaboration among humans, Harnesses,
-and Kubernetes Operators.
+`loopd` is a platform where Actors collaborate through persistent messages.
+Users, Operators, and Harnesses can contribute independently, without a fixed question–answer turn.
 
 Its guiding idea is:
 

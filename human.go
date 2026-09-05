@@ -31,7 +31,6 @@ type HumanRequest struct {
 	Actor          ActorRef      `json:"actor,omitempty"`
 	Target         ActorRef      `json:"target,omitempty"`
 	ReplyToID      string        `json:"reply_to_id,omitempty"`
-	TaskID         string        `json:"task_id"`
 	EffectKey      string        `json:"effect_key"`
 	Type           string        `json:"type"`
 	Title          string        `json:"title"`

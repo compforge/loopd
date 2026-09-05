@@ -18,20 +18,18 @@ import { HumanMessage } from "./HumanMessage";
 import { mergeMessage, applyMessageEvent } from "./message";
 import { DetailPanel } from "./DetailPanel";
 
-import { readActiveTasks, writeActiveTask, removeActiveTask, type StoredTask } from "./streams";
+import { readSubscriptions, writeSubscription, type StoredSubscription } from "./streams";
 const selectedActorKey = "loopd.selected-actor";
 const selectedConversationKey = "loopd.selected-conversation";
-const legacyRouter: Pick<Actor, "kind" | "key"> = { kind: "operator", key: "router" };
 
-type RunStatus = "connecting" | "running" | "reconnecting" | "completed" | "failed";
+type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed";
 
-interface LiveTask {
+interface LiveSubscription {
   messages?: Message[];
   conversationID: string;
   taskID: string;
   lastEventID: string;
-  status: RunStatus;
-  target: Pick<Actor, "kind" | "key">;
+  status: ConnectionStatus;
 }
 
 export function App() {
@@ -41,21 +39,18 @@ export function App() {
   const [selectedConversationID, setSelectedConversationID] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedMessageID, setSelectedMessageID] = useState<string>();
-  const [liveTasks, setLiveTasks] = useState<Record<string, LiveTask>>({});
+  const [liveSubscriptions, setLiveSubscriptions] = useState<Record<string, LiveSubscription>>({});
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const nextStream = useRef(0);
   const streams = useRef(new Map<string, AbortController>());
   useEffect(() => () => { for (const controller of streams.current.values()) controller.abort(); }, []);
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
   const selectedMessage = messages.find((message) => message.id === selectedMessageID);
-  const liveTask = Object.values(liveTasks).find((item) => item.taskID === selectedMessage?.task_id);
-  const hasActiveStreams = Object.values(liveTasks).some((item) => !isTerminal(item.status));
-  const selectedIsLive = Boolean(selectedMessage && liveTask?.taskID === selectedMessage.task_id);
+  const subscription = selectedConversationID ? liveSubscriptions[selectedConversationID] : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,9 +106,12 @@ export function App() {
       if (controller.signal.aborted) return;
       const lastResponse = items.findLast((message) => message.kind !== "user");
       setSelectedMessageID((current) => current ?? lastResponse?.id);
+      const stored = readSubscriptions()[selectedConversationID];
+      const input = items.findLast((message) => message.purpose === "input" && message.task_id);
+      if (!streams.current.has(selectedConversationID) && (stored || input)) {
+        void observeConversation(selectedConversationID, stored ?? { taskID: input!.task_id, lastEventID: "" });
+      }
     });
-    const active = readActiveTasks()[selectedConversationID];
-    for (const task of active ?? []) void observeTask(selectedConversationID, task);
     return () => controller.abort();
   }, [selectedConversationID]);
 
@@ -146,7 +144,7 @@ export function App() {
     for (const controller of streams.current.values()) controller.abort();
     streams.current.clear();
     setMessages([]);
-    setLiveTasks({});
+    setLiveSubscriptions({});
     setSelectedMessageID(undefined);
     setSelectedConversationID(conversationID);
     setError(undefined);
@@ -157,7 +155,7 @@ export function App() {
     streams.current.clear();
     setSelectedConversationID(undefined);
     setMessages([]);
-    setLiveTasks({});
+    setLiveSubscriptions({});
     setSelectedMessageID(undefined);
     setError(undefined);
   }
@@ -199,36 +197,35 @@ export function App() {
         updated_at: new Date().toISOString(),
       },
     ]);
-    await observeTask(conversationID, undefined, text, selectedActor);
+    await observeConversation(conversationID, undefined, text, selectedActor);
   }
 
-  async function observeTask(
+  async function observeConversation(
     conversationID: string,
-    stored?: StoredTask,
+    stored?: StoredSubscription,
     text?: string,
     requestedTarget?: Pick<Actor, "kind" | "key">,
   ) {
-    let slot = conversationID + "/" + (stored?.taskID ?? String(++nextStream.current));
-    if (streams.current.has(slot)) return;
+    const slot = conversationID;
+    if (stored && streams.current.has(slot)) return;
+    streams.current.get(slot)?.abort();
     const controller = new AbortController();
     streams.current.set(slot, controller);
     let taskID = stored?.taskID ?? "";
     let lastEventID = stored?.lastEventID ?? "";
-    let failed = false;
     let awaitingID = text !== undefined;
     let liveMessages: Message[] = [];
-    const target = requestedTarget ?? stored?.target ?? legacyRouter;
-    const update = (status: RunStatus) => {
+    const target = requestedTarget;
+    const update = (status: ConnectionStatus) => {
       if (controller.signal.aborted) return;
-      setLiveTasks((current) => ({ ...current, [slot]: {
-        conversationID, taskID, lastEventID, status, target,
+      setLiveSubscriptions((current) => ({ ...current, [slot]: {
+        conversationID, taskID, lastEventID, status,
         messages: [...liveMessages],
       } }));
     };
     update("connecting");
     try {
       for (;;) {
-        let ended = false;
         try {
           await streamMessage({
             conversationID, taskID: taskID || undefined, lastEventID: lastEventID || undefined,
@@ -238,20 +235,9 @@ export function App() {
               const first = !taskID;
               taskID = value;
               if (awaitingID) { setSubmitting(false); awaitingID = false; }
-              if (first) {
-                const oldSlot = slot;
-                slot = conversationID + "/" + taskID;
-                streams.current.delete(oldSlot);
-                streams.current.set(slot, controller);
-                setLiveTasks((current) => {
-                  const next = { ...current };
-                  delete next[oldSlot];
-                  return next;
-                });
-              }
               if (first) void refreshMessages(conversationID, controller.signal);
-              writeActiveTask(conversationID, { taskID, lastEventID, target });
-              update("running");
+              writeSubscription(conversationID, { taskID, lastEventID });
+              update("connected");
             },
             onEvent: (delivery) => {
               if (controller.signal.aborted) return;
@@ -266,34 +252,28 @@ export function App() {
                   }
                 }
                 // A Message's END closes only that Message.
-                update("running");
+                update("connected");
                 return;
               }
               // Control events carry transport lifecycle only, never a bubble.
               if (eventId) lastEventID = eventId;
-              if (patch.op === PatchOp.ERROR) { failed = true; setError(String(patch.meta.error.message ?? "执行失败")); }
-              if (patch.op === PatchOp.END) ended = true;
-              writeActiveTask(conversationID, { taskID, lastEventID, target });
-              update(ended ? (failed ? "failed" : "completed") : "running");
+              if (patch.op === PatchOp.ERROR) setError(String(patch.meta.error.message ?? "连接错误"));
+              writeSubscription(conversationID, { taskID, lastEventID });
+              update("connected");
             },
           });
-          if (ended) break;
           if (!taskID) throw new Error("chat stream closed before an ID was returned");
         } catch (cause) {
           if (isAbort(cause)) return;
           if (!taskID) throw cause;
-          update("reconnecting");
-          await delay(1_500, controller.signal);
         }
+        update("reconnecting");
+        await delay(1_500, controller.signal);
       }
-      removeActiveTask(conversationID, taskID);
-      await refreshMessages(conversationID, controller.signal);
-      const refreshed = await listConversations(controller.signal);
-      if (!controller.signal.aborted) setConversations(refreshed);
     } catch (cause) {
       if (!isAbort(cause)) { setError(errorMessage(cause)); update("failed"); }
     } finally {
-      streams.current.delete(slot);
+      if (streams.current.get(slot) === controller) streams.current.delete(slot);
       if (awaitingID) setSubmitting(false);
     }
   }
@@ -348,9 +328,9 @@ export function App() {
             </div>
           )}
           {renderedMessages.map((message) => {
-            const messageRun = Object.values(liveTasks).find((item) => item.taskID === message.task_id);
-            const isLive = message.kind !== "user" && messageRun !== undefined && !isTerminal(messageRun.status);
             const model = safeModel(message.content);
+            const output = model?.meta.output;
+            const isLive = message.purpose === "output" && output !== null && typeof output === "object" && "ended" in output && output.ended === false;
             const text = messageText(model);
             const active = selectedMessageID === message.id;
             return (
@@ -362,7 +342,7 @@ export function App() {
               >
                 <div className="message-author">
                   <span>{message.kind === "user" ? "YOU" : message.key.toUpperCase()}</span>
-                  {isLive && messageRun && <RunBadge status={messageRun.status} />}
+                  {isLive && <span className="run-badge running">STREAMING</span>}
                 </div>
                 <div className="bubble">
                   {message.reply_to_id && <a className="reply-reference" href={`#message-${message.reply_to_id}`}>查看所回复的消息</a>}
@@ -408,7 +388,7 @@ export function App() {
               <span>发送给</span>
               <select
                 aria-label="选择 Actor"
-                disabled={Boolean(liveTask && !isTerminal(liveTask.status)) || actors.length === 0}
+                disabled={actors.length === 0}
                 value={selectedActorID ?? ""}
                 onChange={(event) => {
                   setSelectedActorID(event.target.value);
@@ -439,22 +419,11 @@ export function App() {
 
       <DetailPanel
         message={selectedMessage}
-        liveMessages={selectedIsLive ? liveTask?.messages : undefined}
-        running={Boolean(selectedIsLive && liveTask && !isTerminal(liveTask.status))}
+        liveMessages={subscription?.messages}
+        running={subscription?.status === "connected"}
       />
     </div>
   );
-}
-
-function RunBadge({ status }: { status: RunStatus }) {
-  const labels: Record<RunStatus, string> = {
-    connecting: "CONNECTING",
-    running: "RUNNING",
-    reconnecting: "RECONNECTING",
-    completed: "COMPLETED",
-    failed: "FAILED",
-  };
-  return <span className={`run-badge ${status}`}>{labels[status]}</span>;
 }
 
 function Typing() {
@@ -512,10 +481,6 @@ function relativeTime(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(value));
 }
 
-function isTerminal(status: RunStatus): boolean {
-  return status === "completed" || status === "failed";
-}
-
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
@@ -526,10 +491,9 @@ function isAbort(cause: unknown): boolean {
 
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => {
-      window.clearTimeout(timer);
-      reject(new DOMException("aborted", "AbortError"));
-    }, { once: true });
+    if (signal.aborted) { reject(new DOMException("aborted", "AbortError")); return; }
+    const abort = () => { window.clearTimeout(timer); reject(new DOMException("aborted", "AbortError")); };
+    const timer = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, milliseconds);
+    signal.addEventListener("abort", abort, { once: true });
   });
 }

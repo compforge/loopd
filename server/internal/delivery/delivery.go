@@ -1,4 +1,4 @@
-// Package delivery multiplexes message-owned AgentUE streams for one Task.
+// Package delivery multiplexes message-owned AgentUE streams for a conversation.
 package delivery
 
 import (
@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
+	"strings"
 
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
@@ -20,16 +20,10 @@ var ErrInvalidEvent = errors.New("invalid AgentUE event")
 type MessageRepository interface {
 	ProjectOutput(context.Context, string, agentueui.Event) error
 	GetDeliveryInput(context.Context, string) (model.Message, error)
-	ListMessagesByTask(context.Context, string, string, int) ([]model.Message, error)
+	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
-	SaveOutput(context.Context, string, []byte, uint64) error
-	ObserveMessageActivity(context.Context, string, time.Time) error
 }
 
-type Failure struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
 type Event struct {
 	MessageID string
 	Message   *loopd.Message
@@ -64,10 +58,6 @@ func (coordinator *Coordinator) Delete(ctx context.Context, taskID string) error
 	return coordinator.events.Delete(ctx, taskID)
 }
 
-// Output creates an addressable message before any stream content is published.
-
-// Emit is the main-answer convenience path; block content never determines its destination.
-
 // +spec=`Message ID 决定输出归属，block ID 与 seq 只在该 Message 内唯一；Human 状态只能经 typed action 写入`
 func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage) (string, error) {
 	message, err := coordinator.repo.GetMessage(ctx, messageID)
@@ -77,30 +67,75 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if message.Purpose != "output" {
 		return "", fmt.Errorf("%w: message is not an output", ErrInvalidEvent)
 	}
-	{
-		event, err := agentueui.Parse(data)
-		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrInvalidEvent, err)
-		}
-		if event.Op == agentueui.OpEnd {
-			return "", coordinator.finishMessage(ctx, message, nil)
-		}
-	}
 	event, err := parseOutputEvent(data)
 	if err != nil {
 		return "", err
 	}
-	if err := coordinator.ensureStream(ctx, message); err != nil {
+	if visibleMessage(message).Ended() {
+		if event.Op == agentueui.OpEnd {
+			return "", nil
+		}
+		return "", fmt.Errorf("%w: message has ended", ErrInvalidEvent)
+	}
+	// Each update extends one durable revision. A gap cannot be interpreted
+	// safely as a delta or an End; the writer must retry its missing update.
+	if event.Seq > message.Revision+1 {
+		return "", fmt.Errorf("%w: event skips message revision", ErrInvalidEvent)
+	}
+	if err := coordinator.repo.ProjectOutput(ctx, message.ID, event); err != nil {
 		return "", err
 	}
-	id, err := coordinator.events.Publish(ctx, streamKey(message), data, event.Seq)
-	if err == nil {
-		err = coordinator.repo.ProjectOutput(ctx, message.ID, event)
+	message, err = coordinator.repo.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
 	}
-	if err == nil && message.Purpose == "output" && event.Timestamp != nil {
-		err = coordinator.repo.ObserveMessageActivity(ctx, message.ID, time.UnixMilli(*event.Timestamp).UTC())
+	id, err := coordinator.publish(ctx, message, event)
+	if err != nil {
+		// DB acceptance is the publication contract. A page bridge outage must
+		// not make actors repeat business work; subscriptions repair from SQL.
+		coordinator.logger.WarnContext(ctx, "page delivery deferred", "message_id", messageID, "error", err)
+		return "", nil
 	}
-	return id, err
+	if event.Op == agentueui.OpEnd {
+		coordinator.logger.InfoContext(ctx, "message output ended", "message_id", messageID, "conversation_id", message.ConversationID)
+	}
+	return id, nil
+}
+
+func (coordinator *Coordinator) publish(ctx context.Context, message model.Message, event agentueui.Event) (string, error) {
+	key := streamKey(message)
+	state, err := coordinator.events.State(ctx, key)
+	if errors.Is(err, agentuerunner.ErrNotFound) {
+		if err := coordinator.ensureStream(ctx, message); err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	} else if state.LastSeq < message.Revision {
+		// A skipped delivery or an out-of-order publisher needs a full snapshot,
+		// not a delta whose predecessor never reached this bridge.
+		if state.LastSeq+1 != event.Seq || message.Revision != event.Seq {
+			event, err = agentueui.Start(message.Content, message.Revision)
+			if err != nil {
+				return "", err
+			}
+		}
+		data, err := event.Marshal()
+		if err != nil {
+			return "", err
+		}
+		id, err := coordinator.events.Publish(ctx, key, data, event.Seq)
+		if err != nil {
+			return "", err
+		}
+		if !visibleMessage(message).Ended() {
+			return id, nil
+		}
+	}
+	if visibleMessage(message).Ended() {
+		return "", coordinator.events.MarkTerminal(ctx, key, agentuerunner.StatusCompleted)
+	}
+	return "", nil
 }
 
 // Only transport control owns the Chat cursor. Every actual Message has an
@@ -137,46 +172,6 @@ func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.
 	return err
 }
 
-// Complete ends only the
-// UI transport. It never creates an answer to carry lifecycle state.
-func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, failure *Failure) error {
-	input, err := coordinator.input(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	control := transportMessage(input)
-	if err := coordinator.ensureStream(ctx, control); err != nil {
-		return err
-	}
-	state, err := coordinator.events.State(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if state.Status.Terminal() {
-		return nil
-	}
-	seq, status := uint64(2), agentuerunner.StatusCompleted
-	if failure != nil {
-		status = agentuerunner.StatusFailed
-		data, err := agentueui.Failure(seq, failure.Code, failure.Message).Marshal()
-		if err != nil {
-			return err
-		}
-		if _, err := coordinator.events.Publish(ctx, taskID, data, seq); err != nil {
-			return err
-		}
-		seq++
-	}
-	data, err := agentueui.End(seq).Marshal()
-	if err != nil {
-		return err
-	}
-	if _, err := coordinator.events.Publish(ctx, taskID, data, seq); err != nil {
-		return err
-	}
-	return coordinator.events.MarkTerminal(ctx, taskID, status)
-}
-
 func (coordinator *Coordinator) input(ctx context.Context, taskID string) (model.Message, error) {
 	return coordinator.repo.GetDeliveryInput(ctx, taskID)
 }
@@ -187,7 +182,7 @@ func transportMessage(input model.Message) model.Message {
 }
 
 func visibleMessage(m model.Message) loopd.Message {
-	return loopd.Message{DeliveryState: m.DeliveryState, TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 
 func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {
@@ -198,11 +193,17 @@ func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {
 	if t, _ := event.Block["type"].(string); t == "ask" || t == "confirm" || t == "human_reply" {
 		return agentueui.Event{}, fmt.Errorf("%w: Human blocks require typed actions", ErrInvalidEvent)
 	}
+	if event.Mask == "meta.output" || strings.HasPrefix(event.Mask, "meta.output.") || event.Mask == "meta.human" || strings.HasPrefix(event.Mask, "meta.human.") {
+		return agentueui.Event{}, fmt.Errorf("%w: reserved message metadata", ErrInvalidEvent)
+	}
+	if _, exists := event.Meta["output"]; exists {
+		return agentueui.Event{}, fmt.Errorf("%w: reserved output metadata", ErrInvalidEvent)
+	}
 	if _, exists := event.Meta["human"]; exists {
 		return agentueui.Event{}, fmt.Errorf("%w: reserved Human metadata", ErrInvalidEvent)
 	}
-	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend {
-		return agentueui.Event{}, fmt.Errorf("%w: only set and append events may be emitted", ErrInvalidEvent)
+	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend && event.Op != agentueui.OpEnd {
+		return agentueui.Event{}, fmt.Errorf("%w: only set, append and end events may be emitted", ErrInvalidEvent)
 	}
 	return event, nil
 }

@@ -3,7 +3,7 @@
 Conversation 是参与者共享的交流空间，Message 是可见内容的事实来源。Conv CRD 保存参与者的
 唤醒信号与消费位置，不保存消息正文或 Operator 的领域状态。
 
-本文拥有持久消息的通知、拉取与提交协议。独立参与者模型见 [Kernel](../../docs/kernel.md)，
+本文拥有持久消息的通知、拉取与提交协议。Actor 模型见 [Kernel](../../docs/kernel.md)，
 Verb 的调用方式见 [Runtime](../../docs/runtime.md)；这里不规定 Operator 何时处理补充输入。
 
 ## DB 作为协作 queue
@@ -25,6 +25,11 @@ Read 是 read Verb，分页返回共享历史；历史范围与执行上下文�
 Speak 是 write Verb，在指定会话中创建或幂等复用 Actor 的一条消息；可以另发消息，也可以按消息
 身份继续更新流式内容。Speak 不承诺对方已经消费，更不表示业务完成。
 
+流式 Speak 在 End 后才进入收件 Actor 的消费前缀，页面和 Read 则可以观察实时内容。
+Poll 遇到尚未 End 的收件消息即停止，不能越过它提交后面的消息；一条较早的消息结束时仍会
+通知收件 Actor，即使已有更大的 EndOffset。写入者须完成或恢复自己的输出，runtime 不凭时间
+猜测其结束。希望先交付阶段结果时，可用独立的一次性 Speak，而不是让接收者消费半条消息。
+
 ## Poll 与 Commit
 
 消息消费参考 [Kafka Consumer](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
@@ -39,7 +44,7 @@ Speak 是 write Verb，在指定会话中创建或幂等复用 Actor 的一条�
 
 位置值是 UUIDv7 Message ID，表示包含该消息的边界；不是 Kafka 数字 offset 的“下一条”约定。
 
-1. server 保存 Message 时同事务记录待通知标记，提交后更新 CRD 的 EndOffset；失败由后台重试。
+1. server 保存可消费 Message（流式输出为 End）时同事务记录待通知标记，提交后更新 CRD 的 EndOffset；失败由后台重试。
 2. controller-runtime Watch 将参与者信号映射到 Reconcile；Watch 是 Controller 配置，不是 Verb。
 3. Poll 默认从 Committed 后读取定向或广播消息，并记录 Position，不自动 Commit。
 4. 同一次执行继续拉取时显式传上次结果 Position 作为 After；丢失响应时用相同 After 重试。
@@ -53,6 +58,7 @@ Poll 查询以数据库为准，不把 EndOffset 当作上限。Commit 单调推
 进程重启或 Poll 响应丢失后，不传 After 即从 Committed 恢复未提交消息，提供至少一次消费的基础。
 这不能保证外部动作 exactly-once：Operator 仍需稳定动作身份和必要的领域检查点。
 
+EndOffset 保持单调；Actor 专属的消息版本通知也能唤醒较早流式消息结束后的消费。
 Predicate 不因 Position 更新而触发空转；启动时未提交的消息、自己的新通知或仍有积压的 Commit
 会触发调谐。其他参与者的变化不唤醒当前 Actor。相同 Actor/Conv 的消费循环应由 Operator 保证
 单一 owner；Kubernetes 资源版本解决状态更新冲突，不替代多副本执行互斥。

@@ -3,7 +3,7 @@
 ## 项目定位与边界
 
 server 是 loop-server 组件，数据库拥有 Conversation 与 Message 两类聊天事实，以及 Operator/Harness
-在线注册。DB 消息记录支持参与者独立消费，Conv CRD 保存定向信号和消费进度，Redis 支持页面
+在线注册。DB 消息记录支持 Actor 独立消费，Conv CRD 保存定向信号和消费进度，Redis 支持页面
 流与重连；task_id 仅标识页面交付。Operator 领域状态、Harness 执行状态、执行审计和成本记录
 不进入聊天模型。
 
@@ -17,7 +17,7 @@ server/
 │   ├── operator.go         # Operator Registry
 │   └── harness.go          # Harness Registry
 ├── internal/domain/        # Human 消息的纯状态规则，不持有独立存储
-├── internal/delivery/      # Message 寻址与独立流、Task 聚合交付及固化
+├── internal/delivery/      # Message 寻址与独立流、会话聚合交付及固化
 ├── internal/migrations/    # 已有数据库的 Schema 迁移
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
@@ -34,7 +34,6 @@ server/
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；输入提交与 UI 流交付
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
-│   ├── completion.go       # 页面交付收尾恢复，与 Human 生命周期独立
 │   └── human.go            # Human 消息交互、持久到期与类型化答复
 └── docs/                   # 消息消费、可见事实持久化与用户交互的领域设计
 ```
@@ -56,4 +55,4 @@ server/
 - `docs/conversation.md` — Conv 定向唤醒、Poll/Commit 消费位置和恢复边界
 - `docs/ue.md` — 页面布局、消息呈现、交互卡片与页面交付；不定义业务完成
 - `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
-- `../docs/kernel.md` — loopd 稳定理念和参与者边界
+- `../docs/kernel.md` — loopd 稳定理念和Actor 边界

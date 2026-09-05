@@ -1,9 +1,9 @@
 # 用户交互与页面交付
 
-本文描述参与者协作如何呈现在页面上：布局、消息呈现、Ask/Confirm 卡片，以及支撑这些体验的
+本文描述 Actor 协作如何呈现在页面上：布局、消息呈现、Ask/Confirm 卡片，以及支撑这些体验的
 流式交付、快照、重连与收尾。业务消费协议与存储事实分别由 Conversation、Persistence 文档拥有。
 
-参与者之间的协作依赖持久消息与 [Poll/Commit](conversation.md)，不依赖页面连接。
+Actor 之间的协作依赖持久消息与 [Poll/Commit](conversation.md)，不依赖页面连接。
 Redis 的 replay 位置不代表 Operator 已经消费，Operator 的 Commit 也不代表页面已经收到输出。
 DB、CRD 与 Redis 的整体责任分层见 [Kernel](../../docs/kernel.md)。
 
@@ -42,43 +42,52 @@ task_id 标识一次页面交付及 Redis 流，不是 Operator 的业务任务�
 Ask/Confirm 在实际发生时各自创建 Message。人可以连续追加，Operator 可以多次回应，
 输入与输出数量没有一对一约束。
 
-Redis 初始化在输入提交边界内：失败回滚输入；数据库提交失败尽力删除已初始化流。
-这不是跨系统事务，崩溃可能留下临时孤立流。Conv 通知用同事务保存的待通知标记在提交后重试，
-不要求用户重复发送。消费契约见 [Conversation](conversation.md)。
+消息提交只依赖 DB，Redis 不进入输入事务。DB 接收后，即使页面桥暂时不可用，也不要求用户
+重新发送。Conv 通知用同事务保存的待通知标记在提交后重试；消费契约见 [Conversation](conversation.md)。
+首次提交在连接页面桥前返回已接受的消息与 task_id；随后断线按该身份重连，不另建输入。
 
-带 task_id 的请求只观察既有交付，不创建输入或通知。HTTP/SSE 断开不取消执行。
+带 task_id 的请求只观察其所属会话，不创建输入或通知。一个页面订阅覆盖 User conv 及其直接
+内部会话，包括不同 task_id 或无 task_id 的后续发言。HTTP/SSE 断开不取消执行。
 Operator 通过 Poll 接收消息、Read 读取历史；不提供按 task_id 配对输入与回答的业务入口。
 
 ### 消息寻址与快照
 
-每条 Message 有独立的 AgentUE model、block ID、seq/revision 与 Redis 流。
-Conv.Speak 建立消息地址，随后按 Message ID 写事件；TaskID 可选，不限制后续发言。
+每条 Message 有独立的 AgentUE model、block ID 与 seq/revision。
+Conv.Speak 默认原子发布完整消息，不创建独立消息流；只有 Stream=true 时保持开放，
+返回的句柄通过 Emit/End 按 Message ID 更新消息；Operator 不传 task_id。
 Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批准。
 
-会话级消息事件先写 Redis，再推进 SQL 可见快照。SQL 失败时以相同 seq 和内容重试，
-不分配新 seq；同一 Message 的写入者负责保持有序。Message end 固化并终结该消息流，
-不代表 Actor 或整个 Conv 完成。
+消息事件先原子推进 SQL 可见快照，再尽力写 Redis。DB 接收即发送成功；桥故障只影响页面
+实时性，不改变 Actor 的协作结果。runtime 隐藏序号与瞬时重试，SQL 保存最后事件指纹，避免
+响应丢失后重复追加；同一序号不同内容会冲突。Message End 不代表 Actor 或整个 Conv 完成。
 
-所有输出都通过 Message 寻址。页面会持续刷新会话消息，发现晚到的发言和内容，
-不依赖某个 task_id 的观察连接仍然打开。
+所有输出都通过 Message 寻址。订阅持续检查 SQL Revision，用完整快照修复未送达的增量；
+桥连续时交付增量，发生版本缺口或乱序时发送最新快照。页面发现晚到的发言和内容，
+不依赖写入时命中了哪个 server 实例。
 
 ### 聚合流与 replay
 
 - 有消息身份的事件用 message_id、message、event 外层寻址，客户端按 ID/revision 合并。
-- 没有消息身份的 start/error/end 是 UI 控制事件，不创建气泡。
+- 没有消息身份的 start/ping 是 UI 连接控制事件，不创建气泡，也没有业务结束信号。
 - Last-Event-ID 是聚合控制流位置；各 Message 在重连时独立重放。
-- 一条 Message 的 end 不关闭 UI 流；不同 task_id 的观察互不替代。
-- 已关闭交付从 SQL 恢复当时及已持久化的相关消息；后续独立发言仍由会话列表呈现。
+- 一条 Message 的 end 不关闭 UI 流；已结束消息和 Human 卡片以 SQL 快照交付。
+- 页面仅保留所选会话的一条订阅；再次发言替换连接身份，但仍可收到旧输入对应的后续输出。
+- 切换会话／离开页面主动取消连接，正常 EOF 或断线按保存的 task_id 退避重连。
 
-任一 server 实例都可观察同一交付，不依赖发布时命中的实例。Redis 丢失不能恢复尚未持久化的
-增量；AgentUE Bridge 负责事件协议、幂等与续接，server 负责消息寻址和 SQL 快照。
+任一 server 实例都可观察同一交付。Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
+但不会重新生成每个中间增量；AgentUE Bridge 负责事件协议和续接，server 负责消息寻址与快照。
 
-### 完成与重试
+### 消息结束与重试
 
-输入 Message 保存 UI 关闭意图，行锁只协调该交付收尾，不作为业务任务锁。
-server 终结控制流并标记 closed，观察方在送达 end 前刷新相关消息的当前快照；相同意图可重试，变化冲突。
-中断后的恢复由通用交付维护循环承担，不归 Human 生命周期所有。
+默认 Speak 在创建事务中保存完整正文与结束状态。流式 End 与内容事件使用同一顺序和重试契约：
+先原子推进 SQL Revision 与受控 meta.output.ended=true，再尽力更新消息桥并标记终态。
+SQL 失败由句柄重试原事件，不另分配 seq；重复 End 幂等。
+普通 Speak 的内容和 Emit 不能伪造受控 meta.output；客户端收到 End 也将同一消息标为已结束。
 
-关闭交付不删除 Conv、不自动 Commit 消费位置、不终止待答问题，也不禁止 Actor 再次发言。
-Human 问题依赖自己的期限、身份和不可变终态。Operator 决定何时关闭当前页面观察，以及何时
-完成自己的业务工作，两者不能相互推断。
+AgentUE 原生 reducer 的 End 不改变 model，因此 loopd 将消息结束状态额外保存在可见快照的 meta
+中，不新增生命周期表。Redis 丢失后已固化的结束状态仍可恢复，不会把结束消息重新视为正在输出。
+页面只对仍开放的 output 显示 STREAMING，不把“连接在线”误标为“Operator 正在执行”。
+
+没有 Delivery.Complete、输入关闭意图或通用页面收尾维护循环。页面拥有订阅生命周期；
+Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自动 Commit、不终止待答问题，
+也不禁止任何 Actor 用新 Key 再次发言。

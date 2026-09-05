@@ -24,7 +24,6 @@ export interface Message {
   id: string;
   target_kind?: ActorKind;
   target_key?: string;
-  delivery_state?: "" | "closing" | "closed";
   reply_to_id?: string;
   purpose?: "input" | "output" | "human_request" | "human_reply";
   revision?: number;

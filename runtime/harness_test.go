@@ -23,15 +23,19 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 
+		if request.URL.Path == "/v1/conversations/root/speak" {
+			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)})
+			return
+		}
 		if request.URL.Path == "/v1/conversations/workspace/speak" {
 			var input loopd.SpeakRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input.Key != "input/route" || input.Actor.Kind != loopd.RoleHarness {
+			if input.Key != "input/route" || input.Actor.Kind != loopd.RoleHarness || !input.Stream {
 				t.Errorf("output=%+v", input)
 			}
-			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", TaskID: "task-1"})
+			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)})
 			return
 		}
 		if request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/events") {
@@ -67,7 +71,11 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
-	operatorEvent, err := runtime.Loop.Delivery.EmitMessage(context.Background(), "task-1", agentueui.Event{
+	stream, err := runtime.Loop.Conv.Speak(context.Background(), "root", loopd.SpeakRequest{Stream: true, Key: "status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = stream.Emit(context.Background(), agentueui.Event{
 		Op: agentueui.OpSet,
 		Block: map[string]any{
 			"id": "operator/status", "type": "text", "content": "routing",
@@ -76,12 +84,8 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsedOperatorOutput, err := agentueui.Parse(operatorEvent.Data)
-	if err != nil || parsedOperatorOutput.Seq != 2 {
-		t.Fatalf("Operator event = %#v, error=%v", parsedOperatorOutput, err)
-	}
 
-	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "input/route", TaskID: "task-1", EffectKey: "route", Target: "demo", Text: "hello"}
+	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "input/route", EffectKey: "route", Target: "demo", Text: "hello"}
 	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
 	if err != nil {
 		t.Fatal(err)
@@ -94,16 +98,16 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatalf("Call = %#v", result)
 	}
 
-	stream, streamErrors := call.Stream(context.Background(), "")
-	var observed []string
-	for event := range stream {
-		observed = append(observed, event.ID)
+	callEvents, streamErrors := call.Stream(context.Background())
+	var observed []agentueui.Op
+	for event := range callEvents {
+		observed = append(observed, event.Op)
 	}
 	if err := <-streamErrors; err != nil {
 		t.Fatal(err)
 	}
-	if got, want := fmt.Sprint(observed), "[2-0 3-0 4-0]"; got != want {
-		t.Fatalf("event IDs = %s, want %s", got, want)
+	if got, want := fmt.Sprint(observed), "[append append set]"; got != want {
+		t.Fatalf("observed operations = %s, want %s", got, want)
 	}
 	publishedMu.Lock()
 	if len(published) != 5 || published[0].Seq != 2 || published[1].Seq != 2 || published[2].Seq != 3 || published[3].Seq != 4 {

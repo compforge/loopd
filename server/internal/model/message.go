@@ -13,8 +13,6 @@ type Message struct {
 	Revision        uint64     `gorm:"not null;default:1"`
 	HumanDueAt      *time.Time `gorm:"index"`
 	WakePending     bool       `gorm:"not null;default:false;index"`
-	DeliveryState   string     `gorm:"size:16;not null;default:'';index"`
-	Completion      []byte     `gorm:"type:json"`
 
 	ID             string `gorm:"primaryKey;size:36"`
 	ConversationID string `gorm:"size:36;not null;index:idx_message_conversation"`

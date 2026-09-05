@@ -38,17 +38,14 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
 		t.Fatal(err)
 	}
-	main, err := chat.Create(ctx, "root", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
+	_, err = chat.Create(ctx, "root", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := chat.Complete(ctx, main.TaskID, nil); err != nil {
-		t.Fatal(err)
-	}
 	event := `{"event":{"op":"set","seq":2,"block":{"id":"text","type":"text","content":"work"}}}`
-	// +case=`An actor can speak and stream after UI delivery closes, without a task ID.`
+	// +case=`An actor can speak and stream independently of UI delivery, without a task ID.`
 	speech := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
 	if speech.StatusCode() != 200 {
 		t.Fatalf("speak=%d %s", speech.StatusCode(), speech.Body())
 	}
@@ -60,13 +57,13 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 		t.Fatalf("speech=%+v", spoken)
 	}
 	retry := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
 	var same loopd.Message
 	if err := json.Unmarshal(retry.Body(), &same); err != nil || same.ID != spoken.ID {
 		t.Fatalf("speech retry=%s %v", retry.Body(), err)
 	}
 	changed := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"operator","key":"another"}}`)
+		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"operator","key":"another"}}`)
 	if changed.StatusCode() != 409 {
 		t.Fatalf("changed recipient=%d", changed.StatusCode())
 	}
@@ -94,6 +91,16 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	}
 	if view.StatusCode() != 200 || len(history.Data) != 2 || history.Data[1].ID != spoken.ID {
 		t.Fatalf("history=%d %s", view.StatusCode(), view.Body())
+	}
+	complete := performJSON(t, engine, "POST", "/v1/deliveries/old/complete", "{}")
+	if complete.StatusCode() != 404 {
+		t.Fatalf("removed Complete route=%d", complete.StatusCode())
+	}
+	once := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
+		`{"key":"once","actor":{"kind":"operator","key":"router"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"done"}]}}`)
+	var final loopd.Message
+	if err := json.Unmarshal(once.Body(), &final); err != nil || once.StatusCode() != 200 || !final.Ended() {
+		t.Fatalf("one-shot=%s %v", once.Body(), err)
 	}
 	removed := performJSON(t, engine, "GET", "/v1/conversations/root/messages/"+spoken.ID+"/context", "")
 	if removed.StatusCode() != 404 {

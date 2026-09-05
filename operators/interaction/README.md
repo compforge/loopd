@@ -24,7 +24,7 @@ Kubernetes 配置使用标准 `KUBECONFIG`；Conversation namespace 必须与 se
 ## 独立参与者与消费策略
 
 演示监听 Conv CRD，通过 runtime Poll 接收发给自己的消息。同一 Conv 的普通用户发言按顺序
-处理：Ask → Confirm → Speak 汇总 → 关闭可选页面流 → Commit。等待卡片答复时释放 Reconcile
+处理：Ask → Confirm → Speak 一次发布完整汇总 → Commit。等待卡片答复时释放 Reconcile
 并发位，不提交当前输入；用户可以继续追加消息，它们留在队列中，当前交互结束后再处理。
 
 卡片答复经 Human handle 获取，不再触发新的 Ask。普通发言即使写着“确认”也不会自动批准
@@ -32,7 +32,7 @@ Kubernetes 配置使用标准 `KUBECONFIG`；Conversation namespace 必须与 se
 
 EffectKey 与汇总消息 Key 以输入 Message ID 为基础，TaskID 只关联页面流。重启从 Committed
 重读输入，复用已持久化的问题、deadline、结果与汇总；不依赖进程内执行状态，也不重置超时。
-只有汇总和可选页面收尾成功，才 Commit 此输入，卡片答复随后独立消费并确认。
+只有完整汇总发布成功，才 Commit 此输入，卡片答复随后独立消费并确认。
 
 本例的业务进度可从持久问题和结果重新推导，因此不另建领域 CRD。这不意味着 runtime 可以
 恢复任意 Go 调用栈；增加无法推导的领域进度时，应由 Operator 自己持久化。

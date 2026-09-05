@@ -14,7 +14,7 @@ import (
 )
 
 type ConversationCoordinator interface {
-	Signal(context.Context, string, string, loopd.ActorRef) error
+	Signal(context.Context, string, string, loopd.ActorRef, uint64) error
 	Poll(context.Context, string, loopd.ActorRef, string, conversationclient.ReadMessages) (loopd.PollResult, error)
 	Commit(context.Context, string, loopd.CommitRequest) error
 }
@@ -95,7 +95,7 @@ func (s *PollService) Commit(ctx context.Context, conversationID string, request
 // server replica can retry without creating a second user message.
 func (s *PollService) Notify(ctx context.Context, message model.Message) error {
 	if err := s.conversations.Signal(ctx, message.ConversationID, message.ID,
-		loopd.ActorRef{Kind: loopd.Role(message.TargetKind), Key: message.TargetKey}); err != nil {
+		loopd.ActorRef{Kind: loopd.Role(message.TargetKind), Key: message.TargetKey}, message.Revision); err != nil {
 		return err
 	}
 	if err := s.repo.AcknowledgeDispatch(ctx, message.ID); err != nil {

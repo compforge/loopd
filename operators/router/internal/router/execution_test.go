@@ -90,8 +90,8 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 			completed := fmt.Sprint(server.completedIDs)
 			remaining := len(server.inbox)
 			server.mu.Unlock()
-			if completed != "[task-1 task-2]" || remaining != 0 {
-				t.Fatalf("delivery closure=%s unread=%d", completed, remaining)
+			if completed != "[message-3]" || remaining != 0 {
+				t.Fatalf("committed prefix=%s unread=%d", completed, remaining)
 			}
 			// A coalesced Conv wake after this run must not execute the same input again.
 			if _, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: objectKey("conversation-1")}); err != nil {
@@ -164,7 +164,7 @@ func TestRouterConsumesMessageWithoutUIDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, completed, failure := server.result()
-	if answer != "Result" || completed || failure != nil {
+	if answer != "Result" || !completed || failure != nil {
 		t.Fatalf("message work must not require a UI delivery: answer=%q completed=%v failure=%v", answer, completed, failure)
 	}
 }

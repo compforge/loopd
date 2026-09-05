@@ -2,7 +2,8 @@
 
 [English](README.md) | **简体中文**
 
-`loopd` 是一个面向 Human、Harness 与 Kubernetes Operator 协作的编排运行时。
+`loopd` 是 Actor 通过持久消息协作的平台。User、Operator 与 Harness 可以独立参与，
+无需遵循固定的一问一答回合。
 
 它的核心理念是：
 

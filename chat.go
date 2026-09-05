@@ -15,7 +15,6 @@ type Conversation struct {
 }
 
 type Message struct {
-	DeliveryState  string          `json:"delivery_state,omitempty"`
 	TargetKind     Role            `json:"target_kind,omitempty"`
 	TargetKey      string          `json:"target_key,omitempty"`
 	ReplyToID      string          `json:"reply_to_id,omitempty"`
@@ -33,10 +32,24 @@ type Message struct {
 // SpeakRequest creates one actor-owned message. Key is stable within the
 // conversation and actor, independent of any UI delivery. Empty Target broadcasts.
 type SpeakRequest struct {
+	// Stream leaves the message open for incremental output. The default publishes a complete message.
+	Stream    bool            `json:"stream,omitempty"`
 	Key       string          `json:"key"`
 	Actor     ActorRef        `json:"actor"`
 	Target    ActorRef        `json:"target,omitempty"`
 	ReplyToID string          `json:"reply_to_id,omitempty"`
-	TaskID    string          `json:"task_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"`
+}
+
+// Ended reports whether the message writer has finished sending. It says nothing
+// about the conversation, the consumer position, or any business execution.
+func (message Message) Ended() bool {
+	var value struct {
+		Meta struct {
+			Output struct {
+				Ended bool `json:"ended"`
+			} `json:"output"`
+		} `json:"meta"`
+	}
+	return json.Unmarshal(message.Content, &value) == nil && value.Meta.Output.Ended
 }

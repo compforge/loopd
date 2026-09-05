@@ -38,7 +38,6 @@ type Runtime struct {
 type Loop struct {
 	Conv     Conv
 	Human    Human
-	Delivery Delivery
 	Harness  Harness
 	Operator Operator
 }
@@ -66,19 +65,18 @@ func New(baseURL string, options Options) (*Runtime, error) {
 		options.Logger = slog.Default()
 	}
 	c := &client{
-		baseURL: parsed, http: options.HTTPClient,
+		baseURL: parsed, http: options.HTTPClient, logger: options.Logger,
 		requestTimeout: options.RequestTimeout,
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
-	loop.Delivery = newDelivery(c)
+	loop.Conv = Conv{client: c, messages: &messageHandles{values: make(map[string]*Message)}}
 	loop.Human = Human{client: c}
 	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
-	loop.Harness.chat = loop.Delivery
+	loop.Harness.conv = loop.Conv
 	loop.Operator = Operator{registry: newRegistry(
 		runCtx, c, "operator", "operators", options.RegistryLeaseDuration, options.Logger,
 	)}
-	loop.Conv = Conv{client: c}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }
 
@@ -92,6 +90,7 @@ func (runtime *Runtime) Close() error {
 }
 
 type client struct {
+	logger         *slog.Logger
 	baseURL        *url.URL
 	http           *http.Client
 	requestTimeout time.Duration

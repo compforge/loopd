@@ -17,17 +17,11 @@ import (
 )
 
 type ChatRepository interface {
-	BeginCompletion(context.Context, string, []byte) error
-	FinishCompletion(context.Context, string) error
-	PendingCompletions(context.Context) ([]model.Message, error)
-	CreateChatInput(context.Context, model.Message, func(context.Context) error) (model.Message, error)
+	CreateChatInput(context.Context, model.Message) (model.Message, error)
 }
 
 type ChatDelivery interface {
 	EmitMessage(context.Context, string, json.RawMessage) (string, error)
-	Initialize(context.Context, string, json.RawMessage) error
-	Delete(context.Context, string) error
-	Complete(context.Context, string, *delivery.Failure) error
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
@@ -60,33 +54,14 @@ func (service *ChatService) Create(
 	if userKey == "" || !target.ValidTarget() || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
-	if service.delivery == nil {
-		return loopd.Message{}, ErrUnavailable
-	}
 	taskID := uuid.V7()
-	streamContent, err := emptyContent(content)
-	if err != nil {
-		return loopd.Message{}, ErrInvalid
-	}
 	input := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
 		Kind: string(loopd.RoleUser), ActorKey: userKey, Content: content,
 		TargetKind: string(target.Kind), TargetKey: target.Key, DispatchPending: true,
 	}
-	streamCreated := false
-	message, err := service.repo.CreateChatInput(ctx, input, func(txCtx context.Context) error {
-		if err := service.delivery.Initialize(txCtx, taskID, streamContent); err != nil {
-			return fmt.Errorf("%w: initialize chat stream: %v", ErrUnavailable, err)
-		}
-		streamCreated = true
-		return nil
-	})
+	message, err := service.repo.CreateChatInput(ctx, input)
 	if err != nil {
-		if streamCreated {
-			if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
-				service.logger.ErrorContext(ctx, "delete uncommitted chat stream", "task_id", taskID, "error", cleanupErr)
-			}
-		}
 		return loopd.Message{}, err
 	}
 	if service.notifier != nil {
@@ -125,26 +100,6 @@ func (service *ChatService) Stream(
 	return err
 }
 
-func (service *ChatService) Complete(ctx context.Context, taskID string, failure *delivery.Failure) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return ErrInvalid
-	}
-	intent, _ := json.Marshal(failure)
-	if err := service.repo.BeginCompletion(ctx, taskID, intent); err != nil {
-		return err
-	}
-	if err := mapDeliveryError(service.delivery.Complete(ctx, taskID, failure)); err != nil {
-		return err
-	}
-	// Completing a UI stream never retires the conversation or business resources.
-	if err := service.repo.FinishCompletion(ctx, taskID); err != nil {
-		return err
-	}
-	service.logger.InfoContext(ctx, "chat delivery completed", "task_id", taskID)
-	return nil
-}
-
 func mapDeliveryError(err error) error {
 	switch {
 	case err == nil:
@@ -158,30 +113,6 @@ func mapDeliveryError(err error) error {
 	default:
 		return err
 	}
-}
-
-func emptyContent(content json.RawMessage) (json.RawMessage, error) {
-	var source struct {
-		Version string `json:"version"`
-		Biz     string `json:"biz"`
-	}
-	if err := json.Unmarshal(content, &source); err != nil {
-		return nil, err
-	}
-	return json.Marshal(struct {
-		Version string            `json:"version"`
-		Biz     string            `json:"biz"`
-		Meta    map[string]any    `json:"meta"`
-		Blocks  []json.RawMessage `json:"blocks"`
-	}{Version: source.Version, Biz: source.Biz, Meta: map[string]any{}, Blocks: []json.RawMessage{}})
-}
-
-func (service *ChatService) resumeCompletion(ctx context.Context, taskID string, intent []byte) error {
-	var failure *delivery.Failure
-	if err := json.Unmarshal(intent, &failure); err != nil {
-		return err
-	}
-	return service.Complete(ctx, taskID, failure)
 }
 
 func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage) (string, error) {

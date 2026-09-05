@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 )
 
@@ -15,7 +16,17 @@ func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, af
 		Where("(target_kind = ? AND target_key = ?) OR (target_kind = ? AND target_key = ?)", kind, key, "", "").
 		Where("NOT (kind = ? AND actor_key = ?)", kind, key).
 		Order("id ASC").Limit(limit).Find(&messages).Error
-	return messages, mapError(err)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	// Do not let a consumer commit past an unfinished earlier speech. The UI
+	// may display its partial snapshot, but Poll delivers complete messages.
+	for i, message := range messages {
+		if message.Purpose == "output" && !(loopd.Message{Content: message.Content}).Ended() {
+			return messages[:i], nil
+		}
+	}
+	return messages, nil
 }
 
 func (store *Store) PendingDispatches(ctx context.Context, limit int) ([]model.Message, error) {

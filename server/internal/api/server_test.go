@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -161,7 +162,6 @@ func performChat(t *testing.T, server *Server, conversationID, body string) (str
 	}
 	return string(request.Response.Header.Peek(taskIDHeader)), writer.String()
 }
-func (completedChatRunner) Complete(context.Context, string, *delivery.Failure) error { return nil }
 func (completedChatRunner) Stream(
 	_ context.Context,
 	_ string,
@@ -184,4 +184,33 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 
 func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
 	return "", nil
+}
+
+type unavailableChatRunner struct{ completedChatRunner }
+
+func (unavailableChatRunner) Stream(context.Context, string, string, string, func(delivery.Event) error) error {
+	return errors.New("page bridge unavailable")
+}
+
+// +case=`An accepted input returns its message and replay identity even when opening the page stream fails.`
+func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "chat.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil),
+		service.NewMessageService(store, nil), service.NewChatService(store, unavailableChatRunner{}, nil, nil), nil)
+	engine := route.NewEngine(config.NewOptions(nil))
+	server.Register(engine)
+	created := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"offline bridge"}`)
+	var conv loopd.Conversation
+	if err := json.Unmarshal(created.Body(), &conv); err != nil {
+		t.Fatal(err)
+	}
+	id, body := performChat(t, server, conv.ID, `{"user_key":"alice","target":{"kind":"operator","key":"a"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`)
+	input, err := store.GetDeliveryInput(context.Background(), id)
+	if err != nil || !strings.Contains(body, input.ID) || !strings.Contains(body, `"op":"start"`) {
+		t.Fatalf("missing acceptance: task=%s body=%s err=%v", id, body, err)
+	}
 }

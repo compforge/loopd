@@ -19,7 +19,7 @@ import (
 var ErrCallConflict = errors.New("harness call conflicts with an existing effect")
 
 type Harness struct {
-	chat     Delivery
+	conv     Conv
 	registry registry
 	state    *harnessState
 }
@@ -37,7 +37,6 @@ type Prompt struct {
 	ConversationID string
 	// IdempotencyKey belongs to the caller's business scope, not the UI stream.
 	IdempotencyKey string
-	TaskID         string
 	EffectKey      string
 	Target         string
 	Text           string
@@ -97,13 +96,13 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	if existing := service.state.calls[effectID]; existing != nil {
 		service.state.mu.Unlock()
 		if existing.fingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: task %q effect %q", ErrCallConflict, prompt.TaskID, prompt.EffectKey)
+			return nil, fmt.Errorf("%w: conversation %q effect %q", ErrCallConflict, prompt.ConversationID, prompt.EffectKey)
 		}
 		return existing, nil
 	}
 	callID := uuid.V7()
 	request := provider.Request{
-		CallID: callID, TaskID: prompt.TaskID,
+		CallID:         callID,
 		IdempotencyKey: effectID,
 		Prompt:         prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
 	}
@@ -119,7 +118,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	now := time.Now().UTC()
 	call := &Call{
 		value: loopd.HarnessCall{
-			ID: providerCall.ID(), TaskID: prompt.TaskID, EffectKey: prompt.EffectKey,
+			ID: providerCall.ID(), EffectKey: prompt.EffectKey,
 			Target: prompt.Target, Phase: loopd.CallRunning,
 			Timestamped: loopd.Timestamped{CreatedAt: now, UpdatedAt: now},
 		},
@@ -130,13 +129,13 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	service.state.calls[effectID] = call
 	service.state.mu.Unlock()
 	service.state.logger.InfoContext(ctx, "harness call started",
-		"task_id", prompt.TaskID,
+		"conversation_id", prompt.ConversationID,
 		"effect_key", prompt.EffectKey,
 		"target", prompt.Target,
 		"call_id", providerCall.ID(),
 	)
 
-	go call.follow(service.state.ctx, providerCall, service.chat, prompt, service.state.logger)
+	go call.follow(service.state.ctx, providerCall, service.conv, prompt, service.state.logger)
 	return call, nil
 }
 
@@ -156,7 +155,7 @@ type Call struct {
 	mu          sync.Mutex
 	value       loopd.HarnessCall
 	fingerprint [32]byte
-	events      []loopd.Event
+	events      []agentueui.Event
 	changed     chan struct{}
 	done        chan struct{}
 	terminalErr error
@@ -181,23 +180,18 @@ func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	}
 }
 
-// Stream is a Verb (effect: read) replaying locally observed deliveries after afterEventID and follows
-// the Call until completion. Durable page replay uses Delivery.Send and SSE
-// Last-Event-ID; this process-local view is a convenience for the Reconciler.
-func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd.Event, <-chan error) {
-	events := make(chan loopd.Event)
+// Stream observes this Call from its locally retained beginning, then follows it.
+// It is not a page subscription; no Redis/SSE replay cursor is required.
+func (call *Call) Stream(ctx context.Context) (<-chan agentueui.Event, <-chan error) {
+	events := make(chan agentueui.Event)
 	errors := make(chan error, 1)
 	go func() {
 		defer close(events)
 		defer close(errors)
-		index, err := call.eventIndex(afterEventID)
-		if err != nil {
-			errors <- err
-			return
-		}
+		index := 0
 		for {
 			call.mu.Lock()
-			pending := append([]loopd.Event(nil), call.events[index:]...)
+			pending := append([]agentueui.Event(nil), call.events[index:]...)
 			index = len(call.events)
 			changed := call.changed
 			terminal := call.value.Phase.Terminal()
@@ -224,30 +218,15 @@ func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd
 	return events, errors
 }
 
-func (call *Call) eventIndex(afterEventID string) (int, error) {
-	if afterEventID == "" {
-		return 0, nil
-	}
-	call.mu.Lock()
-	defer call.mu.Unlock()
-	for index, event := range call.events {
-		if event.ID == afterEventID {
-			return index + 1, nil
-		}
-	}
-	return 0, fmt.Errorf("event ID %q does not belong to Call %q", afterEventID, call.value.ID)
-}
-
 func (call *Call) follow(
 	ctx context.Context,
 	providerCall provider.Call,
-	chat Delivery,
+	conv Conv,
 	prompt Prompt,
 	logger *slog.Logger,
 ) {
-	taskID := prompt.TaskID
 	var publishErr error
-	var output *loopd.Message
+	var output *Message
 	for event := range providerCall.Events() {
 		if publishErr != nil {
 			continue
@@ -261,7 +240,6 @@ func (call *Call) follow(
 			publishErr = fmt.Errorf("harness may only publish AgentUE set or append events, got %q", value.Op)
 			continue
 		}
-		value.Seq = 0
 		// Stamp once before delivery: retries must carry the same event bytes.
 		// AgentUE's timestamp is the visible output time, not Task completion.
 		if value.Timestamp == nil {
@@ -275,28 +253,28 @@ func (call *Call) follow(
 			value.Block["effect_key"] = call.value.EffectKey
 		}
 		if output == nil {
-			var message loopd.Message
+			var message *Message
 			var err error
 			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
-			message, err = (Conv{client: chat.client}).Speak(ctx, prompt.ConversationID, loopd.SpeakRequest{
-				Key: prompt.IdempotencyKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}, TaskID: taskID, Content: content,
+			message, err = conv.Speak(ctx, prompt.ConversationID, loopd.SpeakRequest{
+				Stream: true, Key: prompt.IdempotencyKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}, Content: content,
 			})
 			if err != nil {
 				publishErr = err
 				continue
 			}
-			output = &message
+			output = message
 		}
-		published, err := chat.EmitMessage(ctx, output.ID, value)
+		err = output.Emit(ctx, value)
 		if err != nil {
 			publishErr = err
 			continue
 		}
-		call.appendEvent(published)
+		call.appendEvent(value)
 	}
 	result, waitErr := providerCall.Wait(ctx)
 	if output != nil && publishErr == nil && ctx.Err() == nil {
-		_, publishErr = chat.EmitMessage(ctx, output.ID, agentueui.End(0))
+		publishErr = output.End(ctx)
 	}
 	err := errors.Join(publishErr, waitErr)
 	phase := loopd.CallSucceeded
@@ -308,7 +286,7 @@ func (call *Call) follow(
 	logContext := context.WithoutCancel(ctx)
 	if err != nil {
 		logger.ErrorContext(logContext, "harness call failed",
-			"task_id", taskID,
+			"conversation_id", prompt.ConversationID,
 			"effect_key", value.EffectKey,
 			"target", value.Target,
 			"call_id", providerCall.ID(),
@@ -317,14 +295,14 @@ func (call *Call) follow(
 		return
 	}
 	logger.InfoContext(logContext, "harness call completed",
-		"task_id", taskID,
+		"conversation_id", prompt.ConversationID,
 		"effect_key", value.EffectKey,
 		"target", value.Target,
 		"call_id", providerCall.ID(),
 	)
 }
 
-func (call *Call) appendEvent(event loopd.Event) {
+func (call *Call) appendEvent(event agentueui.Event) {
 	call.mu.Lock()
 	call.events = append(call.events, event)
 	now := time.Now().UTC()

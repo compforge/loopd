@@ -10,7 +10,7 @@ import (
 
 func TestHumanTerminalTransitions(t *testing.T) {
 	now := time.Unix(100, 0)
-	request := loopd.HumanRequest{TaskID: "task", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", AllowOther: true, Timeout: time.Minute}
+	request := loopd.HumanRequest{EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", AllowOther: true, Timeout: time.Minute}
 	reply := loopd.HumanReply{ReplyToID: "question", Outcome: loopd.HumanSuccess, Value: "yes"}
 	q := NewHumanQuestion(request, now)
 	if q.Expire(now.Add(time.Second)) {

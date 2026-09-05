@@ -25,16 +25,16 @@ func humanStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	content := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	if _, err := s.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: content}, nil); err != nil {
+	if _, err := s.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: content}); err != nil {
 		t.Fatal(err)
 	}
 	return s
 }
 func question(key string) loopd.HumanRequest {
-	return loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: "input", TaskID: "task", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []loopd.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
+	return loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []loopd.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
 }
 
-// +case=`两个并行问题按相反顺序答复，只按引用收口且 Task 主消息保持原身份`
+// +case=`两个并行问题按相反顺序答复，只按引用收口且 输入消息保持原身份`
 func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	s := humanStore(t)
 	ctx := context.Background()
@@ -52,9 +52,6 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	}
 	if ask.Message.Key != "operator" || ask.Message.ReplyToID != "input" {
 		t.Fatalf("message=%+v", ask.Message)
-	}
-	if err := s.BeginCompletion(ctx, "task", []byte("null")); err != nil {
-		t.Fatalf("complete pending=%v", err)
 	}
 	for _, test := range []struct {
 		conv, actor, id, value string
@@ -101,19 +98,13 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	if _, err := s.CreateHuman(ctx, r); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed params=%v", err)
 	}
-	rows, _ := s.ListRootMessagesByTask(ctx, "task")
+	rows, _ := s.ListMessages(ctx, "conv", "", 100)
 	input, err := s.GetDeliveryInput(ctx, "task")
 	if err != nil || input.ID != "input" || len(rows) != 5 {
 		t.Fatalf("input=%+v rows=%d %v", input, len(rows), err)
 	}
-	if err := s.BeginCompletion(ctx, "task", []byte("null")); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := s.CreateHuman(ctx, question("new")); err != nil {
-		t.Fatalf("UI completion must not prevent a new question: %v", err)
-	}
-	if err := s.FinishCompletion(ctx, "task"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("answered questions must not prevent a new question: %v", err)
 	}
 	// Human notification cleanup belongs to its own maintenance loop, not Chat.
 }
@@ -148,14 +139,11 @@ func TestHumanTimeoutDismissAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BeginCompletion(ctx, "task", []byte(`{"code":"stopped","message":"done"}`)); err != nil {
-		t.Fatal(err)
-	}
 	result, err = s.GetHuman(ctx, pending.Message.ID)
 	if err != nil || result.Status != loopd.HumanPending || result.Reason != "" || result.Reply != nil {
 		t.Fatalf("failure=%+v %v", result, err)
 	}
-	rows, _ := s.ListRootMessagesByTask(ctx, "task")
+	rows, _ := s.ListMessages(ctx, "conv", "", 100)
 	if len(rows) != 5 {
 		t.Fatalf("rows=%d, expected one input, three questions and one dismissal", len(rows))
 	}
@@ -186,7 +174,7 @@ func TestConcurrentHumanRepliesHaveOneWinner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows, _ := s.ListRootMessagesByTask(ctx, "task")
+	rows, _ := s.ListMessages(ctx, "conv", "", 100)
 	if len(rows) != 3 {
 		t.Fatalf("got %d messages after competing replies", len(rows))
 	}
