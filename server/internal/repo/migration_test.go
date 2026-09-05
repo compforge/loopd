@@ -15,18 +15,22 @@ import (
 
 func TestOpenMigratesDomainKeys(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
-		testOpenMigratesDomainKeys(t, Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "legacy.db")})
+		testOpenMigratesDomainKeys(t, Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "legacy.db")}, "key")
 	})
 	t.Run("mysql", func(t *testing.T) {
 		dsn := os.Getenv("TEST_MYSQL_MIGRATION_DSN")
 		if dsn == "" {
 			t.Skip("set TEST_MYSQL_MIGRATION_DSN to an empty disposable database")
 		}
-		testOpenMigratesDomainKeys(t, Config{Driver: "mysql", DSN: dsn})
+		testOpenMigratesDomainKeys(t, Config{Driver: "mysql", DSN: dsn}, "key")
 	})
 }
 
-func testOpenMigratesDomainKeys(t *testing.T, config Config) {
+func TestOpenMigratesSenderKey(t *testing.T) {
+	testOpenMigratesDomainKeys(t, Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "sender.db")}, "sender_key")
+}
+
+func testOpenMigratesDomainKeys(t *testing.T, config Config, messageColumn string) {
 	t.Helper()
 	config.OperationTimeout = 10 * time.Second
 	dialector, _, err := databaseDialector(config)
@@ -68,6 +72,11 @@ func testOpenMigratesDomainKeys(t *testing.T, config Config) {
 			t.Fatal(err)
 		}
 	}
+	if messageColumn != "key" {
+		if err := db.Migrator().RenameColumn(&legacyMessage{}, "key", messageColumn); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := pool.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -79,15 +88,15 @@ func testOpenMigratesDomainKeys(t *testing.T, config Config) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = store.Close() })
-		for table, column := range map[string]string{"messages": "sender_key", "operators": "operator_key", "harnesses": "harness_key"} {
+		for table, column := range map[string]string{"messages": "actor_key", "operators": "operator_key", "harnesses": "harness_key"} {
 			columns, err := store.db.Migrator().ColumnTypes(table)
 			if err != nil {
 				t.Fatal(err)
 			}
 			found := false
 			for _, value := range columns {
-				if value.Name() == "key" {
-					t.Fatalf("%s still has a key column", table)
+				if value.Name() == "key" || value.Name() == "sender_key" {
+					t.Fatalf("%s still has a legacy %s column", table, value.Name())
 				}
 				found = found || value.Name() == column
 			}
@@ -96,7 +105,7 @@ func testOpenMigratesDomainKeys(t *testing.T, config Config) {
 			}
 		}
 		messages, err := store.ListMessages(ctx, "conversation-1", "", 100)
-		if err != nil || len(messages) != 1 || messages[0].ID != "message-1" || messages[0].SenderKey != "user-1" {
+		if err != nil || len(messages) != 1 || messages[0].ID != "message-1" || messages[0].ActorKey != "user-1" {
 			t.Fatalf("migrated messages = %#v, error = %v", messages, err)
 		}
 		// MySQL may reformat JSON; compare the visible semantic content.

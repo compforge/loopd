@@ -27,6 +27,14 @@ Operator/Harness 表的租约及发现语义见 [在线注册与发现](registry
 主会话的 `parent_message_id` 为 `NULL`。详情会话只允许引用主会话中的 response Message，不继续嵌套；
 同一条 Message 在 v1 中最多关联一个详情会话。
 
+左侧导航只列主会话。选择主会话中的 Message 后，按它的 ID 查找 `parent_message_id` 相同的详情
+会话，右侧展示该会话的 Message；没有关联会话就展示空状态。Task ID 关联一次执行，不替代
+这个父子关系，也不作为页面选中 Message 的标识。
+
+Operator 内部的临时 Harness Call 各对应详情会话中的一条 `harness` Message，actor_key 使用
+该 Call 的身份；同一次 Call 的文本和工具块保存在同一条 Message 中。effect_key 是可见步骤名，
+不代替身份。主回答只保存 Operator 自己的输出，不混存这些 Harness Message。
+
 ## Message
 
 `messages` 表包含：
@@ -35,7 +43,7 @@ Operator/Harness 表的租约及发现语义见 [在线注册与发现](registry
 - `conversation_id`：所属 Conversation；
 - `task_id`：对应 Task CRD 名称的一次完整问答标识；反问、确认等可见消息继续使用同一值；
 - `kind`：发送者类型，只能是 `user`、`operator`、`harness`；
-- `key`：发送者在所属系统中的稳定标识；
+- `actor_key`：发送者在所属系统中的稳定标识；
 - `content`：页面可见的 AgentUE semantic model JSON；其中 `blocks` 按顺序承载 `text`、`tool`、
   `artifact` 等可扩展内容；
 - `created_at`、`updated_at`：创建时间与可见内容最后更新时间。

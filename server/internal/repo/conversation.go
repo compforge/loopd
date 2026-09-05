@@ -9,7 +9,16 @@ import (
 type ConversationRepository interface {
 	CreateConversation(context.Context, model.Conversation) (model.Conversation, error)
 	GetConversation(context.Context, string) (model.Conversation, error)
+	FindConversationByParentMessage(context.Context, string) (model.Conversation, error)
 	ListConversations(context.Context, string, int) ([]model.Conversation, error)
+}
+
+func (store *Store) FindConversationByParentMessage(ctx context.Context, messageID string) (model.Conversation, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	var conversation model.Conversation
+	err := store.db.WithContext(ctx).Where("parent_message_id = ?", messageID).First(&conversation).Error
+	return conversation, mapError(err)
 }
 
 // ListConversations returns root conversations newest first. Detail

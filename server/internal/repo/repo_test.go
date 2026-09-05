@@ -48,12 +48,12 @@ func TestMessagesUseUUIDOrderAsCursor(t *testing.T) {
 	}
 	first := model.Message{
 		ID: "01991f3d-1112-7000-8000-000000000000", ConversationID: "01991f3d-1111-7000-8000-000000000000",
-		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "user", SenderKey: "user-1",
+		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "user", ActorKey: "user-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	second := model.Message{
 		ID: "01991f3d-1113-7000-8000-000000000000", ConversationID: first.ConversationID,
-		TaskID: first.TaskID, Kind: "operator", SenderKey: "operator-1",
+		TaskID: first.TaskID, Kind: "operator", ActorKey: "operator-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	if _, err := store.CreateMessage(ctx, second); err != nil {
@@ -112,7 +112,7 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 	}
 	existing := model.Message{
 		ID: "01991f3d-1112-7000-8000-000000000000", ConversationID: conversationID,
-		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "operator", SenderKey: "existing",
+		TaskID: "01991f3d-1110-7000-8000-000000000000", Kind: "operator", ActorKey: "existing",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	if _, err := store.CreateMessage(ctx, existing); err != nil {
@@ -120,7 +120,7 @@ func TestCreateChatMessagesRollsBackBothRows(t *testing.T) {
 	}
 	user := model.Message{
 		ID: "01991f3d-1113-7000-8000-000000000000", ConversationID: conversationID,
-		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", SenderKey: "user-1",
+		TaskID: "01991f3d-1114-7000-8000-000000000000", Kind: "user", ActorKey: "user-1",
 		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`),
 	}
 	response := existing

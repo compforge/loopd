@@ -31,6 +31,14 @@ func (server *Server) getConversation(ctx context.Context, request *hertzapp.Req
 }
 
 func (server *Server) listConversations(ctx context.Context, request *hertzapp.RequestContext) error {
+	if parentMessageID := request.Query("parent_message_id"); parentMessageID != "" {
+		conversations, err := server.conversations.ListDetailConversations(ctx, parentMessageID)
+		if err != nil {
+			return err
+		}
+		request.JSON(consts.StatusOK, page[loopd.Conversation]{Data: conversations})
+		return nil
+	}
 	limit, err := queryLimit(request)
 	if err != nil {
 		return err

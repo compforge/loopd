@@ -27,8 +27,8 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	}
 	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 	_, err = store.CreateChatMessages(ctx,
-		model.Message{ID: "message-1", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", SenderKey: "user-1", Content: initial},
-		model.Message{ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", SenderKey: "intent", Content: initial},
+		model.Message{ID: "message-1", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "user-1", Content: initial},
+		model.Message{ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Content: initial},
 		nil,
 	)
 	if err != nil {

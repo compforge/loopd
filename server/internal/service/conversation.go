@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -61,6 +62,17 @@ func (service *ConversationService) CreateConversation(
 func (service *ConversationService) GetConversation(ctx context.Context, id string) (loopd.Conversation, error) {
 	conversation, err := service.repo.GetConversation(ctx, id)
 	return conversationFromModel(conversation), err
+}
+
+func (service *ConversationService) ListDetailConversations(ctx context.Context, parentMessageID string) ([]loopd.Conversation, error) {
+	conversation, err := service.repo.FindConversationByParentMessage(ctx, parentMessageID)
+	if errors.Is(err, repo.ErrNotFound) {
+		return []loopd.Conversation{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []loopd.Conversation{conversationFromModel(conversation)}, nil
 }
 
 func (service *ConversationService) ListConversations(

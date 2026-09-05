@@ -47,6 +47,13 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
   return page.data;
 }
 
+export async function findDetailConversation(messageID: string, signal?: AbortSignal): Promise<Conversation | undefined> {
+	const page = await requestJSON<Page<Conversation>>(
+		`/v1/conversations?parent_message_id=${encodeURIComponent(messageID)}`, { signal },
+	);
+	return page.data[0];
+}
+
 export async function createConversation(name: string, signal?: AbortSignal): Promise<Conversation> {
   return requestJSON<Conversation>("/v1/conversations", {
     method: "POST",
@@ -57,11 +64,17 @@ export async function createConversation(name: string, signal?: AbortSignal): Pr
 }
 
 export async function listMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
-  const page = await requestJSON<Page<Message>>(
-    `/v1/conversations/${encodeURIComponent(conversationID)}/messages?limit=100`,
-    { signal },
-  );
-  return page.data;
+  const messages: Message[] = [];
+  let after = "";
+  for (;;) {
+    const page = await requestJSON<Page<Message>>(
+      `/v1/conversations/${encodeURIComponent(conversationID)}/messages?limit=100&after=${encodeURIComponent(after)}`,
+      { signal },
+    );
+    messages.push(...page.data);
+    if (page.data.length < 100) return messages;
+    after = page.data[page.data.length - 1].id;
+  }
 }
 
 export interface StreamRequest {
