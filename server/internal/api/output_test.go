@@ -38,7 +38,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = chat.Create(ctx, "root", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
+	_, err = chat.Create(ctx, "root", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

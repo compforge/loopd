@@ -19,8 +19,9 @@ export function DetailPanel({ message, liveMessages, running }: {
 }) {
   const [detail, setDetail] = useState<Detail>();
   const parentID = message?.conversation_id;
-  const actorKind = message?.kind === "user" ? message.target_kind : message?.kind;
-  const actorKey = message?.kind === "user" ? message.target_key : message?.key;
+  const organizer = detailOrganizer(message);
+  const actorKind = organizer?.kind;
+  const actorKey = organizer?.key;
   const scope = JSON.stringify([parentID, actorKind, actorKey]);
   useEffect(() => {
     if (!parentID || !actorKind || !actorKey) return;
@@ -95,18 +96,19 @@ export function DetailPanel({ message, liveMessages, running }: {
   );
 }
 
-function DetailMessage({ message, index }: { message: Message; index: number }) {
-  const style = message.kind === "harness" ? { "--harness-color": traceColor(message.key) } as CSSProperties : undefined;
+export function DetailMessage({ message, index }: { message: Message; index: number }) {
+  const style = message.kind !== "user" ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
   let model: UIModel | undefined;
   try { model = parseUIModel(message.content); } catch { /* Invalid persisted model is shown below. */ }
-  const effectKey = model?.meta.effect_key;
-  const title = typeof effectKey === "string" && effectKey ? effectKey
+  const actorName = typeof model?.meta.actor_display_name === "string" ? model.meta.actor_display_name : message.kind.split("/").at(-1)!;
+  const explicitTitle = model?.meta.title;
+  const title = typeof explicitTitle === "string" && explicitTitle ? explicitTitle
     : model?.blocks[0] ? traceLabel(model.blocks[0], index) : `步骤 ${index + 1}`;
   return (
     <article className={`detail-card${style ? " harness-trace" : ""}`} style={style} data-message-id={message.id}>
       <div className="timeline-node">{index + 1}</div>
       <div className="detail-card-head">
-        <span className="block-kind">{message.kind.toUpperCase()}</span>
+        <span className="block-kind" title={`${message.kind} / ${message.key}`}>{actorName.toUpperCase()}</span>
       </div>
       <div className="detail-card-title">{title}</div>
       <div className="detail-card-time" title={`${message.created_at} → ${message.updated_at}`}>
@@ -117,6 +119,7 @@ function DetailMessage({ message, index }: { message: Message; index: number }) 
         <div key={block.id}>
           {block.type === "tool" && <div className="detail-card-subtitle">{String(block.name ?? "TOOL")} {String(block.status ?? "")}</div>}
           {typeof block.content === "string" && <p>{block.content}</p>}
+          {typeof block.error === "string" && block.error && <p role="alert">{block.error}</p>}
         </div>
       ))}
       {model?.blocks.length === 0 && <p className="quiet">等待输出…</p>}
@@ -130,4 +133,14 @@ function activityTime(value: string): string {
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString([], {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   });
+}
+
+// Operator role messages share the owning Operator's workspace. Run keys remain
+// author identities and must not create a separate detail conversation.
+export function detailOrganizer(message?: Message) {
+ if (!message) return undefined;
+ const kind = message.kind === "user" ? message.target_kind : message.kind;
+ const key = message.kind === "user" ? message.target_key : message.key;
+ if (kind?.startsWith("operator/")) return { kind: "operator" as const, key: kind.split("/")[1] };
+ return { kind, key };
 }

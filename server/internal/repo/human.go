@@ -76,7 +76,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	return result, nil
 }
 func publicMessage(m model.Message) loopd.Message {
-	return loopd.Message{TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -130,9 +130,6 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 			result, err = humanResult(tx, m, c)
 			return err
 		}
-		if r.Actor.Kind != loopd.RoleOperator {
-			return ErrConflict
-		}
 		now := time.Now().UTC()
 		question := domain.NewHumanQuestion(r, now)
 		deadline := question.Deadline
@@ -144,7 +141,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: "operator", ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: string(r.Actor.Kind), ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}

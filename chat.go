@@ -8,14 +8,14 @@ type Conversation struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitempty"`
 	// Actor identifies the conversation's organizer, not every message sender.
-	ActorKind Role   `json:"actor_kind"`
-	ActorKey  string `json:"actor_key"`
-	ParentID  string `json:"parent_id,omitempty"`
+	ActorKind ActorKind `json:"actor_kind"`
+	ActorKey  string    `json:"actor_key"`
+	ParentID  string    `json:"parent_id,omitempty"`
 	Timestamped
 }
 
 type Message struct {
-	TargetKind     Role            `json:"target_kind,omitempty"`
+	TargetKind     ActorKind       `json:"target_kind,omitempty"`
 	TargetKey      string          `json:"target_key,omitempty"`
 	ReplyToID      string          `json:"reply_to_id,omitempty"`
 	Purpose        string          `json:"purpose,omitempty"`
@@ -23,7 +23,7 @@ type Message struct {
 	ID             string          `json:"id"`
 	ConversationID string          `json:"conversation_id"`
 	TaskID         string          `json:"task_id"`
-	Kind           Role            `json:"kind"`
+	Kind           ActorKind       `json:"kind"`
 	Key            string          `json:"key"`
 	Content        json.RawMessage `json:"content"`
 	Timestamped

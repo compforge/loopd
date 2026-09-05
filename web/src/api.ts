@@ -1,7 +1,7 @@
 import { decodeSse, type SseMessage, type UIModel } from "@compforge/agentue/ui";
 
-export type ActorKind = "user" | "operator" | "harness";
-export type TargetActorKind = Exclude<ActorKind, "user">;
+export type ActorKind = "user" | "operator" | "harness" | `operator/${string}/${string}`;
+export type TargetActorKind = "operator" | "harness";
 
 export interface Actor {
   kind: TargetActorKind;

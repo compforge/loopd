@@ -36,7 +36,7 @@ func TestConversationPollHTTP(t *testing.T) {
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
 	chat := service.NewChatService(store, completedChatRunner{}, nil, poll)
-	if _, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"},
+	if _, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"},
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestConversationPollHTTP(t *testing.T) {
 	if err := json.Unmarshal(first.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Messages) != 1 || result.Messages[0].Kind != loopd.RoleUser ||
+	if len(result.Messages) != 1 || result.Messages[0].Kind != loopd.ActorKindUser ||
 		result.Messages[0].TargetKey != "router" || result.Position != result.Messages[0].ID {
 		t.Fatalf("Poll = %+v", result)
 	}
@@ -79,5 +79,51 @@ func TestConversationPollHTTP(t *testing.T) {
 	unknown := performJSON(t, engine, "POST", "/v1/conversations/conv/poll", `{"actor":{"kind":"operator","key":"other"}}`)
 	if unknown.StatusCode() != 403 {
 		t.Fatalf("nonparticipant = %d %s", unknown.StatusCode(), unknown.Body())
+	}
+}
+
+// +case=`Custom Operator roles are participants with independent consumption cursors.`
+func TestCustomRoleConversationConsumption(t *testing.T) {
+	ctx := context.Background()
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "roles.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	_, err = store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := kuberuntime.NewScheme()
+	_ = conversationv1.AddToScheme(scheme)
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
+	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
+	messages := service.NewMessageService(store, nil)
+	// Speak persistence queues the notification; Poll service reconciles it.
+	role := loopd.ActorRef{Kind: "operator/longhorizon/manager", Key: "run-uid"}
+	message, err := messages.Speak(ctx, "conv", loopd.SpeakRequest{Key: "audit-report", Actor: loopd.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := poll.Notify(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	result, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: role, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 1 || result.Messages[0].ID != message.ID {
+		t.Fatalf("poll=%+v", result)
+	}
+	if err := poll.Commit(ctx, "conv", loopd.CommitRequest{Actor: role, Through: result.Position}); err != nil {
+		t.Fatal(err)
+	}
+	result, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: role})
+	if err != nil || len(result.Messages) != 0 {
+		t.Fatalf("committed=%+v %v", result, err)
 	}
 }

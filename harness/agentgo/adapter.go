@@ -29,6 +29,18 @@ func New(factory Factory) (*Adapter, error) {
 }
 
 func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (harness.Call, error) {
+	parent := ctx
+	ctx, cancel := context.WithCancel(parent)
+	if request.Timeout > 0 {
+		cancel()
+		ctx, cancel = context.WithTimeout(parent, request.Timeout)
+	}
+	started := false
+	defer func() {
+		if !started {
+			cancel()
+		}
+	}()
 	if request.CallID == "" || request.IdempotencyKey == "" || request.Prompt == "" {
 		return nil, errors.New("call ID, idempotency key, and prompt are required")
 	}
@@ -40,7 +52,7 @@ func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (ha
 		return nil, errors.New("agentgo harness factory returned nil")
 	}
 	call := &call{
-		id: request.CallID, agent: instance,
+		id: request.CallID, agent: instance, cancel: cancel,
 		events: make(chan harness.Event, 128), done: make(chan struct{}),
 	}
 	instance.Subscribe(call.consume)
@@ -48,10 +60,12 @@ func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (ha
 		call.finish(err)
 		return nil, err
 	}
+	started = true
 	return call, nil
 }
 
 type call struct {
+	cancel        context.CancelFunc
 	id            string
 	agent         *agent.Agent
 	events        chan harness.Event
@@ -104,6 +118,9 @@ func (call *call) consume(event agent.Event) {
 
 func (call *call) finish(err error) {
 	call.once.Do(func() {
+		if call.cancel != nil {
+			call.cancel()
+		}
 		call.mu.Lock()
 		call.err = err
 		call.mu.Unlock()

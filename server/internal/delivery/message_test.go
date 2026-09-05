@@ -218,7 +218,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 			later = message.ID
 			request = outputRequest("unsolicited")
 			request.Stream = false
-			request.Actor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: "another"}
+			request.Actor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "another"}
 			message, err = store.Speak(ctx, "root", request)
 			if err != nil {
 				return err

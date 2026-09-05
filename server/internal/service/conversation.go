@@ -52,7 +52,7 @@ func (service *ConversationService) CreateConversation(
 ) (loopd.Conversation, error) {
 	conversation := model.Conversation{
 		ID: uuid.V7(), Name: strings.TrimSpace(name),
-		ActorKind: string(loopd.RoleUser), ActorKey: strings.TrimSpace(userKey),
+		ActorKind: string(loopd.ActorKindUser), ActorKey: strings.TrimSpace(userKey),
 	}
 	if conversation.ActorKey == "" {
 		return loopd.Conversation{}, ErrInvalid
@@ -91,7 +91,7 @@ func (service *ConversationService) ListConversations(
 func conversationFromModel(value model.Conversation) loopd.Conversation {
 	result := loopd.Conversation{
 		ID: value.ID, Name: value.Name,
-		ActorKind: loopd.Role(value.ActorKind), ActorKey: value.ActorKey,
+		ActorKind: loopd.ActorKind(value.ActorKind), ActorKey: value.ActorKey,
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 	if value.ParentID != nil {

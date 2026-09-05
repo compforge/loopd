@@ -20,6 +20,9 @@ DB、CRD 与 Redis 的整体责任分层见 [Kernel](../../docs/kernel.md)。
 也允许 Operator 多次回应；流式控制事件不生成空消息气泡。
 
 处理详情按相交时间区间分组，同组按 Actor 分列。与前组无交集的时间段重新靠左，
+自定义 `operator/<operator-key>/<role>` 作者显示角色名和完整身份，选中主会话中的角色消息时
+按 owning Operator 定位共享内部会话。report 的 title、actor_display_name 和错误供详情展示。
+
 卡片按内容自然高度展示，不按持续时长拉伸。区间代表可见活动，不是精确执行耗时或因果关系。
 
 > 待补充：内容块与工具展示、Actor 颜色与步骤标识、滚动跟随，以及消息引用的交互规则。

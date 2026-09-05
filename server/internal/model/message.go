@@ -4,7 +4,7 @@ import "time"
 
 type Message struct {
 	// Empty recipient kind and key explicitly address the conversation.
-	TargetKind      string     `gorm:"size:16"`
+	TargetKind      string     `gorm:"size:128"`
 	TargetKey       string     `gorm:"size:128"`
 	DispatchPending bool       `gorm:"not null;default:false;index"`
 	OutputKey       *string    `gorm:"size:128;uniqueIndex:idx_message_output"`
@@ -17,7 +17,7 @@ type Message struct {
 	ID             string `gorm:"primaryKey;size:36"`
 	ConversationID string `gorm:"size:36;not null;index:idx_message_conversation"`
 	TaskID         string `gorm:"size:36;not null;index:idx_message_task"`
-	Kind           string `gorm:"size:16;not null"`
+	Kind           string `gorm:"size:128;not null"`
 	ActorKey       string `gorm:"size:128;not null"`
 	Content        []byte `gorm:"type:json;not null"`
 	CreatedAt      time.Time

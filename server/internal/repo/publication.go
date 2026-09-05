@@ -57,7 +57,7 @@ func (store *Store) Speak(ctx context.Context, convID string, request loopd.Spea
 		result = model.Message{ID: uuid.V7(), ConversationID: convID,
 			Kind: string(request.Actor.Kind), ActorKey: request.Actor.Key, TargetKind: string(request.Target.Kind), TargetKey: request.Target.Key,
 			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: content,
-			DispatchPending: !request.Stream && request.Target.Kind != loopd.RoleUser}
+			DispatchPending: !request.Stream && request.Target.Kind != loopd.ActorKindUser}
 		return mapError(tx.Create(&result).Error)
 	})
 	return

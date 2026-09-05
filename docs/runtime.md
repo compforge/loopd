@@ -33,6 +33,11 @@ Operator 不导入 server 私有 model/repo，不直接写聊天数据库或 Red
 CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Operator 进程，
 server 不执行 Adapter。
 
+ActorKind 的内置常量为 ActorKindUser、ActorKindOperator、ActorKindHarness。Operator 可声明
+`operator/<operator-key>/<role>` 自定义 kind（最长 128 字节），如 LongHorizon Manager 以 Run UID
+作为 key。自定义角色能 Speak、Poll、Commit 和发起 Human 交互，拥有独立定向信号和消费位置；
+身份不会自动注册为发送框里的服务。Actor 命名不是鉴权，API 仍采用可信部署边界。
+
 ## Verb 与 Effect
 
 Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自动意味着幂等或持久恢复；
@@ -46,7 +51,7 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 | Conv | Speak | write：一次说完，或开启流式消息并返回句柄 |
 | Conv | Workspace | write：懒创建或复用该 Actor 的内部会话 |
 | Human | Ask / Confirm | write：创建或复用独立问题 Message |
-| Human handle | Get / Wait | read：观察问题的权威结果 |
+| Human / Human handle | Get / Wait | read：观察问题的权威结果 |
 | Harness | Prompt | write：发起或复用有身份的执行，返回 Call |
 | Harness Call | Value / Stream / Wait | read：观察已有执行 |
 | Message handle | Emit / End | write：增量更新／结束这条消息，不管理页面连接 |
@@ -131,6 +136,9 @@ Harness.Prompt 返回 Call handle。Operator 提供 prompt、tools、目标、�
 同一 runtime 内同身份同参数复用 Call，变化冲突。生产 Adapter 必须把相同身份映射到相同持久
 执行，并在重启后重新观察；agentd 可以承担持久执行，内置 agentgo 只是进程内 demo。
 
+Prompt.Actor 可指定合法非 user 作者，默认仍为 Harness/Call ID；Prompt.Timeout 交给 Adapter
+落实期限。Actor、Timeout 和 ConversationID 等参数参与同一 runtime 的幂等冲突检查。
+
 Call.Value 读取状态，Stream(ctx) 观察本地 AgentUE 增量（不需要页面游标），Wait 等待终态。耗时长不代表没有进展。Wait 的 context
 取消只结束等待；runtime 关闭会结束进程内执行，外部持久执行仍由 Harness 拥有。
 
@@ -212,3 +220,9 @@ Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Read
 [Router](../operators/router/internal/router/router.go) 是能力入口。
 Go 测试覆盖消费重读、交付和交互，Web 测试覆盖消息投影与卡片展示。
 页面交互与交付协议见 [UE](../server/docs/ue.md)。
+
+## 领域 Operator 示例
+
+[LongHorizon](../operators/longhorizon/README.md) 展示 Conv intake、三个业务 Reconciler、轮次边界
+接收补充输入、报告检查点和 Operator 自己的 Run TTL。具体策略由其 [领域设计](../operators/longhorizon/docs/design.md)
+拥有，不成为 runtime 对所有 Operator 的约束。

@@ -45,7 +45,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(created.Body(), &conversation); err != nil {
 		t.Fatal(err)
 	}
-	if conversation.ActorKind != loopd.RoleUser || conversation.ActorKey == "" || conversation.ParentID != "" {
+	if conversation.ActorKind != loopd.ActorKindUser || conversation.ActorKey == "" || conversation.ParentID != "" {
 		t.Fatalf("user conversation = %+v", conversation)
 	}
 	listed := ut.PerformRequest(engine, "GET", "/v1/conversations", nil).Result()
@@ -95,10 +95,10 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.ParentID != conversation.ID || child.ActorKind != loopd.RoleOperator || child.ActorKey != "intent" {
+	if child.ParentID != conversation.ID || child.ActorKind != loopd.ActorKindOperator || child.ActorKey != "intent" {
 		t.Fatalf("work conversation=%+v", child)
 	}
-	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.RoleHarness, "call-1",
+	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.ActorKindHarness, "call-1",
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"detail output"}]}`))
 	if err != nil {
 		t.Fatal(err)

@@ -25,12 +25,12 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := NewChatService(store, nopChatRunner{}, nil, nil)
-	input, err := chat.Create(ctx, conversation.ID, "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("question"))
+	input, err := chat.Create(ctx, conversation.ID, "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !uuidV7Pattern.MatchString(input.ID) || !uuidV7Pattern.MatchString(input.TaskID) ||
-		input.Kind != loopd.RoleUser || input.Key != "alice" || input.TargetKind != loopd.RoleOperator || input.TargetKey != "router" {
+		input.Kind != loopd.ActorKindUser || input.Key != "alice" || input.TargetKind != loopd.ActorKindOperator || input.TargetKey != "router" {
 		t.Fatalf("input = %+v", input)
 	}
 	history, err := store.ListMessages(ctx, conversation.ID, "", 100)
@@ -51,7 +51,7 @@ func TestChatAcceptsInputWithoutPageDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	chat := NewChatService(store, nil, nil, nil)
-	_, err = chat.Create(ctx, conversation.ID, "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("question"))
+	_, err = chat.Create(ctx, conversation.ID, "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err != nil {
 		t.Fatalf("Create = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestChatAcceptsInputWithoutPageDelivery(t *testing.T) {
 func TestChatReportsDatabaseFailure(t *testing.T) {
 	runner := &recordingChatRunner{}
 	chat := NewChatService(failingCommitRepository{}, runner, nil, nil)
-	_, err := chat.Create(context.Background(), "conv", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("question"))
+	_, err := chat.Create(context.Background(), "conv", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err == nil {
 		t.Fatalf("commit error: %+v %v", runner, err)
 	}
@@ -82,45 +82,45 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer, err := chat.Create(ctx, root.ID, "user-1", loopd.ActorRef{
-		Kind: loopd.RoleOperator,
+		Kind: loopd.ActorKindOperator,
 		Key:  "operator-1",
 	}, textContent("question"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator-1"})
+	detail, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "operator-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.ParentID != root.ID || detail.ActorKind != loopd.RoleOperator || detail.ActorKey != "operator-1" {
+	if detail.ParentID != root.ID || detail.ActorKind != loopd.ActorKindOperator || detail.ActorKey != "operator-1" {
 		t.Fatalf("work conversation ownership = %+v", detail)
 	}
-	if root.ActorKind != loopd.RoleUser || root.ActorKey != "user-1" || root.ParentID != "" {
+	if root.ActorKind != loopd.ActorKindUser || root.ActorKey != "user-1" || root.ParentID != "" {
 		t.Fatalf("user conversation ownership = %+v", root)
 	}
-	if again, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator-1"}); err != nil || again.ID != detail.ID {
+	if again, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "operator-1"}); err != nil || again.ID != detail.ID {
 		t.Fatalf("workspace not reused: %+v %v", again, err)
 	}
 	_, err = messages.CreateMessage(
-		ctx, detail.ID, answer.TaskID, loopd.RoleOperator, "operator-1", textContent("working"),
+		ctx, detail.ID, answer.TaskID, loopd.ActorKindOperator, "operator-1", textContent("working"),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := messages.CreateMessage(ctx, detail.ID, "other-task", loopd.RoleHarness, "call", textContent("another delivery")); err != nil {
+	if _, err := messages.CreateMessage(ctx, detail.ID, "other-task", loopd.ActorKindHarness, "call", textContent("another delivery")); err != nil {
 		t.Fatalf("cross-task message error = %v", err)
 	}
-	if _, err := chat.Create(ctx, detail.ID, "user-1", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("nested chat")); !errors.Is(err, repo.ErrConflict) {
+	if _, err := chat.Create(ctx, detail.ID, "user-1", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, textContent("nested chat")); !errors.Is(err, repo.ErrConflict) {
 		t.Fatalf("nested chat error = %v", err)
 	}
 	// Switching the target of a later question must not transfer the user's
 	// conversation to that target or reuse a previous Task's work conversation.
-	other, err := chat.Create(ctx, root.ID, "user-1", loopd.ActorRef{Kind: loopd.RoleHarness, Key: "direct"}, textContent("next"))
+	other, err := chat.Create(ctx, root.ID, "user-1", loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: "direct"}, textContent("next"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	otherDetail, err := conversations.ActorConversation(ctx, root.ID, loopd.ActorRef{Kind: other.TargetKind, Key: other.TargetKey})
-	if err != nil || otherDetail.ActorKind != loopd.RoleHarness || otherDetail.ActorKey != "direct" || otherDetail.ID == detail.ID {
+	if err != nil || otherDetail.ActorKind != loopd.ActorKindHarness || otherDetail.ActorKey != "direct" || otherDetail.ID == detail.ID {
 		t.Fatalf("other work conversation = %+v, error = %v", otherDetail, err)
 	}
 	unchanged, err := conversations.GetConversation(ctx, root.ID)

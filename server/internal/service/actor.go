@@ -50,7 +50,7 @@ func (service *ActorService) RegisterOperator(
 	if err != nil {
 		return loopd.Actor{}, err
 	}
-	service.logRenewal(ctx, loopd.RoleOperator, registered.OperatorKey, expiresAt)
+	service.logRenewal(ctx, loopd.ActorKindOperator, registered.OperatorKey, expiresAt)
 	return operatorFromModel(registered), nil
 }
 
@@ -72,7 +72,7 @@ func (service *ActorService) RegisterHarness(
 	if err != nil {
 		return loopd.Actor{}, err
 	}
-	service.logRenewal(ctx, loopd.RoleHarness, registered.HarnessKey, expiresAt)
+	service.logRenewal(ctx, loopd.ActorKindHarness, registered.HarnessKey, expiresAt)
 	return harnessFromModel(registered), nil
 }
 
@@ -96,7 +96,7 @@ func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
 	return actors, nil
 }
 
-func (service *ActorService) logRenewal(ctx context.Context, kind loopd.Role, key string, expiresAt time.Time) {
+func (service *ActorService) logRenewal(ctx context.Context, kind loopd.ActorKind, key string, expiresAt time.Time) {
 	service.logger.DebugContext(ctx, "registry lease renewed", "kind", kind, "key", key, "expires_at", expiresAt)
 }
 
@@ -113,7 +113,7 @@ func registration(key, displayName, description string, lease time.Duration) (st
 
 func operatorFromModel(value model.Operator) loopd.Actor {
 	return loopd.Actor{
-		ActorRef:    loopd.ActorRef{Kind: loopd.RoleOperator, Key: value.OperatorKey},
+		ActorRef:    loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: value.OperatorKey},
 		DisplayName: value.DisplayName,
 		Description: value.Description,
 	}
@@ -121,7 +121,7 @@ func operatorFromModel(value model.Operator) loopd.Actor {
 
 func harnessFromModel(value model.Harness) loopd.Actor {
 	return loopd.Actor{
-		ActorRef:    loopd.ActorRef{Kind: loopd.RoleHarness, Key: value.HarnessKey},
+		ActorRef:    loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: value.HarnessKey},
 		DisplayName: value.DisplayName,
 		Description: value.Description,
 	}

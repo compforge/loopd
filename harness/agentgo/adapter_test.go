@@ -2,7 +2,9 @@ package agentgo
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	agent "github.com/compforge/agentgo"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
@@ -69,5 +71,33 @@ func (model stubModel) message() agent.Message {
 	return agent.Message{
 		Role: agent.RoleAssistant, Content: []agent.ContentBlock{agent.TextBlock(model.reply)},
 		StopReason: agent.StopReasonStop,
+	}
+}
+
+type blockedModel struct{ stubModel }
+
+func (blockedModel) GenerateStream(ctx context.Context, _ []agent.Message, _ []agent.ToolSpec, _ ...agent.CallOption) (<-chan agent.StreamEvent, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func TestAdapterEnforcesExecutionTimeout(t *testing.T) {
+	adapter, err := New(func(ctx context.Context, _ harness.Request) (*agent.Agent, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("execution has no deadline")
+		}
+		return agent.NewAgent(agent.WithModel(blockedModel{})), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := adapter.Prompt(context.Background(), harness.Request{CallID: "timeout", IdempotencyKey: "task/timeout", Prompt: "wait", Timeout: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = call.Wait(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		t.Fatalf("Adapter did not enforce its own timeout: %v, wait=%v", err, ctx.Err())
 	}
 }

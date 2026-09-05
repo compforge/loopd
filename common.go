@@ -2,36 +2,40 @@
 // Operator runtimes, and Harness adapters.
 package loopd
 
-import "time"
-
-type Role string
-
-const (
-	RoleUser     Role = "user"
-	RoleHarness  Role = "harness"
-	RoleOperator Role = "operator"
+import (
+	"regexp"
+	"strings"
+	"time"
 )
 
-func (role Role) Valid() bool {
+type ActorKind string
+
+const (
+	ActorKindUser     ActorKind = "user"
+	ActorKindHarness  ActorKind = "harness"
+	ActorKindOperator ActorKind = "operator"
+)
+
+func (role ActorKind) Valid() bool {
 	switch role {
-	case RoleUser, RoleHarness, RoleOperator:
+	case ActorKindUser, ActorKindHarness, ActorKindOperator:
 		return true
 	default:
-		return false
+		return len(role) <= 128 && customActorKind.MatchString(string(role))
 	}
 }
 
 type ActorRef struct {
-	Kind Role   `json:"kind"`
-	Key  string `json:"key"`
+	Kind ActorKind `json:"kind"`
+	Key  string    `json:"key"`
 }
 
 func (ref ActorRef) Valid() bool {
-	return ref.Kind.Valid() && ref.Key != ""
+	return ref.Kind.Valid() && strings.TrimSpace(ref.Key) == ref.Key && ref.Key != "" && len(ref.Key) <= 128
 }
 
 func (ref ActorRef) ValidTarget() bool {
-	return (ref.Kind == RoleHarness || ref.Kind == RoleOperator) && ref.Key != ""
+	return ref.Valid() && ref.Kind != ActorKindUser
 }
 
 type Actor struct {
@@ -43,4 +47,11 @@ type Actor struct {
 type Timestamped struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Custom actor kinds identify Operator-owned participants; they do not register a service.
+var customActorKind = regexp.MustCompile(`^operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`)
+
+func (kind ActorKind) IsOperator() bool {
+	return kind == ActorKindOperator || (kind.Valid() && strings.HasPrefix(string(kind), "operator/"))
 }

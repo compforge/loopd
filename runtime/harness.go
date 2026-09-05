@@ -41,6 +41,8 @@ type Prompt struct {
 	Target         string
 	Text           string
 	Tools          []loopd.Tool
+	Actor          *loopd.ActorRef
+	Timeout        time.Duration
 }
 
 type HarnessRegistration struct {
@@ -82,6 +84,16 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	if (prompt.ConversationID == "" || prompt.IdempotencyKey == "") || prompt.EffectKey == "" || prompt.Target == "" || prompt.Text == "" {
 		return nil, errors.New("conversation and idempotency key, effect key, Harness target, and prompt are required")
 	}
+	if prompt.Timeout < 0 {
+		return nil, errors.New("timeout cannot be negative")
+	}
+	if prompt.Actor != nil {
+		if !prompt.Actor.ValidTarget() {
+			return nil, errors.New("invalid output actor")
+		}
+		author := *prompt.Actor
+		prompt.Actor = &author
+	}
 	adapter := service.state.adapters[prompt.Target]
 	if adapter == nil {
 		return nil, fmt.Errorf("harness target %q is not configured", prompt.Target)
@@ -104,7 +116,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	request := provider.Request{
 		CallID:         callID,
 		IdempotencyKey: effectID,
-		Prompt:         prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
+		Timeout:        prompt.Timeout, Prompt: prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
 	}
 	providerCall, err := adapter.Prompt(service.state.ctx, request)
 	if err != nil {
@@ -140,11 +152,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 }
 
 func promptFingerprint(prompt Prompt) ([32]byte, error) {
-	encoded, err := json.Marshal(struct {
-		Target string       `json:"target"`
-		Text   string       `json:"text"`
-		Tools  []loopd.Tool `json:"tools,omitempty"`
-	}{Target: prompt.Target, Text: prompt.Text, Tools: prompt.Tools})
+	encoded, err := json.Marshal(prompt)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("encode Harness prompt: %w", err)
 	}
@@ -256,8 +264,12 @@ func (call *Call) follow(
 			var message *Message
 			var err error
 			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
+			author := loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: call.value.ID}
+			if prompt.Actor != nil {
+				author = *prompt.Actor
+			}
 			message, err = conv.Speak(ctx, prompt.ConversationID, loopd.SpeakRequest{
-				Stream: true, Key: prompt.IdempotencyKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}, Content: content,
+				Stream: true, Key: prompt.IdempotencyKey, Actor: author, Content: content,
 			})
 			if err != nil {
 				publishErr = err

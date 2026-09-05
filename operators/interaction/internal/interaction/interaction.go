@@ -20,7 +20,7 @@ import (
 
 const OperatorKey = "interaction"
 
-var actor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey}
+var actor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: OperatorKey}
 
 type Reconciler struct{ loop rt.Loop }
 
@@ -49,7 +49,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind == loopd.RoleUser && message.Purpose != "human_reply" {
+	if message.Kind == loopd.ActorKindUser && message.Purpose != "human_reply" {
 		pending, err := d.interact(ctx, request.Name, message)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -87,7 +87,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		}
 	}
 	query := strings.Join(parts, "\n")
-	target := loopd.ActorRef{Kind: loopd.RoleUser, Key: message.Key}
+	target := loopd.ActorRef{Kind: loopd.ActorKindUser, Key: message.Key}
 	askPrompt := fmt.Sprintf("关于你的问题：%s\n你希望以哪种方式处理？", query)
 	// Inputs stay identical across retries. The server owns the original
 	// deadline and immutable result, so restarting never resets the 10s wait.

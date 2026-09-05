@@ -18,7 +18,7 @@ func TestHumanMaintenanceRecoversNotifications(t *testing.T) {
 	}
 	runner := &recordingChatRunner{}
 	chat := NewChatService(store, runner, nil, nil)
-	message, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
+	message, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

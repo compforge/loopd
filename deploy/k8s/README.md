@@ -47,3 +47,7 @@ kubectl -n loopd port-forward service/loopd-loopd-web 8080:80
 ```
 
 然后打开 `http://127.0.0.1:8080`。
+
+可选的 [LongHorizon Operator](../../operators/longhorizon/README.md) 通过 `longhorizon.enabled=true`
+启用。其 Role 只读 Conv，独立管理 Run/Execution/Audit；`longhorizon.runTimeout` 和 `retentionTTL`
+分别控制业务期限和终态资源保留时间，均默认 24h，不影响 server 的 Conv 或页面交付生命周期。

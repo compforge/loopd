@@ -13,7 +13,7 @@ import (
 )
 
 func TestConversationWatchOnlyWakesAddressedActor(t *testing.T) {
-	predicate := ConversationPredicate(loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"})
+	predicate := ConversationPredicate(loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"})
 	original := &conversationv1.Conversation{
 		Spec: conversationv1.ConversationSpec{Participants: []conversationv1.ConversationParticipant{
 			{Kind: "operator", Key: "a", EndOffset: "001"},
@@ -84,7 +84,7 @@ func TestConversationReadAndPollUseDifferentVerbs(t *testing.T) {
 		t.Fatalf("Read = %+v, %v", messages, err)
 	}
 	result, err := runtime.Loop.Conv.Poll(context.Background(), "conv", loopd.PollRequest{
-		Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}, Limit: 10,
+		Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}, Limit: 10,
 	})
 	if err != nil || result.Position != "003" {
 		t.Fatalf("Poll = %+v, %v", result, err)

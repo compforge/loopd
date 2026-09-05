@@ -65,3 +65,6 @@ AgentGo demo runs in process; durable execution across Operator restarts require
 both persistent Operator progress and a persistent Harness adapter. See the [runtime design](docs/runtime.md) for the
 calling and recovery contract, and [Kubernetes deployment](deploy/k8s/README.md)
 for the storage and Quick Start limits.
+
+长期 CLI 工作的使用示例见 [LongHorizon Operator](operators/longhorizon/README.md)：三个角色通过
+持久消息协作，以 Run、Execution、Audit 保存领域控制状态，并在轮次边界接收补充输入。

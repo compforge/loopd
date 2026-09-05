@@ -145,7 +145,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 			*position = inbox.Position
 		}
 		for _, message := range inbox.Messages {
-			if message.Kind != loopd.RoleUser {
+			if message.Kind != loopd.ActorKindUser {
 				continue
 			}
 			text, err := modelText(message.Content)
