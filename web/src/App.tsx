@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   applyPatch,
   parseUIModel,
@@ -17,6 +17,7 @@ import {
   type Conversation,
   type Message,
 } from "./api";
+import { traceCallID, traceColor } from "./trace";
 
 const activeTasksKey = "loopd.active-tasks";
 const selectedActorKey = "loopd.selected-actor";
@@ -473,16 +474,21 @@ function DetailView({ model, taskID, status }: { model: UIModel; taskID: string;
 function BlockCard({ block, index }: { block: BaseBlock; index: number }) {
   const isTool = block.type === "tool";
   const content = typeof block.content === "string" ? block.content : undefined;
+  const callID = traceCallID(block);
+  const effectKey = typeof block.effect_key === "string" ? block.effect_key : undefined;
+  const style = callID ? { "--harness-color": traceColor(callID) } as CSSProperties : undefined;
   return (
-    <div className="detail-card">
+    <div className={`detail-card${callID ? " harness-trace" : ""}`} style={style}>
       <div className="timeline-node">{index + 1}</div>
       <div className="detail-card-head">
         <span className={`block-kind ${isTool ? "tool" : "harness"}`}>{isTool ? "TOOL" : "HARNESS"}</span>
         {typeof block.status === "string" && <span className="block-status">{block.status}</span>}
       </div>
       <div className="detail-card-title">
-        {isTool && typeof block.name === "string" ? block.name : blockLabel(block)}
+        {effectKey || (isTool && typeof block.name === "string" ? block.name : blockLabel(block))}
       </div>
+      {effectKey && isTool && typeof block.name === "string" && <div className="detail-card-subtitle">{block.name}</div>}
+      {effectKey && callID && <div className="detail-card-subtitle" title={callID}>Call {shortID(callID)}</div>}
       {content && <p>{content}</p>}
     </div>
   );

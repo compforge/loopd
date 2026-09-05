@@ -16,8 +16,9 @@ button { color: inherit; }
 .shell {
   display: grid;
   grid-template-columns: 264px minmax(460px, 1fr) 348px;
+  /* Keep long histories inside each panel instead of growing the viewport row. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
-  min-height: 680px;
   overflow: hidden;
   background: #f5f4f0;
 }
@@ -92,7 +93,7 @@ button { color: inherit; }
 .conversation-title { overflow: hidden; font-size: 13px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-time { color: #898a84; font-size: 10px; }
 
-.chat-panel { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; background: #faf9f6; }
+.chat-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: #faf9f6; }
 .chat-header {
   display: flex;
   align-items: center;
@@ -206,7 +207,11 @@ button { color: inherit; }
 .block-kind { color: #4e6d59; font-size: 8px; font-weight: 850; letter-spacing: .12em; }
 .block-kind.tool { color: #786342; }
 .block-status { color: #8d8f87; font-size: 9px; }
-.detail-card-title { margin-top: 7px; font-size: 12px; font-weight: 720; }
+.detail-card-title { margin-top: 7px; font-size: 12px; font-weight: 720; overflow-wrap: anywhere; }
+.detail-card-subtitle { margin-top: 5px; color: #74776f; font-size: 10px; overflow-wrap: anywhere; }
+.harness-trace { border-left: 3px solid var(--harness-color); }
+.harness-trace .timeline-node { border-color: var(--harness-color); color: var(--harness-color); }
+.harness-trace .block-kind { color: var(--harness-color); }
 .detail-card p { max-height: 180px; margin: 8px 0 0; overflow-y: auto; color: #656861; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
 .muted-state { padding: 18px 10px; color: #999b94; font-size: 11px; text-align: center; }
 
