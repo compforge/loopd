@@ -1,7 +1,7 @@
 # Loop Runtime
 
-loop-runtime 是嵌入 Operator 进程的 Go 协作开发库。它在 controller-runtime 的控制循环之上，
-提供接入 loopd、读取协作上下文、调用 Harness 和发布结果的公共能力，使业务可以用普通
+loop-runtime 是嵌入 Operator 进程的 Go 协作 toolkit。它在 controller-runtime 的控制循环之上，
+提供接入 loopd、读取协作上下文、调用 Harness 和发布结果的类型化 Verb，使业务可以用普通
 Reconcile 代码实现自己的编排。本文是这些开发契约的唯一设计入口；跨组件事实归属见
 [Kernel](kernel.md)。
 
@@ -13,6 +13,8 @@ Operator 提供 Resource 和 Reconciler 中的业务逻辑。loop-runtime 沿用
 
 两者在同一 Operator 内组合。controller-runtime 负责资源控制循环，loop-runtime 补充 Human、
 Conversation 与 Harness 的协作能力；已有的 Manager、调度队列、重试和资源 Client 直接复用。
+Verb 是 Reconcile 读取协作事实、推进实际工作的能力入口，不替代 Reconcile 的业务判断。
+“Loop is a CRD” 的落地既需要状态收敛结构，也需要这些可执行的协作能力，而不只是资源 CRUD。
 
 | 关注点 | controller-runtime | loop-runtime | Operator |
 |---|---|---|---|
@@ -35,6 +37,24 @@ Operator process
 Operator 通过公共契约接入，不导入 server 的 repo/model，也不直接写聊天数据库或 Redis。
 Harness Adapter 在 Operator 进程的 runtime 一侧装配，server 不执行 Adapter。业务自有数据库、
 API 和领域 CRD 可以通过普通 Client 访问，无需先进入 loopd Core。
+
+### Verb 背后的公共机制
+
+Verb 是 Operator 面向协作基础设施的入口，底层机制由 runtime 与 server 配合承担，而不是
+要求每个 Operator 自己实现一套数据访问、流式交付和交付重试逻辑：
+
+- 数据读取：按 Task 或 Conversation 获取消息与上下文，屏蔽聊天存储和服务端组装细节。
+- 输出交付：runtime 按 Message 发布流式输出，server 协调事件传输与消息固化，再通过
+  AgentUE 交付前端；Operator 不需要感知页面连接，也不直接操作聊天数据库或 Redis。
+- 扩展接入：业务通过 Operator 扩展编排策略，Harness 通过 Adapter 接入，差异不进入聊天核心。
+- 交付可靠性：公共层提供消息续接、交付收尾重试及各 Verb 约定的幂等能力。流式续接
+  不等于执行恢复，也不意味着每个增量都已固化到数据库。
+
+执行恢复不由 runtime 的内存状态保证。编排层由 Operator 将领域进度与稳定动作身份持久化到
+CRD，重启后通过 Reconcile 重新读取并推进；Harness 层由 Adapter 及其执行端负责，loopd 只按
+契约接入，不实现 Harness 内部恢复。agentd 承担持久执行，agentgo 只是进程内模拟。
+
+Operator 需要理解这些调用契约和恢复边界，但无需关注其存储、传输与前端交付的实现细节。
 
 ## 接入与运行流程
 
@@ -94,20 +114,21 @@ Message 引用。内存中的 TaskContext 不承担领域 checkpoint，也不能
 二者都是当前持久消息的读取，不是 AgentLedger 完整执行轨迹，也不隐式等待消息完成。
 按 ID 翻页不负责感知已读消息后续修订；观察实时变化使用 Chat 流，读取 Human 权威状态使用 handle.Get。
 
-Reconcile 用 Task ID 读取事实后发起 Effect，无需额外 Task 表。当前问题仍按显式 input 身份
+Reconcile 用 Task ID 读取事实后调用 Verb 推进工作，无需额外 Task 表。当前问题仍按显式 input 身份
 定位，不能把后来的 user 回复当作原始问题；固定输入上下文用 Task.Get 的历史截止点，后续交互
 使用 Task.Messages 或 Human handle 读取最新状态。
 
-## Effect：Read 与 Write
+## Verb 与 Effect
 
-runtime 提供的协作操作统一称为 Effect，按调用者意图分为两类：
+runtime 提供给 Operator 的协作操作统一称为 **Verb**。Verb 表达“可以做什么”，其 **Effect**
+按调用者意图分为 `read` 和 `write`，表达“读取已有事实，还是发起工作或改变协作状态”：
 
-- **Read Effect**：读取、等待或订阅已有事实，不发起新的业务工作。订阅建立本地观察，
+- **Effect = read**：读取、等待或订阅已有事实，不发起新的业务工作。订阅建立本地观察，
   服务端刷新到期状态或重建交付投影，不改变它的读取意图。
-- **Write Effect**：发起执行，或创建、发布、收口和维护协作事实。每项操作分别声明身份、
+- **Effect = write**：发起执行，或创建、发布、收口和维护协作事实。每个 Verb 分别声明身份、
   冲突和重试规则；write 不意味着统一幂等，也不意味着自动持久恢复。
 
-### Read Effect
+### Effect = read 的 Verb
 
 | 能力 | 操作与读取边界 |
 |---|---|
@@ -116,9 +137,9 @@ runtime 提供的协作操作统一称为 Effect，按调用者意图分为两�
 | Harness Call | `Value/Stream/Wait` 观察已有执行；本地观察不是持久订阅 |
 | Human handle | `Get/Wait` 读取或等待权威问题状态；停止等待不等于忽略问题 |
 
-### Write Effect
+### Effect = write 的 Verb
 
-| 操作 | 身份与重试边界 |
+| Verb | 身份与重试边界 |
 |---|---|
 | `Harness.Prompt` | task ID + EffectKey；同参数复用，变化冲突，跨重启去重由持久 Adapter 保证 |
 | `Human.Ask/Confirm` | task ID + EffectKey；复用原问题、deadline 和结果，变化冲突 |
@@ -130,7 +151,10 @@ runtime 提供的协作操作统一称为 Effect，按调用者意图分为两�
 | 不带 task_id 的 `Chat.Send` | 每次提交创建新工作；取得 task_id 后可续接观察 |
 | `Operator.Register/Harness.Register` | 按参与者类型与稳定 key 更新注册，后台续租随 runtime 生命周期运行 |
 
-Read/Write 是公共能力的分类，不增加统一 Effect CRD 或执行引擎。Operator 直接访问业务 API 时，
+Effect 的 read/write 分类不增加统一 Verb/Effect CRD 或执行引擎，也不要求在 API 中增加一层
+`Verbs` 容器；`Loop.Task`、`Loop.Chat`、`Loop.Human` 等仍按协作对象组织 Verb。
+Verb 名称不是调用身份：例如 `Harness.Prompt` 是 Verb，`plan`、`work/0` 是任务内的步骤 key；
+`EffectKey` 继续用于需要稳定调用身份的操作。Operator 直接访问业务 API 时，
 幂等、结果核对与补偿仍由相应 Connector 和事实 owner 承担。
 
 ## Harness Call 与 Effect identity
@@ -161,7 +185,7 @@ controller-runtime 根据 Reconcile 返回的 error 或 Result 处理调度。Op
 调整计划、换一个动作还是结束问答；runtime 提供调用结果，不替业务作完成决定。进程重启后从
 Resource 与事实 owner 重新构造工作，不恢复 Go 调用栈、goroutine 或本地 handle。
 
-## Human Effect：Ask 与 Confirm
+## Human Verb：Ask 与 Confirm
 
 `Loop.Human` 是面向人的能力分组，与
 `Loop.Harness` 并列。Operator 提问、用户答复直接记录为 Message；runtime 以问题 Message
@@ -169,11 +193,11 @@ Resource 与事实 owner 重新构造工作，不恢复 Go 调用栈、goroutine
 
 ### 输入、超时与结果
 
-两项 Write Effect 都必须提供 TaskID、EffectKey、Title、Prompt 和有限正 Timeout（Go time.Duration，JSON 使用纳秒）。用户不理会问题
+两项 Verb 的 Effect 都是 write，必须提供 TaskID、EffectKey、Title、Prompt 和有限正 Timeout（Go time.Duration，JSON 使用纳秒）。用户不理会问题
 是正常情况，因此 Timeout 必填，不能省略、设为零或无限等待。它限定等待人的总时长，独立于
 HTTP timeout 与本地调用 context；server 首次持久化问题时确定 deadline，重试与重启不重置它。
 
-| Action | 特有输入 | success 的业务值 |
+| Verb | 特有输入 | success 的业务值 |
 |---|---|---|
 | `Human.Ask` | Choices：稳定 value、label、可选 description；AllowOther 决定是否接受自由文本 | 选中的稳定 value，或非空自由文本 |
 | `Human.Confirm` | 可选 ConfirmLabel、DeclineLabel，只改变展示文案 | `accepted` 或 `declined` |
@@ -204,7 +228,7 @@ Confirm 固定提供接受和拒绝两个决议，可用 ConfirmLabel/DeclineLab
 是 accepted/declined。需要任意多个业务选项时使用 Ask。两类交互都另外提供“忽略/取消”，返回
 独立的 dismissed；它不是一个 choices value，也不等同于 Confirm 的 declined。
 
-Write Effect 创建或复用问题 Message，返回以其 ID 标识的 typed handle；`Get(ctx)` 读取权威请求
+Ask/Confirm 创建或复用问题 Message，返回以其 ID 标识的 typed handle；`Get(ctx)` 读取权威请求
 状态，`Wait(ctx)` 等待终态。请求由 pending 进入且只能进入一个不可变终态：
 
 | 终态 | 含义与 Operator 处理 |
@@ -274,7 +298,7 @@ Web 在主会话按 block type 展示问题卡、输入或选项以及忽略操�
 
 ### 幂等、发布与唤醒
 
-同一 Task 的 Human Write Effect 共享 EffectKey 命名空间。server 原子创建或读取问题 Message，比较
+同一 Task 的 Human Ask/Confirm Verb 共享 EffectKey 命名空间。server 原子创建或读取问题 Message，比较
 动作类型、问题、选项和 Timeout 等不可变输入；同 key 同参数返回原问题及结果，变化则冲突。
 已忽略或超时的问题不被重开；Operator 决定再次提问时使用新的步骤身份。
 
@@ -379,6 +403,6 @@ Router 直接处理 Task：读取 Query/History，按 `plan`、`work/<index>`、
 [Chat](../runtime/chat.go) 、[Human](../runtime/human.go) 与 [Registry](../runtime/registry.go)；执行扩展点见
 [Adapter](../harness/harness.go)，接入示例见 [Router](../operators/router/internal/router/router.go)。
 现有回归入口是 `runtime/*_test.go`、`harness/agentgo/adapter_test.go` 和 Router 测试，
-服务端交付规则由 server 测试维护；Human Effect 的验收场景见上节。
+服务端交付规则由 server 测试维护；Human Verb 的验收场景见上节。
 controller-runtime 的参照依据是其 [包总览](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg)
 中的 Manager、Controller、Reconciler 与 Watch 分工。

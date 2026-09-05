@@ -80,8 +80,8 @@ func (chat Chat) Conversation(ctx context.Context, conversationID string) (loopd
 	return result, err
 }
 
-// Send is a write Effect creating work without TaskID, or a read Effect
-// observing existing work with TaskID. The HTTP connection only observes execution; closing the
+// Send is a Verb with a write effect when creating work without TaskID, or a
+// read effect when observing existing work with TaskID. The HTTP connection only observes execution; closing the
 // stream does not cancel the Task or its Operator.
 func (chat Chat) Send(
 	ctx context.Context,
@@ -189,7 +189,7 @@ func (chat Chat) History(
 	return result.Data, err
 }
 
-// Emit is a write Effect publishing to the initial main answer. Other messages
+// Emit is a Verb (effect: write) publishing to the initial main answer. Other messages
 // use EmitMessage; each message owns its AgentUE sequence.
 func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (loopd.Event, error) {
 	chat.state.mu.Lock()
@@ -211,14 +211,14 @@ func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event)
 	return chat.EmitMessage(ctx, taskID, messageID, event)
 }
 
-// Output is a write Effect creating or reusing a message by stable Task/key.
+// Output is a Verb (effect: write) creating or reusing a message by stable Task/key.
 func (chat Chat) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
 	var message loopd.Message
 	err := chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/outputs", request, &message)
 	return message, err
 }
 
-// EmitMessage is a write Effect. Equal block IDs and sequence numbers in other
+// EmitMessage is a Verb (effect: write). Equal block IDs and sequence numbers in other
 // messages never collide. The server verifies the message belongs to this Task.
 func (chat Chat) EmitMessage(ctx context.Context, taskID, messageID string, event agentueui.Event) (loopd.Event, error) {
 	result, err := chat.emit(ctx, "message/"+messageID, "/v1/tasks/"+url.PathEscape(taskID)+"/messages/"+url.PathEscape(messageID)+"/events", event)
@@ -264,7 +264,7 @@ func (chat Chat) sequence(messageID string) *messageSequence {
 	return sequence
 }
 
-// Complete is a write Effect that persists all output Messages and
+// Complete is a Verb (effect: write) that persists all output Messages and
 // closes the task delivery. Repeating the same completion is safe.
 func (chat Chat) Complete(ctx context.Context, taskID string, failure *TaskFailure) error {
 	return chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/complete", struct {

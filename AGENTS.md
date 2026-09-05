@@ -20,7 +20,7 @@ loopd/
 ├── docs/                   # loopd 稳定内核与跨模块设计
 ├── harness/                # runtime 侧 Harness Adapter 契约；agentgo 为进程内 demo
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
-├── runtime/                # Operator 协作开发库；复用 controller-runtime，提供 Task、Chat、Human、Harness 与注册
+├── runtime/                # Operator 协作 toolkit；提供 Task、Chat、Human、Harness 与注册 Verb
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
 ├── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 └── *.go                    # 跨 server、runtime 和 harness 的公共协作模型

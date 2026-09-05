@@ -106,7 +106,7 @@
   <text x="345" y="551" font-size="16" font-weight="650" text-anchor="middle">Task</text>
   <text x="345" y="594" font-size="16" font-weight="650" text-anchor="middle">Chat</text>
   <text x="345" y="637" font-size="16" font-weight="650" text-anchor="middle">Harness</text>
-  <text x="345" y="680" font-size="16" font-weight="650" text-anchor="middle">Effects</text>
+  <text x="345" y="680" font-size="16" font-weight="650" text-anchor="middle">Verbs</text>
   <text x="345" y="759" font-size="14" fill="#5b628d" text-anchor="middle">稳定 API 与执行身份</text>
 
   <!-- Domain Operators own business state, decisions, and completion semantics. -->
@@ -127,7 +127,7 @@
   <rect x="585" y="758" width="440" height="39" rx="19" fill="#fff9e8" stroke="#c59a2c" stroke-width="1.4"/>
   <text x="805" y="784" font-size="14" font-weight="650" text-anchor="middle">一个 Agent 的无损、可恢复执行边界</text>
 
-  <!-- The embedded runtime turns Operator intent into stable collaboration and Harness effects. -->
+  <!-- The embedded toolkit exposes collaboration and Harness Verbs with read or write effects. -->
   <line class="flow" x1="442" y1="475" x2="474" y2="475"/>
   <line class="flow" x1="442" y1="732" x2="474" y2="732"/>
 

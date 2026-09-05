@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980" role="img" aria-labelledby="title desc">
   <title id="title">loopd Agent orchestration architecture</title>
-  <desc id="desc">Human uses loop-server conversations. A Task CRD wakes an Operator, which owns its domain Resource and reconciles through loop-runtime Effects. Harness adapters connect agentd and other Harnesses. AgentUE carries visible progress while AgentLedger stores complete execution facts.</desc>
+  <desc id="desc">Human uses loop-server conversations. A Task CRD wakes an Operator, which owns its domain Resource and reconciles through loop-runtime Verbs with read or write effects. Harness adapters connect agentd and other Harnesses. AgentUE carries visible progress while AgentLedger stores complete execution facts.</desc>
 
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -131,14 +131,14 @@
 
   <text x="868" y="398" font-size="15" fill="#4b5563" text-anchor="middle">业务定义 Resource、判断逻辑与完成条件；loopd 不内建固定 Workflow 或 Agent Team。</text>
 
-  <!-- Task and Effect are the two stable boundaries between domain Operators and loopd. -->
+  <!-- Task and Verb are the two stable boundaries between domain Operators and loopd. -->
   <line class="port-line" x1="600" y1="419" x2="600" y2="530"/>
   <rect class="port-pill" x="463" y="447" width="274" height="40" rx="20"/>
   <text class="port-label" x="600" y="473">Task CRD · route / wake</text>
 
   <line class="port-line" x1="1130" y1="419" x2="1130" y2="530"/>
   <rect class="port-pill" x="1012" y="447" width="236" height="40" rx="20"/>
-  <text class="port-label" x="1130" y="473">Effects · results</text>
+  <text class="port-label" x="1130" y="473">Verbs · results</text>
 
   <!-- loopd owns collaboration and shared orchestration mechanics, not domain semantics. -->
   <rect x="400" y="530" width="1000" height="305" rx="28" fill="#edf3fc" stroke="#111827" stroke-width="3" filter="url(#shadow)"/>
@@ -156,13 +156,13 @@
 
   <rect class="core-card" x="960" y="642" width="390" height="172" rx="18"/>
   <text x="1155" y="681" font-size="24" font-weight="720" text-anchor="middle">loop-runtime</text>
-  <text x="1155" y="708" font-size="15" fill="#4b5563" text-anchor="middle">Operator SDK &amp; recoverable Effects</text>
+  <text x="1155" y="708" font-size="15" fill="#4b5563" text-anchor="middle">Operator toolkit &amp; typed Verbs</text>
   <rect class="core-pill" x="990" y="732" width="160" height="46" rx="14"/>
   <text x="1070" y="753" font-size="13" font-weight="650" text-anchor="middle">observe Task</text>
   <text x="1070" y="770" font-size="13" font-weight="650" text-anchor="middle">read context</text>
   <rect class="core-pill" x="1165" y="732" width="155" height="46" rx="14"/>
   <text x="1242" y="753" font-size="13" font-weight="650" text-anchor="middle">Chat · Harness</text>
-  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">recoverable Effects</text>
+  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">read / write Verbs</text>
 
   <line class="port-line" x1="844" y1="728" x2="956" y2="728"/>
   <rect class="port-pill" x="848" y="681" width="104" height="34" rx="17"/>

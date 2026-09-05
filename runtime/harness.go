@@ -69,7 +69,7 @@ func (service Harness) Register(ctx context.Context, value HarnessRegistration) 
 	})
 }
 
-// Prompt is a write Effect starting or resuming one process-local Call. The effect identity avoids
+// Prompt is a Verb (effect: write) starting or resuming one process-local Call. The effect identity avoids
 // duplicate starts while this Runtime is alive. A production Adapter such as
 // agentd must additionally make IdempotencyKey durable across process restarts.
 func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error) {
@@ -158,14 +158,14 @@ type Call struct {
 	terminalErr error
 }
 
-// Value is a read Effect observing the locally known execution state.
+// Value is a Verb (effect: read) observing the locally known execution state.
 func (call *Call) Value() loopd.HarnessCall {
 	call.mu.Lock()
 	defer call.mu.Unlock()
 	return call.value
 }
 
-// Wait is a read Effect; cancelling the wait does not cancel execution.
+// Wait is a Verb (effect: read); cancelling the wait does not cancel execution.
 func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	select {
 	case <-ctx.Done():
@@ -177,7 +177,7 @@ func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	}
 }
 
-// Stream is a read Effect replaying locally observed deliveries after afterEventID and follows
+// Stream is a Verb (effect: read) replaying locally observed deliveries after afterEventID and follows
 // the Call until completion. Durable page replay uses Chat.Send and SSE
 // Last-Event-ID; this process-local view is a convenience for the Reconciler.
 func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd.Event, <-chan error) {
