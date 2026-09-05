@@ -88,11 +88,11 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	if err := <-streamErrors; err != nil {
 		t.Fatal(err)
 	}
-	if got, want := fmt.Sprint(observed), "[3-0 4-0]"; got != want {
+	if got, want := fmt.Sprint(observed), "[3-0 4-0 5-0]"; got != want {
 		t.Fatalf("event IDs = %s, want %s", got, want)
 	}
 	publishedMu.Lock()
-	if len(published) != 3 || published[0].Seq != 2 || published[1].Seq != 3 || published[2].Seq != 4 {
+	if len(published) != 4 || published[0].Seq != 2 || published[1].Seq != 3 || published[2].Seq != 4 || published[3].Seq != 5 {
 		t.Fatalf("published events = %#v", published)
 	}
 	publishedMu.Unlock()
@@ -103,6 +103,16 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	}
 	if again != call || adapter.starts != 1 {
 		t.Fatalf("reused Call = %t, Adapter starts = %d", again == call, adapter.starts)
+	}
+	for _, end := range []int{3, 4} {
+		snapshot, err := agentueui.ApplyAll(map[string]any{"blocks": []any{}}, published[1:end])
+		if err != nil {
+			t.Fatal(err)
+		}
+		block := snapshot["blocks"].([]any)[0].(map[string]any)
+		if block["call_id"] != result.ID || block["effect_key"] != "route" || block["content"] != "hello" {
+			t.Fatalf("streaming/final Harness block = %#v", block)
+		}
 	}
 	changed := prompt
 	changed.Text = "different"
@@ -117,10 +127,11 @@ type fakeHarnessAdapter struct {
 
 func (adapter *fakeHarnessAdapter) Prompt(_ context.Context, request harness.Request) (harness.Call, error) {
 	adapter.starts++
-	events := make(chan harness.Event, 2)
+	events := make(chan harness.Event, 3)
 	for _, event := range []agentueui.Event{
-		{Op: agentueui.OpSet, Block: map[string]any{"id": "answer", "type": "text", "content": "hel"}},
+		{Op: agentueui.OpAppend, Mask: "block.content", Block: map[string]any{"id": "answer", "type": "text", "content": "hel"}},
 		{Op: agentueui.OpAppend, Mask: "block.content", Block: map[string]any{"id": "answer", "content": "lo"}},
+		{Op: agentueui.OpSet, Block: map[string]any{"id": "answer", "type": "text", "content": "hello"}},
 	} {
 		data, err := event.Marshal()
 		if err != nil {

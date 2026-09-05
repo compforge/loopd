@@ -254,6 +254,12 @@ func (call *Call) follow(
 			continue
 		}
 		value.Seq = 0
+		if value.Block != nil {
+			// AgentUE retains extra block fields on creation/full replacement;
+			// masked deltas only update their field, so identity never appends.
+			value.Block["call_id"] = call.value.ID
+			value.Block["effect_key"] = call.value.EffectKey
+		}
 		published, err := chat.Emit(ctx, taskID, value)
 		if err != nil {
 			publishErr = err

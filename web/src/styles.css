@@ -207,7 +207,11 @@ button { color: inherit; }
 .block-kind { color: #4e6d59; font-size: 8px; font-weight: 850; letter-spacing: .12em; }
 .block-kind.tool { color: #786342; }
 .block-status { color: #8d8f87; font-size: 9px; }
-.detail-card-title { margin-top: 7px; font-size: 12px; font-weight: 720; }
+.detail-card-title { margin-top: 7px; font-size: 12px; font-weight: 720; overflow-wrap: anywhere; }
+.detail-card-subtitle { margin-top: 5px; color: #74776f; font-size: 10px; overflow-wrap: anywhere; }
+.harness-trace { border-left: 3px solid var(--harness-color); }
+.harness-trace .timeline-node { border-color: var(--harness-color); color: var(--harness-color); }
+.harness-trace .block-kind { color: var(--harness-color); }
 .detail-card p { max-height: 180px; margin: 8px 0 0; overflow-y: auto; color: #656861; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
 .muted-state { padding: 18px 10px; color: #999b94; font-size: 11px; text-align: center; }
 
