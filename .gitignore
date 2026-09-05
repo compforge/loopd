@@ -1,6 +1,11 @@
 /bin/
 /cover.out
 /.env
+/.local/
+/.worktree/
+/.worktrees/
+.vscode/
+.idea/
 /.DS_Store
 /loopd.db
 /loopd.db-shm
