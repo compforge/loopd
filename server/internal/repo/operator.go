@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/server/internal/model"
+	"gorm.io/gorm/clause"
 )
 
 func (store *Store) RegisterOperator(ctx context.Context, operator model.Operator) (model.Operator, error) {
@@ -12,7 +13,8 @@ func (store *Store) RegisterOperator(ctx context.Context, operator model.Operato
 	defer cancel()
 
 	var existing model.Operator
-	result := store.db.WithContext(ctx).Where("key = ?", operator.Key).Limit(1).Find(&existing)
+	// Let the dialect quote key: it is a reserved identifier in MySQL.
+	result := store.db.WithContext(ctx).Where(map[string]any{"key": operator.Key}).Limit(1).Find(&existing)
 	if result.Error != nil {
 		return model.Operator{}, mapError(result.Error)
 	}
@@ -38,7 +40,7 @@ func (store *Store) ListOperators(ctx context.Context, aliveAfter time.Time) ([]
 	var operators []model.Operator
 	if err := store.db.WithContext(ctx).
 		Where("expires_at > ?", aliveAfter).
-		Order("key ASC").
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).
 		Find(&operators).Error; err != nil {
 		return nil, mapError(err)
 	}

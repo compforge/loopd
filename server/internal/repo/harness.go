@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/server/internal/model"
+	"gorm.io/gorm/clause"
 )
 
 func (store *Store) RegisterHarness(ctx context.Context, harness model.Harness) (model.Harness, error) {
@@ -12,7 +13,8 @@ func (store *Store) RegisterHarness(ctx context.Context, harness model.Harness) 
 	defer cancel()
 
 	var existing model.Harness
-	result := store.db.WithContext(ctx).Where("key = ?", harness.Key).Limit(1).Find(&existing)
+	// Let the dialect quote key: it is a reserved identifier in MySQL.
+	result := store.db.WithContext(ctx).Where(map[string]any{"key": harness.Key}).Limit(1).Find(&existing)
 	if result.Error != nil {
 		return model.Harness{}, mapError(result.Error)
 	}
@@ -38,7 +40,7 @@ func (store *Store) ListHarnesses(ctx context.Context, aliveAfter time.Time) ([]
 	var harnesses []model.Harness
 	if err := store.db.WithContext(ctx).
 		Where("expires_at > ?", aliveAfter).
-		Order("key ASC").
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "key"}}).
 		Find(&harnesses).Error; err != nil {
 		return nil, mapError(err)
 	}
