@@ -1,0 +1,112 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: conversations.loopd.compforge.io
+spec:
+  group: loopd.compforge.io
+  names:
+    kind: Conversation
+    listKind: ConversationList
+    plural: conversations
+    shortNames:
+    - conv
+    singular: conversation
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Conversation is the durable collaboration boundary, not a business Task.
+          Its name equals the server conversation ID. Message bodies remain in SQL;
+          Operators own their business resources and choose when to call Poll.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              participants:
+                items:
+                  description: |-
+                    ConversationParticipant carries a recipient-specific wake signal. A signal
+                    for B must not overwrite the signal for A when Kubernetes coalesces updates.
+                  properties:
+                    endOffset:
+                      description: EndOffset is the newest database message notified
+                        to this actor.
+                      type: string
+                    key:
+                      minLength: 1
+                      type: string
+                    kind:
+                      enum:
+                      - operator
+                      - harness
+                      type: string
+                  required:
+                  - key
+                  - kind
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - kind
+                - key
+                x-kubernetes-list-type: map
+            type: object
+          status:
+            properties:
+              consumers:
+                items:
+                  properties:
+                    committed:
+                      description: Committed is the last committed message, exclusive
+                        on the next read.
+                      type: string
+                    key:
+                      minLength: 1
+                      type: string
+                    kind:
+                      enum:
+                      - operator
+                      - harness
+                      type: string
+                    position:
+                      description: |-
+                        Position is diagnostic and bounds commits; recovery never skips
+                        messages based on this field because a Poll response may have been lost.
+                      type: string
+                  required:
+                  - key
+                  - kind
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - kind
+                - key
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

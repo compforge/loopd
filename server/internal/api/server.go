@@ -16,13 +16,14 @@ import (
 )
 
 type Server struct {
+	Poll          *service.PollService
 	Human         *service.HumanService
 	HumanIdentity HumanIdentity
 	actors        *service.ActorService
 	conversations *service.ConversationService
 	messages      *service.MessageService
 	chat          *service.ChatService
-	tasks         *service.TaskService
+	context       *service.ContextService
 	logger        *slog.Logger
 }
 
@@ -31,13 +32,13 @@ func New(
 	conversations *service.ConversationService,
 	messages *service.MessageService,
 	chat *service.ChatService,
-	tasks *service.TaskService,
+	contexts *service.ContextService,
 	logger *slog.Logger,
 ) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{actors: actors, conversations: conversations, messages: messages, chat: chat, tasks: tasks, logger: logger}
+	return &Server{actors: actors, conversations: conversations, messages: messages, chat: chat, context: contexts, logger: logger}
 }
 
 func (server *Server) Register(engine *route.Engine) {
@@ -51,16 +52,17 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
+	engine.GET("/v1/conversations/:conversation_id/messages/:message_id/context", server.adapt(server.getMessageContext))
+	engine.POST("/v1/conversations/:conversation_id/poll", server.adapt(server.pollConversation))
+	engine.POST("/v1/conversations/:conversation_id/commit", server.adapt(server.commitConversation))
+	engine.POST("/v1/conversations/:conversation_id/speak", server.adapt(server.publishMessage))
+	engine.POST("/v1/conversations/:conversation_id/actors", server.adapt(server.actorConversation))
+	engine.POST("/v1/messages/:message_id/events", server.adapt(server.emitPublishedMessage))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
-	engine.POST("/v1/tasks/:task_id/human", server.adapt(server.createHuman))
+	engine.POST("/v1/conversations/:conversation_id/human", server.adapt(server.createHuman))
+	engine.POST("/v1/conversations/:conversation_id/replies", server.adapt(server.replyHuman))
 	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
-	engine.POST("/v1/conversations/:conversation_id/tasks/:task_id/replies", server.adapt(server.replyHuman))
-	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
-	engine.GET("/v1/tasks/:task_id/messages", server.adapt(server.listTaskMessages))
-	engine.POST("/v1/tasks/:task_id/events", server.adapt(server.appendTaskEvent))
-	engine.POST("/v1/tasks/:task_id/outputs", server.adapt(server.createOutput))
-	engine.POST("/v1/tasks/:task_id/messages/:message_id/events", server.adapt(server.appendMessageEvent))
-	engine.POST("/v1/tasks/:task_id/complete", server.adapt(server.completeTask))
+	engine.POST("/v1/deliveries/:task_id/complete", server.adapt(server.completeDelivery))
 }
 
 type handler func(context.Context, *hertzapp.RequestContext) error

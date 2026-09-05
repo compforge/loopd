@@ -12,9 +12,9 @@ import (
 func TestNewConnectsConfiguredRedis(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	server, err := New(Config{
-		Database: DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")},
-		Redis:    RedisConfig{Address: redisServer.Addr()},
-		Tasks:    testTaskClient{},
+		Database:      DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")},
+		Redis:         RedisConfig{Address: redisServer.Addr()},
+		Conversations: testConversations{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -24,11 +24,11 @@ func TestNewConnectsConfiguredRedis(t *testing.T) {
 	}
 }
 
-type testTaskClient struct{}
+type testConversations struct{}
 
-func (testTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
-func (testTaskClient) Delete(context.Context, string) error                 { return nil }
+func (testConversations) Signal(context.Context, string, string, loopd.ActorRef) error { return nil }
+func (testConversations) Poll(context.Context, string, loopd.ActorRef, string, func(context.Context, string) ([]loopd.Message, error)) (loopd.PollResult, error) {
+	return loopd.PollResult{}, nil
+}
 
-func (testTaskClient) Wake(context.Context, string) error { return nil }
-
-func (testTaskClient) Exists(context.Context, string) (bool, error) { return true, nil }
+func (testConversations) Commit(context.Context, string, loopd.CommitRequest) error { return nil }

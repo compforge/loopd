@@ -30,8 +30,8 @@ func TestChatHTTPFlow(t *testing.T) {
 		service.NewActorService(store, nil),
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
-		service.NewChatService(store, nopTaskClient{}, completedChatRunner{}, nil),
-		service.NewTaskService(store, nil),
+		service.NewChatService(store, completedChatRunner{}, nil, nil),
+		service.NewContextService(store, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))
@@ -45,7 +45,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(created.Body(), &conversation); err != nil {
 		t.Fatal(err)
 	}
-	if conversation.ActorKind != loopd.RoleUser || conversation.ActorKey == "" || conversation.TaskID != "" {
+	if conversation.ActorKind != loopd.RoleUser || conversation.ActorKey == "" || conversation.ParentID != "" {
 		t.Fatalf("user conversation = %+v", conversation)
 	}
 	listed := ut.PerformRequest(engine, "GET", "/v1/conversations", nil).Result()
@@ -71,18 +71,10 @@ func TestChatHTTPFlow(t *testing.T) {
 	if taskID == "" {
 		t.Fatal("send response omitted task ID header")
 	}
-	taskResponse := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID, nil).Result()
-	if taskResponse.StatusCode() != 200 {
-		t.Fatalf("task status=%d body=%s", taskResponse.StatusCode(), taskResponse.Body())
-	}
-	var task loopd.TaskContext
-	if err := json.Unmarshal(taskResponse.Body(), &task); err != nil {
+	input, err := store.GetDeliveryInput(context.Background(), taskID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if task.ID != taskID || task.Input.Kind != loopd.RoleUser || task.Response.Kind != loopd.RoleOperator {
-		t.Fatalf("task = %#v", task)
-	}
-
 	history := ut.PerformRequest(engine, "GET", "/v1/conversations/"+conversation.ID+"/messages", nil).Result()
 	if history.StatusCode() != 200 {
 		t.Fatalf("history status=%d body=%s", history.StatusCode(), history.Body())
@@ -91,19 +83,19 @@ func TestChatHTTPFlow(t *testing.T) {
 	if err := json.Unmarshal(history.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data) != 2 || result.Data[0].TaskID != taskID || result.Data[1].ID != task.Response.ID {
+	if len(result.Data) != 1 || result.Data[0].TaskID != taskID || result.Data[0].ID != input.ID {
 		t.Fatalf("history = %#v", result.Data)
 	}
 
-	childResponse := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"Details","task_id":"`+taskID+`"}`)
-	if childResponse.StatusCode() != 201 {
+	childResponse := performJSON(t, engine, "POST", "/v1/conversations/"+conversation.ID+"/actors", `{"kind":"operator","key":"intent"}`)
+	if childResponse.StatusCode() != 200 {
 		t.Fatalf("create detail=%s", childResponse.Body())
 	}
 	var child loopd.Conversation
 	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.TaskID != taskID || child.ActorKind != loopd.RoleOperator || child.ActorKey != "intent" {
+	if child.ParentID != conversation.ID || child.ActorKind != loopd.RoleOperator || child.ActorKey != "intent" {
 		t.Fatalf("work conversation=%+v", child)
 	}
 	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.RoleHarness, "call-1",
@@ -116,8 +108,8 @@ func TestChatHTTPFlow(t *testing.T) {
 		expectedID string
 	}{
 		{"", conversation.ID},
-		{"?task_id=" + taskID, child.ID},
-		{"?task_id=missing-task", ""},
+		{"?parent_id=" + conversation.ID + "&actor_kind=operator&actor_key=intent", child.ID},
+		{"?parent_id=missing&actor_kind=operator&actor_key=intent", ""},
 	} {
 		response := ut.PerformRequest(engine, "GET", "/v1/conversations"+test.query, nil).Result()
 		if response.StatusCode() != 200 {
@@ -139,20 +131,10 @@ func TestChatHTTPFlow(t *testing.T) {
 	if childMessages.StatusCode() != 200 || !strings.Contains(string(childMessages.Body()), "detail output") {
 		t.Fatalf("child messages=%s", childMessages.Body())
 	}
-	taskMessages := ut.PerformRequest(engine, "GET", "/v1/tasks/"+taskID+"/messages?after="+task.Response.ID+"&limit=1", nil).Result()
-	var taskPage page[loopd.Message]
-	if err := json.Unmarshal(taskMessages.Body(), &taskPage); err != nil {
-		t.Fatal(err)
-	}
-	if taskMessages.StatusCode() != 200 || len(taskPage.Data) != 1 || taskPage.Data[0].ConversationID != child.ID {
-		t.Fatalf("task messages = %s", taskMessages.Body())
+	if removed := performJSON(t, engine, "GET", "/v1/tasks/"+taskID, ""); removed.StatusCode() != 404 {
+		t.Fatalf("legacy task endpoint survived: %d", removed.StatusCode())
 	}
 }
-
-type nopTaskClient struct{}
-
-func (nopTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
-func (nopTaskClient) Delete(context.Context, string) error                 { return nil }
 
 type completedChatRunner struct{}
 
@@ -201,9 +183,6 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 	).Result()
 }
 
-func (completedChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
-	return loopd.Message{}, nil
-}
-func (completedChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
 	return "", nil
 }

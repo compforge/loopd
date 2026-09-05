@@ -3,8 +3,8 @@
 ## 项目定位与边界
 
 loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-loop-server 保存跨参与者的 Conversation 与 Message，并为每次用户发起的工作创建通用 Task CRD；同一 Task 可包含多轮问答。Operator
-Reconcile 该 Task，复杂 Operator 可以继续创建自己的领域 CRD。Harness 持有智能执行状态，loopd
+loop-server 保存跨参与者的 Conversation 与 Message，通过 Conv CRD 的定向信号唤醒 Operator。
+Operator 通过 Poll/Commit 消费消息，自行决定业务执行边界及是否创建领域 CRD。Harness 持有智能执行状态，loopd
 不保存 Operator 领域表。
 
 Conversation 中的公开角色统一为 `user`、`operator`、`harness`。Agent、Assistant、Session 等外部
@@ -15,12 +15,12 @@ Conversation 中的公开角色统一为 `user`、`operator`、`harness`。Agent
 ```text
 loopd/
 ├── cmd/loop-server/        # 进程配置、依赖组装与生命周期
-├── config/crd/             # loopd Task CRD 安装清单
+├── config/crd/             # loopd Conv CRD 安装清单
 ├── deploy/                 # loop-server、Router、Web 镜像与 Kubernetes Helm Chart
 ├── docs/                   # loopd 稳定内核与跨模块设计
 ├── harness/                # runtime 侧 Harness Adapter 契约；agentgo 为进程内 demo
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
-├── runtime/                # Operator 协作 toolkit；提供 Task、Chat、Human、Harness 与注册 Verb
+├── runtime/                # Operator 协作 toolkit；提供 Conv、Delivery、Human、Harness 与注册 Verb
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
 ├── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 └── *.go                    # 跨 server、runtime 和 harness 的公共协作模型
@@ -40,8 +40,9 @@ loopd/
 ## References
 
 - `docs/kernel.md` — loopd 稳定模型、主流程和扩展边界
-- `docs/runtime.md` — Operator 开发库定位、注册发现、Task 上下文、Harness Call 与结果发布
+- `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、消息上下文、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
+- `server/docs/conversation.md` — Conv 消息接收与 Poll 契约
 - `deploy/docker/README.md` — loop-server、Router 与 Web 镜像构建入口
 - `deploy/k8s/README.md` — Helm Quick Start、组件拓扑与配置边界
 - `README.md` — 产品定位与使用入口

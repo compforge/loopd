@@ -15,15 +15,18 @@ export interface Conversation {
   name?: string;
   actor_kind: ActorKind;
   actor_key: string;
-  task_id?: string;
+  parent_id?: string;
   created_at: string;
   updated_at: string;
 }
 
 export interface Message {
   id: string;
-  reply_to_message_id?: string;
-  purpose?: "input" | "response" | "output" | "human_request" | "human_reply";
+  target_kind?: ActorKind;
+  target_key?: string;
+  delivery_state?: "" | "closing" | "closed";
+  reply_to_id?: string;
+  purpose?: "input" | "output" | "human_request" | "human_reply";
   revision?: number;
   conversation_id: string;
   task_id: string;
@@ -52,9 +55,9 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
   return page.data;
 }
 
-export async function findDetailConversation(taskID: string, signal?: AbortSignal): Promise<Conversation | undefined> {
+export async function findDetailConversation(parentID: string, actorKind: ActorKind, actorKey: string, signal?: AbortSignal): Promise<Conversation | undefined> {
 	const page = await requestJSON<Page<Conversation>>(
-		`/v1/conversations?task_id=${encodeURIComponent(taskID)}`, { signal },
+		`/v1/conversations?parent_id=${encodeURIComponent(parentID)}&actor_kind=${encodeURIComponent(actorKind)}&actor_key=${encodeURIComponent(actorKey)}`, { signal },
 	);
 	return page.data[0];
 }
@@ -191,13 +194,13 @@ export function decodeMessageFrame(frame: string): MessageEvent {
 }
 
 export interface HumanReply {
-  reply_to_message_id: string;
+  reply_to_id: string;
   outcome: "success" | "dismissed";
   value?: string;
 }
 export interface HumanResult { message: Message; reply?: Message; status: string; value?: string }
 export async function replyHuman(message: Message, reply: HumanReply): Promise<HumanResult> {
-  return requestJSON<HumanResult>(`/v1/conversations/${encodeURIComponent(message.conversation_id)}/tasks/${encodeURIComponent(message.task_id)}/replies`, {
+  return requestJSON<HumanResult>(`/v1/conversations/${encodeURIComponent(message.conversation_id)}/replies`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reply),
   });
 }

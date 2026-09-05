@@ -22,16 +22,13 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		published   []agentueui.Event
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/task-1" {
-			_ = json.NewEncoder(response).Encode(loopd.TaskContext{ID: "task-1", Response: loopd.Message{ID: "response"}})
-			return
-		}
-		if request.URL.Path == "/v1/tasks/task-1/outputs" {
-			var input loopd.OutputRequest
+
+		if request.URL.Path == "/v1/conversations/workspace/speak" {
+			var input loopd.SpeakRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input.Key != "route" || input.Actor.Kind != loopd.RoleHarness {
+			if input.Key != "input/route" || input.Actor.Kind != loopd.RoleHarness {
 				t.Errorf("output=%+v", input)
 			}
 			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", TaskID: "task-1"})
@@ -70,7 +67,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
-	operatorEvent, err := runtime.Loop.Chat.Emit(context.Background(), "task-1", agentueui.Event{
+	operatorEvent, err := runtime.Loop.Delivery.EmitMessage(context.Background(), "task-1", agentueui.Event{
 		Op: agentueui.OpSet,
 		Block: map[string]any{
 			"id": "operator/status", "type": "text", "content": "routing",
@@ -84,7 +81,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatalf("Operator event = %#v, error=%v", parsedOperatorOutput, err)
 	}
 
-	prompt := Prompt{TaskID: "task-1", EffectKey: "route", Target: "demo", Text: "hello"}
+	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "input/route", TaskID: "task-1", EffectKey: "route", Target: "demo", Text: "hello"}
 	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +106,11 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatalf("event IDs = %s, want %s", got, want)
 	}
 	publishedMu.Lock()
-	if len(published) != 4 || published[0].Seq != 2 || published[1].Seq != 2 || published[2].Seq != 3 || published[3].Seq != 4 {
+	if len(published) != 5 || published[0].Seq != 2 || published[1].Seq != 2 || published[2].Seq != 3 || published[3].Seq != 4 {
 		t.Fatalf("published events = %#v", published)
 	}
 	publishedMu.Unlock()
-	for _, event := range published[1:] {
+	for _, event := range published[1:4] {
 		if event.Timestamp == nil || *event.Timestamp <= 0 {
 			t.Fatalf("Harness output omitted AgentUE activity timestamp: %#v", event)
 		}

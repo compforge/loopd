@@ -4,13 +4,14 @@ import (
 	"context"
 	"time"
 
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 )
 
 type MessageRepository interface {
+	Speak(context.Context, string, loopd.SpeakRequest) (model.Message, error)
 	CreateMessage(context.Context, model.Message) (model.Message, error)
-	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	ListMessages(context.Context, string, string, int) ([]model.Message, error)
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
@@ -26,53 +27,10 @@ func (store *Store) CreateMessage(ctx context.Context, message model.Message) (m
 	if err := store.db.WithContext(ctx).First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
 		return model.Message{}, mapError(err)
 	}
-	if conversation.TaskID != nil && *conversation.TaskID != message.TaskID {
-		return model.Message{}, ErrConflict
-	}
 	if err := mapError(store.db.WithContext(ctx).Create(&message).Error); err != nil {
 		return model.Message{}, err
 	}
 	return message, nil
-}
-
-func (store *Store) CreateChatMessages(
-	ctx context.Context,
-	userMessage model.Message,
-	responseMessage model.Message,
-	beforeCommit func(context.Context) error,
-) (model.Message, error) {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-
-	userMessage.Purpose = "input"
-	responseMessage.Purpose = "response"
-	responseMessage.ReplyToMessageID = userMessage.ID
-	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if userMessage.ConversationID != responseMessage.ConversationID || userMessage.TaskID != responseMessage.TaskID {
-			return ErrConflict
-		}
-		var conversation model.Conversation
-		if err := tx.First(&conversation, "id = ?", userMessage.ConversationID).Error; err != nil {
-			return mapError(err)
-		}
-		if conversation.TaskID != nil || conversation.ActorKind != "user" {
-			return ErrConflict
-		}
-		if err := mapError(tx.Create(&userMessage).Error); err != nil {
-			return err
-		}
-		if err := mapError(tx.Create(&responseMessage).Error); err != nil {
-			return err
-		}
-		if beforeCommit != nil {
-			return beforeCommit(ctx)
-		}
-		return nil
-	})
-	if err != nil {
-		return model.Message{}, err
-	}
-	return responseMessage, nil
 }
 
 func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) ([]model.Message, error) {
@@ -82,7 +40,7 @@ func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) (
 	var messages []model.Message
 	if err := store.db.WithContext(ctx).
 		Joins("JOIN conversations ON conversations.id = messages.conversation_id").
-		Where("messages.task_id = ? AND conversations.task_id IS NULL", taskID).
+		Where("messages.task_id = ? AND conversations.parent_id IS NULL", taskID).
 		Order("messages.id ASC").
 		Find(&messages).Error; err != nil {
 		return nil, err
@@ -192,4 +150,27 @@ func (store *Store) ObserveMessageActivity(ctx context.Context, id string, at ti
 	}
 	return mapError(store.db.WithContext(ctx).Model(&model.Message{}).
 		Where("id = ? AND updated_at < ?", id, at).UpdateColumn("updated_at", at).Error)
+}
+
+func (store *Store) CreateChatInput(ctx context.Context, input model.Message, beforeCommit func(context.Context) error) (model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	input.Purpose = "input"
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conversation model.Conversation
+		if err := tx.First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
+			return mapError(err)
+		}
+		if conversation.ParentID != nil || conversation.ActorKind != "user" {
+			return ErrConflict
+		}
+		if err := tx.Create(&input).Error; err != nil {
+			return mapError(err)
+		}
+		if beforeCommit != nil {
+			return beforeCommit(ctx)
+		}
+		return nil
+	})
+	return input, err
 }

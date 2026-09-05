@@ -9,7 +9,7 @@ export function HumanMessage({ message, onReply, replyTo }: { message: Message; 
   const block = message.content.blocks.find((b) => b.type === "ask" || b.type === "confirm" || b.type === "human_reply");
   if (!block) return null;
   if (block.type === "human_reply") {
-    const original = replyTo?.id === message.reply_to_message_id ? replyTo?.content.blocks.find((b) => b.type === "ask" || b.type === "confirm") : undefined;
+    const original = replyTo?.id === message.reply_to_id ? replyTo?.content.blocks.find((b) => b.type === "ask" || b.type === "confirm") : undefined;
     const value = String(block.value ?? "");
     const label = original?.type === "confirm" ? (value === "accepted" ? "已同意" : value === "declined" ? "已拒绝" : value) : value;
     return <span>{block.outcome === "dismissed" ? "已忽略" : label}</span>;
@@ -19,7 +19,7 @@ export function HumanMessage({ message, onReply, replyTo }: { message: Message; 
   async function answer(outcome: "success" | "dismissed", value?: string) {
     if (busy || !pending) return;
     setBusy(true); setError(undefined);
-    try { onReply(await replyHuman(message, { reply_to_message_id: message.id, outcome, value })); }
+    try { onReply(await replyHuman(message, { reply_to_id: message.id, outcome, value })); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   }

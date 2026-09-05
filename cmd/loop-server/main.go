@@ -7,11 +7,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
-	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	conversationv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	"github.com/compforge/loopd/server"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +29,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	tasks, err := newTaskClient(config.taskNamespace, config.taskClientTimeout)
+	kubeClient, err := newCoordinationClient()
 	if err != nil {
 		return err
 	}
@@ -41,7 +40,8 @@ func run() error {
 			Username: config.redisUsername,
 			Password: config.redisPassword,
 		},
-		Tasks: tasks, Logger: slog.Default(),
+		Conversations: server.NewKubernetesConversationClient(kubeClient, config.taskNamespace, config.taskClientTimeout),
+		Logger:        slog.Default(),
 	})
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func run() error {
 	go loopServer.Run(processCtx)
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("loop-server listening",
+		logger.Info("loop-server polling",
 			"address", config.address,
 			"database_driver", config.databaseDriver,
 			"redis_address", config.redisAddress,
@@ -88,10 +88,10 @@ func run() error {
 	}
 }
 
-func newTaskClient(namespace string, requestTimeout time.Duration) (server.TaskClient, error) {
+func newCoordinationClient() (client.Client, error) {
 	scheme := runtime.NewScheme()
-	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("register loopd Task scheme: %w", err)
+	if err := conversationv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("register loopd coordination scheme: %w", err)
 	}
 	kubeConfig, err := kubeconfig.GetConfig()
 	if err != nil {
@@ -101,5 +101,5 @@ func newTaskClient(namespace string, requestTimeout time.Duration) (server.TaskC
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
-	return server.NewKubernetesTaskClient(kubeClient, namespace, requestTimeout), nil
+	return kubeClient, nil
 }

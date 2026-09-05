@@ -10,63 +10,49 @@ import (
 	"github.com/compforge/loopd/server/internal/model"
 )
 
-type humanTasks struct {
-	recordingTaskClient
-	wakeErr error
-	wakes   int
-}
-
-func (t *humanTasks) Wake(context.Context, string) error         { t.wakes++; return t.wakeErr }
-func (*humanTasks) Exists(context.Context, string) (bool, error) { return true, nil }
-
-// +case=`无浏览器时推进 timeout；唤醒失败和 Task 删除失败在新 Service 中恢复`
+// +case=`无浏览器时推进 timeout；Chat 完成失败由自己的维护循环恢复`
 func TestHumanMaintenanceRecoversNotificationsAndCompletion(t *testing.T) {
 	ctx := context.Background()
 	store := openServiceStore(t)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv"}); err != nil {
 		t.Fatal(err)
 	}
-	tasks := &humanTasks{wakeErr: errors.New("offline")}
 	runner := &recordingChatRunner{}
-	chat := NewChatService(store, tasks, runner, nil)
+	chat := NewChatService(store, runner, nil, nil)
 	message, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	human := NewHumanService(store, tasks, nil)
-	q, err := human.Create(ctx, loopd.HumanRequest{TaskID: message.TaskID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
+	human := NewHumanService(store, nil)
+	q, err := human.Create(ctx, loopd.HumanRequest{ConversationID: message.ConversationID, Actor: loopd.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: loopd.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, TaskID: message.TaskID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := human.Maintain(ctx); err == nil {
-		t.Fatal("expected failed wake delivery")
+	if err := human.Maintain(ctx); err != nil {
+		t.Fatal(err)
 	}
 	result, err := human.Get(ctx, q.Message.ID)
 	if err != nil || result.Status != loopd.HumanTimeout || result.Reply != nil {
 		t.Fatalf("timeout=%+v %v", result, err)
 	}
 	pending, err := store.HumanMaintenance(ctx)
-	if err != nil || len(pending) != 1 || !pending[0].WakePending {
+	if err != nil || len(pending) != 0 {
 		t.Fatalf("lost pending wake=%+v %v", pending, err)
 	}
-	recoveredTasks := &humanTasks{}
-	recovered := NewHumanService(store, recoveredTasks, nil)
-	recoveredChat := NewChatService(store, recoveredTasks, runner, nil)
+	recovered := NewHumanService(store, nil)
+	recoveredChat := NewChatService(store, runner, nil, nil)
 	if err := recovered.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if recoveredTasks.wakes != 1 {
-		t.Fatal("wake not retried")
-	}
-	recoveredTasks.deleteErr = errors.New("offline")
+	runner.completeErr = errors.New("offline")
 	if err := recoveredChat.Complete(ctx, message.TaskID, nil); err == nil {
-		t.Fatal("delete failure not surfaced")
+		t.Fatal("delivery failure not surfaced")
 	}
 	pending, err = store.PendingCompletions(ctx)
 	if err != nil || len(pending) != 1 || pending[0].DeliveryState != "closing" {
 		t.Fatalf("completion intent=%+v %v", pending, err)
 	}
-	recoveredTasks.deleteErr = nil
+	runner.completeErr = nil
 	if err := recoveredChat.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}

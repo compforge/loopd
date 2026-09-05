@@ -98,6 +98,10 @@ func Open(config Config) (*Store, error) {
 	migrationCtx, cancelMigration := context.WithTimeout(context.Background(), time.Minute)
 	defer cancelMigration()
 	// Rename existing columns before AutoMigrate can add empty replacements.
+	if err := migrations.CurrentSchema(db.WithContext(migrationCtx)); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
 	if err := migrations.DomainKeys(db.WithContext(migrationCtx)); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd domain keys: %w", err)
@@ -110,10 +114,6 @@ func Open(config Config) (*Store, error) {
 	); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd database: %w", err)
-	}
-	if err := migrations.ConversationOwnership(db.WithContext(migrationCtx)); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("migrate conversation ownership: %w", err)
 	}
 	return store, nil
 }

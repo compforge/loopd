@@ -12,39 +12,28 @@ import (
 )
 
 type HumanService struct {
-	store *repo.Store
-	tasks interface {
-		Wake(context.Context, string) error
-		Exists(context.Context, string) (bool, error)
-	}
+	store  *repo.Store
 	logger *slog.Logger
 }
 
-func NewHumanService(store *repo.Store, tasks interface {
-	Wake(context.Context, string) error
-	Exists(context.Context, string) (bool, error)
-}, logger *slog.Logger) *HumanService {
-	return &HumanService{store: store, tasks: tasks, logger: loggerOrDefault(logger)}
+func NewHumanService(store *repo.Store, logger *slog.Logger) *HumanService {
+	return &HumanService{store: store, logger: loggerOrDefault(logger)}
 }
 func (s *HumanService) Create(ctx context.Context, r loopd.HumanRequest) (loopd.HumanResult, error) {
 	if err := r.Validate(); err != nil {
 		return loopd.HumanResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	active, err := s.tasks.Exists(ctx, r.TaskID)
-	if err != nil {
-		return loopd.HumanResult{}, err
-	}
-	result, err := s.store.CreateHuman(ctx, r, active)
+	result, err := s.store.CreateHuman(ctx, r)
 	return result, humanError(err)
 }
 func (s *HumanService) Get(ctx context.Context, id string) (loopd.HumanResult, error) {
 	return s.store.GetHuman(ctx, id)
 }
-func (s *HumanService) Reply(ctx context.Context, conversationID, taskID, actor string, r loopd.HumanReply) (loopd.HumanResult, error) {
-	if r.ReplyToMessageID == "" {
+func (s *HumanService) Reply(ctx context.Context, conversationID, actor string, r loopd.HumanReply) (loopd.HumanResult, error) {
+	if r.ReplyToID == "" {
 		return loopd.HumanResult{}, ErrInvalid
 	}
-	result, err := s.store.ReplyHuman(ctx, conversationID, taskID, actor, r)
+	result, err := s.store.ReplyHuman(ctx, conversationID, actor, r)
 	return result, humanError(err)
 }
 func humanError(err error) error {
@@ -54,7 +43,7 @@ func humanError(err error) error {
 	return err
 }
 
-// Run persists deadlines and retries Human wake delivery independently of clients.
+// Run advances Human deadlines independently of connected clients.
 func (s *HumanService) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -91,10 +80,7 @@ func (s *HumanService) Maintain(ctx context.Context) error {
 			}
 		}
 		if row.WakePending {
-			if err := s.tasks.Wake(ctx, row.TaskID); err != nil {
-				failures = append(failures, fmt.Errorf("wake task %s: %w", row.TaskID, err))
-				continue
-			}
+			// Replies are delivered through Conv notifications; handle polling observes deadlines.
 			if err := s.store.AcknowledgeHumanWake(ctx, row.ID, row.Revision); err != nil {
 				failures = append(failures, err)
 			}

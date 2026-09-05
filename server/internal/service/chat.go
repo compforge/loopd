@@ -17,39 +17,35 @@ import (
 )
 
 type ChatRepository interface {
-	BeginCompletion(context.Context, string, []byte, bool) error
+	BeginCompletion(context.Context, string, []byte) error
 	FinishCompletion(context.Context, string) error
 	PendingCompletions(context.Context) ([]model.Message, error)
-	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
-}
-
-type TaskClient interface {
-	Create(context.Context, string, loopd.ActorRef) error
-	Delete(context.Context, string) error
+	CreateChatInput(context.Context, model.Message, func(context.Context) error) (model.Message, error)
 }
 
 type ChatDelivery interface {
-	Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error)
-	EmitMessage(context.Context, string, string, json.RawMessage) (string, error)
+	EmitMessage(context.Context, string, json.RawMessage) (string, error)
 	Initialize(context.Context, string, json.RawMessage) error
 	Delete(context.Context, string) error
-	Emit(context.Context, string, json.RawMessage) (string, error)
 	Complete(context.Context, string, *delivery.Failure) error
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
-// ChatService owns the visible lifecycle of one user question. It creates the
-// message pair and same-ID Task marker, then retires the marker only after the
-// response has been made durable.
+// ChatService owns one UI chat delivery, not an Operator's business task.
+// An input starts the delivery; answers are created only when actors publish.
 type ChatService struct {
+	notifier MessageNotifier
 	repo     ChatRepository
-	tasks    TaskClient
 	delivery ChatDelivery
 	logger   *slog.Logger
 }
 
-func NewChatService(repository ChatRepository, tasks TaskClient, chatDelivery ChatDelivery, logger *slog.Logger) *ChatService {
-	return &ChatService{repo: repository, tasks: tasks, delivery: chatDelivery, logger: loggerOrDefault(logger)}
+type MessageNotifier interface {
+	Notify(context.Context, model.Message) error
+}
+
+func NewChatService(repository ChatRepository, chatDelivery ChatDelivery, logger *slog.Logger, notifier MessageNotifier) *ChatService {
+	return &ChatService{repo: repository, delivery: chatDelivery, logger: loggerOrDefault(logger), notifier: notifier}
 }
 
 func (service *ChatService) Create(
@@ -64,94 +60,44 @@ func (service *ChatService) Create(
 	if userKey == "" || !target.ValidTarget() || validateContent(content) != nil {
 		return loopd.Message{}, ErrInvalid
 	}
-	if service.tasks == nil || service.delivery == nil {
+	if service.delivery == nil {
 		return loopd.Message{}, ErrUnavailable
 	}
-
 	taskID := uuid.V7()
-	responseContent, err := emptyContent(content)
+	streamContent, err := emptyContent(content)
 	if err != nil {
 		return loopd.Message{}, ErrInvalid
 	}
-	userMessage := model.Message{
+	input := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
 		Kind: string(loopd.RoleUser), ActorKey: userKey, Content: content,
+		TargetKind: string(target.Kind), TargetKey: target.Key, DispatchPending: true,
 	}
-	responseMessage := model.Message{
-		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-		Kind: string(target.Kind), ActorKey: target.Key, Content: responseContent,
-	}
-	taskCreated := false
 	streamCreated := false
-	message, err := service.repo.CreateChatMessages(ctx,
-		userMessage,
-		responseMessage,
-		func(txCtx context.Context) error {
-			if err := service.delivery.Initialize(txCtx, taskID, responseContent); err != nil {
-				service.logger.ErrorContext(ctx, "initialize chat event stream failed",
-					"conversation_id", conversationID,
-					"task_id", taskID,
-					"error", err,
-				)
-				return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	message, err := service.repo.CreateChatInput(ctx, input, func(txCtx context.Context) error {
+		if err := service.delivery.Initialize(txCtx, taskID, streamContent); err != nil {
+			return fmt.Errorf("%w: initialize chat stream: %v", ErrUnavailable, err)
+		}
+		streamCreated = true
+		return nil
+	})
+	if err != nil {
+		if streamCreated {
+			if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
+				service.logger.ErrorContext(ctx, "delete uncommitted chat stream", "task_id", taskID, "error", cleanupErr)
 			}
-			streamCreated = true
-			if err := service.tasks.Create(txCtx, taskID, target); err != nil {
-				service.logger.ErrorContext(ctx, "create task CRD failed",
-					"conversation_id", conversationID,
-					"task_id", taskID,
-					"target_kind", target.Kind,
-					"target_key", target.Key,
-					"error", err,
-				)
-				if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
-					service.logger.ErrorContext(ctx, "delete rolled back chat event stream failed",
-						"task_id", taskID,
-						"error", cleanupErr,
-					)
-				}
-				streamCreated = false
-				return fmt.Errorf("%w: %v", ErrUnavailable, err)
-			}
-			taskCreated = true
-			return nil
-		},
-	)
-	// Kubernetes and the database do not share a transaction coordinator. If
-	// the CRD was created but the database commit fails, compensate so an
-	// Operator cannot later reconcile a task whose visible chat state vanished.
-	if err != nil && taskCreated {
-		if cleanupErr := service.tasks.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
-			service.logger.ErrorContext(ctx, "delete rolled back task CRD failed",
-				"conversation_id", conversationID,
-				"task_id", taskID,
-				"error", cleanupErr,
-			)
-		} else {
-			service.logger.InfoContext(ctx, "rolled back task CRD",
-				"conversation_id", conversationID,
-				"task_id", taskID,
-			)
+		}
+		return loopd.Message{}, err
+	}
+	if service.notifier != nil {
+		if err := service.notifier.Notify(ctx, message); err != nil {
+			service.logger.WarnContext(ctx, "conversation notification pending",
+				"conversation_id", conversationID, "message_id", message.ID, "error", err)
 		}
 	}
-	if err != nil && streamCreated {
-		if cleanupErr := service.delivery.Delete(context.WithoutCancel(ctx), taskID); cleanupErr != nil {
-			service.logger.ErrorContext(ctx, "delete rolled back chat event stream failed",
-				"task_id", taskID,
-				"error", cleanupErr,
-			)
-		}
-	}
-	if err == nil {
-		service.logger.InfoContext(ctx, "chat task created",
-			"conversation_id", conversationID,
-			"task_id", taskID,
-			"actor_message_id", message.ID,
-			"target_kind", target.Kind,
-			"target_key", target.Key,
-		)
-	}
-	return messageFromModel(message), err
+	service.logger.InfoContext(ctx, "chat input committed", "conversation_id", conversationID,
+		"task_id", taskID, "message_id", message.ID, "target_kind", target.Kind, "target_key", target.Key)
+	return messageFromModel(message), nil
 }
 
 func (service *ChatService) Stream(
@@ -179,44 +125,23 @@ func (service *ChatService) Stream(
 	return err
 }
 
-func (service *ChatService) Emit(ctx context.Context, taskID string, event json.RawMessage) (string, error) {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return "", ErrInvalid
-	}
-	eventID, err := service.delivery.Emit(ctx, taskID, event)
-	if err == nil {
-		service.logger.DebugContext(ctx, "chat event published", "task_id", taskID, "event_id", eventID)
-	}
-	return eventID, mapDeliveryError(err)
-}
-
 func (service *ChatService) Complete(ctx context.Context, taskID string, failure *delivery.Failure) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return ErrInvalid
 	}
 	intent, _ := json.Marshal(failure)
-	if err := service.repo.BeginCompletion(ctx, taskID, intent, failure != nil); err != nil {
+	if err := service.repo.BeginCompletion(ctx, taskID, intent); err != nil {
 		return err
 	}
 	if err := mapDeliveryError(service.delivery.Complete(ctx, taskID, failure)); err != nil {
 		return err
 	}
-	// The generic Task only wakes its Actor. Once the response is durable and
-	// the event stream is terminal, retaining the marker would make a restarted
-	// controller reconcile completed work again.
-	if err := service.tasks.Delete(context.WithoutCancel(ctx), taskID); err != nil {
-		service.logger.ErrorContext(ctx, "delete completed task CRD failed",
-			"task_id", taskID,
-			"error", err,
-		)
-		return fmt.Errorf("%w: delete completed task %q: %v", ErrUnavailable, taskID, err)
-	}
+	// Completing a UI stream never retires the conversation or business resources.
 	if err := service.repo.FinishCompletion(ctx, taskID); err != nil {
 		return err
 	}
-	service.logger.InfoContext(ctx, "chat task retired", "task_id", taskID)
+	service.logger.InfoContext(ctx, "chat delivery completed", "task_id", taskID)
 	return nil
 }
 
@@ -259,11 +184,7 @@ func (service *ChatService) resumeCompletion(ctx context.Context, taskID string,
 	return service.Complete(ctx, taskID, failure)
 }
 
-func (service *ChatService) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
-	message, err := service.delivery.Output(ctx, taskID, request)
-	return message, mapDeliveryError(err)
-}
-func (service *ChatService) EmitMessage(ctx context.Context, taskID, messageID string, event json.RawMessage) (string, error) {
-	id, err := service.delivery.EmitMessage(ctx, taskID, messageID, event)
+func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage) (string, error) {
+	id, err := service.delivery.EmitMessage(ctx, messageID, event)
 	return id, mapDeliveryError(err)
 }

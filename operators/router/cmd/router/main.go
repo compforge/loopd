@@ -14,7 +14,7 @@ import (
 	agentgoharness "github.com/compforge/loopd/harness/agentgo"
 	operatorrouter "github.com/compforge/loopd/operators/router/internal/router"
 	loopruntime "github.com/compforge/loopd/runtime"
-	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	conversationv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	"github.com/go-logr/logr"
 	kruntime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -78,8 +78,8 @@ func run() error {
 	}
 
 	scheme := kruntime.NewScheme()
-	if err := taskv1alpha1.AddToScheme(scheme); err != nil {
-		return fmt.Errorf("register loopd Task scheme: %w", err)
+	if err := conversationv1alpha1.AddToScheme(scheme); err != nil {
+		return fmt.Errorf("register loopd Conversation scheme: %w", err)
 	}
 	namespace := envOr("LOOP_ROUTER_NAMESPACE", "default")
 	manager, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{

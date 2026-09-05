@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,8 +31,8 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	defer client.Close()
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
-	chat := service.NewChatService(store, nopTaskClient{}, delivery.New(bridge, store, nil), nil)
-	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, service.NewTaskService(store, nil), nil)
+	chat := service.NewChatService(store, delivery.New(bridge, store, nil), nil, nil)
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, service.NewContextService(store, nil), nil)
 	engine := route.NewEngine(config.NewOptions(nil))
 	api.Register(engine)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
@@ -41,43 +42,55 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "/v1/tasks/" + main.TaskID
-	body := `{"key":"work/0","actor":{"kind":"harness","key":"agent"}}`
-	result := performJSON(t, engine, "POST", path+"/outputs", body)
-	if result.StatusCode() != 200 {
-		t.Fatalf("create=%d %s", result.StatusCode(), result.Body())
-	}
-	var output loopd.Message
-	if err := json.Unmarshal(result.Body(), &output); err != nil {
+	if err := chat.Complete(ctx, main.TaskID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if output.Purpose != "output" || output.TaskID != main.TaskID || output.ConversationID == "root" {
-		t.Fatalf("output=%+v", output)
-	}
-	again := performJSON(t, engine, "POST", path+"/outputs", body)
-	var repeated loopd.Message
-	if err := json.Unmarshal(again.Body(), &repeated); err != nil || repeated.ID != output.ID {
-		t.Fatalf("retry=%s %v", again.Body(), err)
-	}
 	event := `{"event":{"op":"set","seq":2,"block":{"id":"text","type":"text","content":"work"}}}`
-	accepted := performJSON(t, engine, "POST", path+"/messages/"+output.ID+"/events", event)
-	if accepted.StatusCode() != 202 {
-		t.Fatalf("emit=%d %s", accepted.StatusCode(), accepted.Body())
+	// +case=`An actor can speak and stream after UI delivery closes, without a task ID.`
+	speech := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
+		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+	if speech.StatusCode() != 200 {
+		t.Fatalf("speak=%d %s", speech.StatusCode(), speech.Body())
 	}
-	wrong := performJSON(t, engine, "POST", "/v1/tasks/other/messages/"+output.ID+"/events", event)
-	if wrong.StatusCode() != 404 {
-		t.Fatalf("wrong task=%d %s", wrong.StatusCode(), wrong.Body())
+	var spoken loopd.Message
+	if err := json.Unmarshal(speech.Body(), &spoken); err != nil {
+		t.Fatal(err)
 	}
-	reserved := performJSON(t, engine, "POST", path+"/messages/"+output.ID+"/events", `{"event":{"op":"set","seq":3,"block":{"id":"human","type":"confirm"}}}`)
-	if reserved.StatusCode() != 400 {
-		t.Fatalf("reserved Human=%d %s", reserved.StatusCode(), reserved.Body())
+	if spoken.TaskID != "" || spoken.ConversationID != "root" {
+		t.Fatalf("speech=%+v", spoken)
 	}
-	done := performJSON(t, engine, "POST", path+"/complete", `{}`)
-	if done.StatusCode() != 204 {
-		t.Fatalf("complete=%d %s", done.StatusCode(), done.Body())
+	retry := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
+		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+	var same loopd.Message
+	if err := json.Unmarshal(retry.Body(), &same); err != nil || same.ID != spoken.ID {
+		t.Fatalf("speech retry=%s %v", retry.Body(), err)
 	}
-	late := performJSON(t, engine, "POST", path+"/messages/"+output.ID+"/events", event)
-	if late.StatusCode() != 409 {
-		t.Fatalf("late=%d %s", late.StatusCode(), late.Body())
+	changed := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
+		`{"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"operator","key":"another"}}`)
+	if changed.StatusCode() != 409 {
+		t.Fatalf("changed recipient=%d", changed.StatusCode())
+	}
+	speechPath := "/v1/messages/" + spoken.ID + "/events"
+	for i := 0; i < 2; i++ {
+		result := performJSON(t, engine, "POST", speechPath, event)
+		if result.StatusCode() != 202 {
+			t.Fatalf("stream/retry=%d %s", result.StatusCode(), result.Body())
+		}
+	}
+	projected, err := store.GetMessage(ctx, spoken.ID)
+	if err != nil || projected.Revision != 2 || !strings.Contains(string(projected.Content), "work") {
+		t.Fatalf("snapshot=%+v err=%v", projected, err)
+	}
+	ended := performJSON(t, engine, "POST", speechPath, `{"event":{"op":"end","seq":3}}`)
+	if ended.StatusCode() != 202 {
+		t.Fatalf("end=%d %s", ended.StatusCode(), ended.Body())
+	}
+	view := performJSON(t, engine, "GET", "/v1/conversations/root/messages/"+spoken.ID+"/context", "")
+	var messageContext loopd.MessageContext
+	if err := json.Unmarshal(view.Body(), &messageContext); err != nil {
+		t.Fatal(err)
+	}
+	if view.StatusCode() != 200 || messageContext.Message.ID != spoken.ID || len(messageContext.History) < 2 {
+		t.Fatalf("context=%d %s", view.StatusCode(), view.Body())
 	}
 }

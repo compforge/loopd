@@ -11,8 +11,8 @@ Its guiding idea is:
 Loop = Resource(spec + status) + Reconcile
 ```
 
-Every chat request creates a small loopd Task CRD that wakes the selected
-Actor. A simple Operator can reconcile that Task directly; a complex
+Messages wake their selected Actor through a persistent Conversation CRD.
+Operators receive new input through the Poll verb; a complex
 Operator may create domain CRDs for its own state and completion semantics.
 `loopd` keeps visible collaboration in conversations and messages. A Harness
 owns its execution state, while AgentLedger records the complete execution
@@ -22,9 +22,9 @@ history.
 
 ## Components
 
-- **loop-server** owns page-visible conversations and messages. It pairs each
-  active chat request with a Task CRD so the work can outlive an HTTP request,
-  browser connection, or server process.
+- **loop-server** owns page-visible conversations and messages. It signals the selected
+  participant through a Conversation CRD and delivers message streams independently
+  of the browser connection.
 - **loop-runtime** is a Go toolkit for building Operators. It combines
   controller-runtime resource reconciliation with loopd collaboration capabilities.
   See the [runtime design](docs/runtime.md) for the Operator development contract.
@@ -62,6 +62,6 @@ multiple Harnesses before publishing its result.
 
 Recovery depends on the execution and storage configuration. The bundled
 AgentGo demo runs in process; durable execution across Operator restarts requires
-a persistent Harness adapter. See the [runtime design](docs/runtime.md) for the
+both persistent Operator progress and a persistent Harness adapter. See the [runtime design](docs/runtime.md) for the
 calling and recovery contract, and [Kubernetes deployment](deploy/k8s/README.md)
 for the storage and Quick Start limits.

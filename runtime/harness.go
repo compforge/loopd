@@ -19,7 +19,7 @@ import (
 var ErrCallConflict = errors.New("harness call conflicts with an existing effect")
 
 type Harness struct {
-	chat     Chat
+	chat     Delivery
 	registry registry
 	state    *harnessState
 }
@@ -33,11 +33,15 @@ type harnessState struct {
 }
 
 type Prompt struct {
-	TaskID    string
-	EffectKey string
-	Target    string
-	Text      string
-	Tools     []loopd.Tool
+	// ConversationID directs visible output independently of a user Delivery.
+	ConversationID string
+	// IdempotencyKey belongs to the caller's business scope, not the UI stream.
+	IdempotencyKey string
+	TaskID         string
+	EffectKey      string
+	Target         string
+	Text           string
+	Tools          []loopd.Tool
 }
 
 type HarnessRegistration struct {
@@ -76,8 +80,8 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if prompt.TaskID == "" || prompt.EffectKey == "" || prompt.Target == "" || prompt.Text == "" {
-		return nil, errors.New("task ID, effect key, Harness target, and prompt are required")
+	if (prompt.ConversationID == "" || prompt.IdempotencyKey == "") || prompt.EffectKey == "" || prompt.Target == "" || prompt.Text == "" {
+		return nil, errors.New("conversation and idempotency key, effect key, Harness target, and prompt are required")
 	}
 	adapter := service.state.adapters[prompt.Target]
 	if adapter == nil {
@@ -87,7 +91,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	if err != nil {
 		return nil, err
 	}
-	effectID := prompt.TaskID + "\x00" + prompt.EffectKey
+	effectID := prompt.IdempotencyKey
 
 	service.state.mu.Lock()
 	if existing := service.state.calls[effectID]; existing != nil {
@@ -100,7 +104,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	callID := uuid.V7()
 	request := provider.Request{
 		CallID: callID, TaskID: prompt.TaskID,
-		IdempotencyKey: prompt.TaskID + "/" + prompt.EffectKey,
+		IdempotencyKey: effectID,
 		Prompt:         prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
 	}
 	providerCall, err := adapter.Prompt(service.state.ctx, request)
@@ -132,7 +136,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 		"call_id", providerCall.ID(),
 	)
 
-	go call.follow(service.state.ctx, providerCall, service.chat, prompt.TaskID, service.state.logger)
+	go call.follow(service.state.ctx, providerCall, service.chat, prompt, service.state.logger)
 	return call, nil
 }
 
@@ -178,7 +182,7 @@ func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 }
 
 // Stream is a Verb (effect: read) replaying locally observed deliveries after afterEventID and follows
-// the Call until completion. Durable page replay uses Chat.Send and SSE
+// the Call until completion. Durable page replay uses Delivery.Send and SSE
 // Last-Event-ID; this process-local view is a convenience for the Reconciler.
 func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd.Event, <-chan error) {
 	events := make(chan loopd.Event)
@@ -237,10 +241,11 @@ func (call *Call) eventIndex(afterEventID string) (int, error) {
 func (call *Call) follow(
 	ctx context.Context,
 	providerCall provider.Call,
-	chat Chat,
-	taskID string,
+	chat Delivery,
+	prompt Prompt,
 	logger *slog.Logger,
 ) {
+	taskID := prompt.TaskID
 	var publishErr error
 	var output *loopd.Message
 	for event := range providerCall.Events() {
@@ -270,14 +275,19 @@ func (call *Call) follow(
 			value.Block["effect_key"] = call.value.EffectKey
 		}
 		if output == nil {
-			message, err := chat.Output(ctx, taskID, loopd.OutputRequest{Key: call.value.EffectKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}})
+			var message loopd.Message
+			var err error
+			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
+			message, err = (Conv{client: chat.client}).Speak(ctx, prompt.ConversationID, loopd.SpeakRequest{
+				Key: prompt.IdempotencyKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}, TaskID: taskID, Content: content,
+			})
 			if err != nil {
 				publishErr = err
 				continue
 			}
 			output = &message
 		}
-		published, err := chat.EmitMessage(ctx, taskID, output.ID, value)
+		published, err := chat.EmitMessage(ctx, output.ID, value)
 		if err != nil {
 			publishErr = err
 			continue
@@ -285,6 +295,9 @@ func (call *Call) follow(
 		call.appendEvent(published)
 	}
 	result, waitErr := providerCall.Wait(ctx)
+	if output != nil && publishErr == nil && ctx.Err() == nil {
+		_, publishErr = chat.EmitMessage(ctx, output.ID, agentueui.End(0))
+	}
 	err := errors.Join(publishErr, waitErr)
 	phase := loopd.CallSucceeded
 	if err != nil {

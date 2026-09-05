@@ -1,6 +1,6 @@
-// Package router implements the first loopd Operator: it plans one user
-// request, fans complex work out to temporary Harness calls, and publishes one
-// Operator-owned answer.
+// Package router implements the first loopd Operator: it consumes user
+// messages, fans complex work out to temporary Harness calls, and publishes
+// progress and results into a shared conversation.
 //
 // The v1 Router does not discover or reserve registered Harnesses. Every call
 // uses the configured transient Harness target. Once loopd has a Harness
@@ -15,17 +15,20 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
-	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
 	loopruntime "github.com/compforge/loopd/runtime"
+	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
 	defaultMaxSubtasks = 4
-	// OperatorKey is the Task target key handled by the Router.
+	// OperatorKey identifies this participant in a conversation.
 	OperatorKey = "router"
 )
 
@@ -36,7 +39,7 @@ type Config struct {
 	Logger        *slog.Logger
 }
 
-// Reconciler turns a loopd Task into a plan, execution results, and final answer.
+// Reconciler receives messages and runs the Router conversation loop.
 type Reconciler struct {
 	loop          loopruntime.Loop
 	harnessTarget string
@@ -62,133 +65,47 @@ func New(loop loopruntime.Loop, config Config) (*Reconciler, error) {
 	}, nil
 }
 
-// SetupWithManager watches only Tasks addressed to this Router. Concurrency is
-// explicit because one Reconcile may wait on several long-running Harnesses.
+// SetupWithManager watches this Router's conversation inbox. A reconciliation
+// owns one active conversation loop; it calls Poll at execution boundaries.
 func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurrentReconciles int) error {
 	if maxConcurrentReconciles <= 0 {
 		return errors.New("Router reconcile concurrency must be positive")
 	}
-	return reconciler.loop.Task.Watch(
-		mgr,
-		loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey},
-		reconciler,
-		loopruntime.TaskWatchOptions{MaxConcurrentReconciles: maxConcurrentReconciles},
-	)
-}
-
-func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
-	task, err := reconciler.loop.Task.Get(ctx, request.Name)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("resolve Router task %q: %w", request.Name, err)
-	}
-	reconciler.logger.InfoContext(ctx, "Router task received",
-		"task_id", task.ID,
-		"conversation_id", task.Conversation.ID,
-	)
-
-	if err := reconciler.run(ctx, task); err != nil {
-		if ctx.Err() != nil {
-			return ctrl.Result{}, err
-		}
-		reconciler.logger.ErrorContext(ctx, "Router task failed", "task_id", task.ID, "error", err)
-		completeErr := reconciler.loop.Chat.Complete(ctx, task.ID, &loopruntime.TaskFailure{
-			Code: "router_failed", Message: err.Error(),
-		})
-		if completeErr != nil {
-			return ctrl.Result{}, errors.Join(err, fmt.Errorf("complete failed Router task: %w", completeErr))
-		}
-		return ctrl.Result{}, nil
-	}
-
-	reconciler.logger.InfoContext(ctx, "Router task completed", "task_id", task.ID)
-	return ctrl.Result{}, nil
-}
-
-func (reconciler *Reconciler) run(ctx context.Context, task loopd.TaskContext) error {
-	query, err := modelText(task.Input.Content)
-	if err != nil {
-		return fmt.Errorf("read user query: %w", err)
-	}
-	history, err := conversationText(task)
-	if err != nil {
-		return fmt.Errorf("read conversation history: %w", err)
-	}
-
-	planCall, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-		TaskID: task.ID, EffectKey: "plan", Target: reconciler.harnessTarget,
-		Text: planningPrompt(query, history, reconciler.maxSubtasks),
-	})
-	if err != nil {
-		return fmt.Errorf("start planning Harness: %w", err)
-	}
-	planResult, err := planCall.Wait(ctx)
-	if err != nil {
-		return fmt.Errorf("wait for planning Harness: %w", err)
-	}
-	plan, err := decodePlan(planResult.Result, query, reconciler.maxSubtasks)
-	if err != nil {
+	if err := conversationv1.AddToScheme(mgr.GetScheme()); err != nil {
 		return err
 	}
-	reconciler.logger.InfoContext(ctx, "Router task planned",
-		"task_id", task.ID,
-		"complexity", plan.Kind,
-		"subtask_count", len(plan.Tasks),
-	)
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("router").
+		For(&conversationv1.Conversation{}, builder.WithPredicates(loopruntime.ConversationPredicate(routerActor))).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		Complete(reconciler)
+}
 
-	// Prompt returns immediately with a running handle. Starting every call
-	// before waiting lets independent subtasks execute in parallel while their
-	// AgentUE streams remain observable through the same Task.
-	calls := make([]*loopruntime.Call, len(plan.Tasks))
-	for index, subtask := range plan.Tasks {
-		call, promptErr := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-			TaskID: task.ID, EffectKey: fmt.Sprintf("work/%d", index), Target: reconciler.harnessTarget,
-			Text: executionPrompt(query, history, subtask),
-		})
-		if promptErr != nil {
-			return fmt.Errorf("start Harness for subtask %d: %w", index+1, promptErr)
-		}
-		calls[index] = call
-	}
+var routerActor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey}
 
-	results := make([]string, len(calls))
-	for index, call := range calls {
-		result, waitErr := call.Wait(ctx)
-		if waitErr != nil {
-			return fmt.Errorf("wait for Harness subtask %d: %w", index+1, waitErr)
-		}
-		results[index] = strings.TrimSpace(result.Result)
-		if results[index] == "" {
-			return fmt.Errorf("Harness subtask %d returned an empty result", index+1)
-		}
-	}
-
-	summaryCall, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-		TaskID: task.ID, EffectKey: "summarize", Target: reconciler.harnessTarget,
-		Text: summaryPrompt(query, history, plan.Tasks, results),
-	})
+func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+	// Receive one initial input. Further inputs join this execution only at the
+	// boundary after its current Harness batch, rather than starting another task.
+	inbox, err := reconciler.loop.Conv.Poll(ctx, request.Name, loopd.PollRequest{Actor: routerActor, Limit: 1})
 	if err != nil {
-		return fmt.Errorf("start summary Harness: %w", err)
+		return ctrl.Result{}, err
 	}
-	summary, err := summaryCall.Wait(ctx)
+	if len(inbox.Messages) == 0 {
+		return ctrl.Result{}, nil
+	}
+	message := inbox.Messages[0]
+	if message.Kind != loopd.RoleUser {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
+			loopd.CommitRequest{Actor: routerActor, Through: inbox.Position})
+	}
+	scope, err := reconciler.loop.Conv.Context(ctx, request.Name, message.ID)
 	if err != nil {
-		return fmt.Errorf("wait for summary Harness: %w", err)
+		return ctrl.Result{}, err
 	}
-	answer := strings.TrimSpace(summary.Result)
-	if answer == "" {
-		return errors.New("summary Harness returned an empty answer")
+	if scope.Conversation.ID != request.Name {
+		return ctrl.Result{}, errors.New("Router input belongs to another conversation")
 	}
-	if _, err := reconciler.loop.Chat.Emit(ctx, task.ID, agentueui.Event{
-		Op: agentueui.OpSet,
-		Block: map[string]any{
-			"id": "answer", "type": "text", "role": string(loopd.RoleOperator), "content": answer,
-		},
-	}); err != nil {
-		return fmt.Errorf("publish Router answer: %w", err)
-	}
-	if err := reconciler.loop.Chat.Complete(ctx, task.ID, nil); err != nil {
-		return fmt.Errorf("complete Router task: %w", err)
-	}
-	return nil
+	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, scope)
 }
 
 type plan struct {
@@ -218,6 +135,10 @@ func decodePlan(raw, query string, maxSubtasks int) (plan, error) {
 		}
 	}
 	switch result.Kind {
+	case "summary":
+		if len(result.Tasks) != 0 {
+			return plan{}, errors.New("summary Router plan must not dispatch subtasks")
+		}
 	case "simple":
 		if len(result.Tasks) == 0 {
 			result.Tasks = []string{query}
@@ -268,15 +189,16 @@ func modelText(content json.RawMessage) (string, error) {
 	return strings.Join(values, "\n"), nil
 }
 
-func conversationText(task loopd.TaskContext) (string, error) {
+func conversationText(scope loopd.MessageContext) (string, error) {
 	var lines []string
-	for _, message := range task.History {
-		if message.ID == task.Input.ID {
+	for _, message := range scope.History {
+		if message.ID == scope.Message.ID {
 			continue
 		}
 		value, err := modelText(message.Content)
 		if err != nil {
-			return "", fmt.Errorf("message %q: %w", message.ID, err)
+			// History also includes typed Human cards and non-text output.
+			value = string(message.Content)
 		}
 		lines = append(lines, fmt.Sprintf("%s/%s: %s", message.Kind, message.Key, value))
 	}

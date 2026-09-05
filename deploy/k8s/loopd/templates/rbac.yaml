@@ -7,8 +7,11 @@ metadata:
     {{- include "loopd.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["loopd.compforge.io"]
-    resources: ["tasks"]
-    verbs: ["get", "list", "watch", "create", "delete", "update"]
+    resources: ["conversations"]
+    verbs: ["get", "list", "watch", "create", "update"]
+  - apiGroups: ["loopd.compforge.io"]
+    resources: ["conversations/status"]
+    verbs: ["get", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -25,4 +28,3 @@ roleRef:
   kind: Role
   name: {{ include "loopd.fullname" . }}
 {{- end }}
-

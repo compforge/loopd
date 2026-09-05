@@ -5,7 +5,7 @@ import { applyMessageEvent } from "./message";
 import { HumanMessage } from "./HumanMessage";
 
 function message(id: string, type = "ask"): Message {
- return { id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", purpose: "human_request", revision: 1, reply_to_message_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
+ return { id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", purpose: "human_request", revision: 1, reply_to_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
 }
 describe("Human messages", () => {
  it("routes equal block IDs to different Messages and ignores a stale snapshot", () => {
@@ -21,7 +21,7 @@ describe("Human messages", () => {
   expect(applyMessageEvent(updated, old)).toBe(updated);
  });
  it("only interprets confirmation values through the exact reply reference", () => {
-  const reply = message("reply"); reply.kind = "user"; reply.purpose = "human_reply"; reply.reply_to_message_id = "question";
+  const reply = message("reply"); reply.kind = "user"; reply.purpose = "human_reply"; reply.reply_to_id = "question";
   reply.content.blocks = [{ id: "human", type: "human_reply", outcome: "success", value: "accepted" }];
   const ask = message("question");
   expect(renderToStaticMarkup(<HumanMessage message={reply} replyTo={ask} onReply={() => {}} />)).toContain("accepted");

@@ -6,7 +6,7 @@
 - 一个 Router Operator Deployment；
 - 一个 Web Deployment 与 Service，Web 同源代理 loop-server 的 `/v1` SSE/API；
 - Quick Start 使用的内存 Redis Deployment 与 Service；
-- Task CRD，以及 loop-server 和 Router 访问 Task 所需的 namespace RBAC。
+- Conversation CRD，以及 loop-server 和 Router 访问 Conversation 所需的 namespace RBAC。
 
 Quick Start 不依赖 StorageClass：未配置 MySQL 时，loop-server 使用临时 SQLite；内置 Redis 只保留
 内存数据。Pod 重建后聊天记录与运行中的事件都会丢失，因此该模式只用于体验。Chart v1 固定要求

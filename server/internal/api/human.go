@@ -50,10 +50,10 @@ func (s *Server) createHuman(ctx context.Context, r *hertzapp.RequestContext) er
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
-	if input.TaskID != "" && input.TaskID != r.Param("task_id") {
+	if input.ConversationID != "" && input.ConversationID != r.Param("conversation_id") {
 		return service.ErrInvalid
 	}
-	input.TaskID = r.Param("task_id")
+	input.ConversationID = r.Param("conversation_id")
 	result, err := s.Human.Create(ctx, input)
 	if err != nil {
 		return err
@@ -91,7 +91,7 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
-	result, err := s.Human.Reply(ctx, r.Param("conversation_id"), r.Param("task_id"), actor, input)
+	result, err := s.Human.Reply(ctx, r.Param("conversation_id"), actor, input)
 	if err != nil {
 		return err
 	}

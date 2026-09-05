@@ -23,9 +23,9 @@ import (
 type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
 
 type Config struct {
+	Conversations ConversationCoordinator
 	Database      DatabaseConfig
 	Redis         RedisConfig
-	Tasks         TaskClient
 	Logger        *slog.Logger
 	HumanIdentity HumanIdentity
 }
@@ -41,6 +41,7 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
+	poll  *service.PollService
 	store *repo.Store
 	redis redis.UniversalClient
 	api   *serverapi.Server
@@ -49,8 +50,8 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
-	if config.Tasks == nil {
-		return nil, errors.New("task client is required")
+	if config.Conversations == nil {
+		return nil, errors.New("conversation coordinator is required")
 	}
 	store, err := repo.Open(repo.Config{
 		Driver: config.Database.Driver, DSN: config.Database.DSN,
@@ -70,13 +71,16 @@ func New(config Config) (*Server, error) {
 	actors := service.NewActorService(store, config.Logger)
 	messages := service.NewMessageService(store, config.Logger)
 	chatDelivery := delivery.New(events, store, config.Logger)
-	chat := service.NewChatService(store, config.Tasks, chatDelivery, config.Logger)
-	tasks := service.NewTaskService(store, config.Logger)
-	human := service.NewHumanService(store, config.Tasks, config.Logger)
-	api := serverapi.New(actors, conversations, messages, chat, tasks, config.Logger)
+	poll := service.NewPollService(store, config.Conversations, config.Logger)
+	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
+	contexts := service.NewContextService(store, config.Logger)
+	human := service.NewHumanService(store, config.Logger)
+	api := serverapi.New(actors, conversations, messages, chat, contexts, config.Logger)
 	api.Human = human
+	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
+		poll:  poll,
 		human: human, chat: chat,
 		store: store,
 		redis: redisClient,
@@ -89,6 +93,7 @@ func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.chat.Run(ctx) })
+	workers.Go(func() { server.poll.Run(ctx) })
 	workers.Wait()
 }
 func (server *Server) Close() error {

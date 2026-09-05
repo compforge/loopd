@@ -34,7 +34,7 @@ func TestHumanHandleWaitAndRequestContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	h, err := runtime.Loop.Human.Ask(context.Background(), AskRequest{TaskID: "task", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true})
+	h, err := runtime.Loop.Human.Ask(context.Background(), AskRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, TaskID: "task", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true})
 	mu.Lock()
 	captured := request
 	mu.Unlock()

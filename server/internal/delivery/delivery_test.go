@@ -27,9 +27,8 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateChatMessages(ctx,
+	_, err = store.CreateChatInput(ctx,
 		model.Message{ID: "message-1", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "user-1", Content: initial},
-		model.Message{ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Content: initial},
 		nil,
 	)
 	if err != nil {
@@ -48,11 +47,14 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	if err := producer.Initialize(ctx, "task-1", initial); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.CreateMessage(ctx, model.Message{ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
 	set := marshalEvent(t, agentueui.Event{
 		Op: agentueui.OpSet, Seq: 2,
 		Block: map[string]any{"id": "answer", "type": "text", "content": "hello"},
 	})
-	cursor, err := producer.Emit(ctx, "task-1", set)
+	_, err = producer.EmitMessage(ctx, "message-2", set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +62,7 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 		Op: agentueui.OpAppend, Seq: 3, Mask: "block.content",
 		Block: map[string]any{"id": "answer", "type": "text", "content": " world"},
 	})
-	if _, err := producer.Emit(ctx, "task-1", appendEvent); err != nil {
+	if _, err := producer.EmitMessage(ctx, "message-2", appendEvent); err != nil {
 		t.Fatal(err)
 	}
 	if err := producer.Complete(ctx, "task-1", nil); err != nil {
@@ -81,28 +83,32 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	}
 
 	var delivered []Event
-	if err := consumer.Stream(ctx, "task-1", "conversation-1", cursor, func(event Event) error {
+	if err := consumer.Stream(ctx, "task-1", "conversation-1", "", func(event Event) error {
 		delivered = append(delivered, event)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(delivered) != 3 {
-		t.Fatalf("got %d deliveries, want reconstructed start, append, and end", len(delivered))
+	// Output event IDs belong to their Message; only the control stream
+	// supplies a Chat replay cursor.
+	var cursor string
+	foundOutput := false
+	for _, item := range delivered {
+		if item.MessageID == "message-2" {
+			foundOutput = true
+			if item.ID != "" {
+				t.Fatal("message cursor escaped into Chat transport")
+			}
+		} else if item.ID != "" && cursor == "" {
+			cursor = item.ID
+		}
 	}
-	first, err := agentueui.Parse(delivered[0].Data)
-	if err != nil {
-		t.Fatal(err)
+	last, err := agentueui.Parse(delivered[len(delivered)-1].Data)
+	if err != nil || last.Op != agentueui.OpEnd || delivered[len(delivered)-1].Message != nil || !foundOutput || cursor == "" {
+		t.Fatalf("incomplete multiplexed delivery: %+v %v", delivered, err)
 	}
-	if first.Op != agentueui.OpStart || first.Seq != 2 || delivered[0].Persisted {
-		t.Fatalf("first delivery = %#v, parsed=%#v", delivered[0], first)
-	}
-	last, err := agentueui.Parse(delivered[2].Data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if last.Op != agentueui.OpEnd || !delivered[2].Persisted {
-		t.Fatalf("last delivery = %#v, parsed=%#v", delivered[2], last)
+	if err := consumer.Stream(ctx, "task-1", "conversation-1", cursor, func(Event) error { return nil }); err != nil {
+		t.Fatalf("resume by transport cursor: %v", err)
 	}
 }
 
@@ -128,16 +134,16 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateChatMessages(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial}, model.Message{ID: "response", ConversationID: "conv", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial}, nil)
+	_, err = store.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := loopd.HumanRequest{TaskID: "task", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
-	q, err := store.CreateHuman(ctx, r, true)
+	r := loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: "input", TaskID: "task", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
+	q, err := store.CreateHuman(ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ReplyHuman(ctx, "conv", "task", "alice", loopd.HumanReply{ReplyToMessageID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "answer"}); err != nil {
+	if _, err := store.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "answer"}); err != nil {
 		t.Fatal(err)
 	}
 	redisServer := miniredis.RunT(t)
@@ -149,8 +155,8 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	ended := false
 	completed := false
 	err = coordinator.Stream(ctx, "task", "conv", "", func(value Event) error {
-		if value.MessageID == "" {
-			t.Fatal("missing Message identity")
+		if value.MessageID != "" && value.Message == nil {
+			t.Fatal("missing Message envelope")
 		}
 		event, err := agentueui.Parse(value.Data)
 		if err != nil {
@@ -162,9 +168,9 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 		if value.Message != nil && value.Message.Purpose == "human_reply" {
 			seen["reply"] = true
 		}
-		if value.MessageID == "response" && !completed {
+		if value.MessageID == "" && event.Op == agentueui.OpStart && !completed {
 			completed = true
-			if err := store.BeginCompletion(ctx, "task", []byte("null"), false); err != nil {
+			if err := store.BeginCompletion(ctx, "task", []byte("null")); err != nil {
 				return err
 			}
 			return coordinator.Complete(ctx, "task", nil)
@@ -180,17 +186,8 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	if err != nil || !ended {
 		t.Fatalf("stream ended=%v %v", ended, err)
 	}
-	response, err := store.GetMessage(ctx, "response")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var content struct {
-		Blocks []json.RawMessage `json:"blocks"`
-	}
-	if err := json.Unmarshal(response.Content, &content); err != nil {
-		t.Fatal(err)
-	}
-	if len(content.Blocks) != 0 {
-		t.Fatalf("Human blocks leaked into main content: %s", response.Content)
+	rows, err := store.ListMessages(ctx, "conv", "", 100)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("expected input, question, reply: %+v %v", rows, err)
 	}
 }

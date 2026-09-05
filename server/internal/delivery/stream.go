@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -18,21 +19,20 @@ type messageDelivery struct {
 }
 
 // Stream multiplexes messages without folding their models together.
-// Only the main answer advances Last-Event-ID; other messages restart with their
-// own full replay on reconnect. A side-message end never terminates the Task.
+// The UI transport advances Last-Event-ID; each message replays its independent
+// stream on reconnect. A message's end never terminates the Chat transport.
 func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversationID, after string, deliver func(Event) error) error {
-	response, err := coordinator.response(ctx, taskID)
+	input, err := coordinator.input(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	if response.ConversationID != conversationID {
+	if input.ConversationID != conversationID {
 		return agentuerunner.ErrNotFound
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	incoming := make(chan messageDelivery)
 	started := map[string]bool{}
-	finished := map[string]bool{}
 	revisions := map[string]uint64{}
 	start := func(message model.Message, cursor string) error {
 		if started[message.ID] {
@@ -87,10 +87,10 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			return err
 		}
 		for _, row := range rows {
-			if row.Purpose == "input" || row.ID == response.ID {
+			if row.Purpose == "input" {
 				continue
 			}
-			if row.Purpose == "output" && response.DeliveryState != "closed" {
+			if row.Purpose == "output" && input.DeliveryState != "closed" {
 				if err := start(row, ""); err != nil {
 					return err
 				}
@@ -103,40 +103,43 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 	if err := discover(); err != nil {
 		return err
 	}
-	if response.DeliveryState == "closed" {
-		if err := snapshot(response); err != nil {
-			return err
+	if input.DeliveryState == "closed" {
+		var failure *Failure
+		if len(input.Completion) != 0 {
+			if err := json.Unmarshal(input.Completion, &failure); err != nil {
+				return err
+			}
 		}
-		end, err := agentueui.End(response.Revision + 1).Marshal()
+		var seq uint64 = 2
+		if failure != nil {
+			data, err := agentueui.Failure(seq, failure.Code, failure.Message).Marshal()
+			if err != nil {
+				return err
+			}
+			if err := deliver(Event{Data: data}); err != nil {
+				return err
+			}
+			seq++
+		}
+		end, err := agentueui.End(seq).Marshal()
 		if err != nil {
 			return err
 		}
-		return deliver(Event{MessageID: response.ID, Data: end})
+		return deliver(Event{Data: end})
 	}
+	control := transportMessage(input)
 	// A lost bridge can only restart from the durable message snapshot.
-	if _, err := coordinator.events.State(ctx, streamKey(response)); errors.Is(err, agentuerunner.ErrNotFound) {
+	if _, err := coordinator.events.State(ctx, streamKey(control)); errors.Is(err, agentuerunner.ErrNotFound) {
 		after = ""
 	} else if err != nil {
 		return err
 	}
-	if err := start(response, after); err != nil {
+	if err := start(control, after); err != nil {
 		return err
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
-	var terminal *Event
 	for {
-		if terminal != nil {
-			all := true
-			for id := range started {
-				if id != response.ID && !finished[id] {
-					all = false
-				}
-			}
-			if all {
-				return deliver(*terminal)
-			}
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -149,7 +152,6 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				if value.err != nil {
 					return value.err
 				}
-				finished[value.message.ID] = true
 				continue
 			}
 			parsed, err := agentueui.Parse(value.delivery.Data)
@@ -158,15 +160,24 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			}
 			msg := visibleMessage(value.message)
 			event := Event{MessageID: msg.ID, Message: &msg, Data: value.delivery.Data}
-			if msg.ID == response.ID {
+			if msg.ID == control.ID {
+				event.Message = nil
 				event.ID = value.delivery.Cursor
 				event.Persisted = event.ID != ""
 				if parsed.Op == agentueui.OpEnd {
-					if err := discover(); err != nil {
+					// UI closure flushes current snapshots but never terminates message writers.
+					rows, err := coordinator.repo.ListMessagesByTask(ctx, taskID, "", -1)
+					if err != nil {
 						return err
 					}
-					terminal = &event
-					continue
+					for _, row := range rows {
+						if row.Purpose != "input" {
+							if err := snapshot(row); err != nil {
+								return err
+							}
+						}
+					}
+					return deliver(event)
 				}
 			}
 			if err := deliver(event); err != nil {
