@@ -38,11 +38,11 @@ func testRegistryRoundTrip(t *testing.T, store *Store) {
 	ctx := context.Background()
 	expires := time.Now().UTC().Add(time.Minute)
 	key := "registry-test-" + uuid.V7()
-	operator, err := store.RegisterOperator(ctx, model.Operator{ID: uuid.V7(), Key: key, ExpiresAt: expires})
+	operator, err := store.RegisterOperator(ctx, model.Operator{ID: uuid.V7(), OperatorKey: key, ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
 	}
-	renewed, err := store.RegisterOperator(ctx, model.Operator{ID: uuid.V7(), Key: key, DisplayName: "renewed", ExpiresAt: expires})
+	renewed, err := store.RegisterOperator(ctx, model.Operator{ID: uuid.V7(), OperatorKey: key, DisplayName: "renewed", ExpiresAt: expires})
 	if err != nil || renewed.ID != operator.ID || renewed.DisplayName != "renewed" {
 		t.Fatalf("Operator renewal = %#v, error = %v", renewed, err)
 	}
@@ -53,18 +53,18 @@ func testRegistryRoundTrip(t *testing.T, store *Store) {
 	found := false
 	for i, item := range operators {
 		found = found || item.ID == operator.ID
-		if i > 0 && operators[i-1].Key > item.Key {
+		if i > 0 && operators[i-1].OperatorKey > item.OperatorKey {
 			t.Fatal("Operators are not ordered by key")
 		}
 	}
 	if !found {
 		t.Fatal("registered Operator missing from discovery")
 	}
-	harness, err := store.RegisterHarness(ctx, model.Harness{ID: uuid.V7(), Key: key, ExpiresAt: expires})
+	harness, err := store.RegisterHarness(ctx, model.Harness{ID: uuid.V7(), HarnessKey: key, ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
 	}
-	renewedHarness, err := store.RegisterHarness(ctx, model.Harness{ID: uuid.V7(), Key: key, DisplayName: "renewed", ExpiresAt: expires})
+	renewedHarness, err := store.RegisterHarness(ctx, model.Harness{ID: uuid.V7(), HarnessKey: key, DisplayName: "renewed", ExpiresAt: expires})
 	if err != nil || renewedHarness.ID != harness.ID || renewedHarness.DisplayName != "renewed" {
 		t.Fatalf("Harness renewal = %#v, error = %v", renewedHarness, err)
 	}
@@ -75,7 +75,7 @@ func testRegistryRoundTrip(t *testing.T, store *Store) {
 	found = false
 	for i, item := range harnesses {
 		found = found || item.ID == harness.ID
-		if i > 0 && harnesses[i-1].Key > item.Key {
+		if i > 0 && harnesses[i-1].HarnessKey > item.HarnessKey {
 			t.Fatal("Harnesses are not ordered by key")
 		}
 	}

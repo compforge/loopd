@@ -42,8 +42,8 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 		t.Fatalf("register actor status=%d body=%s", registered.StatusCode(), registered.Body())
 	}
 	if _, err := store.RegisterHarness(context.Background(), model.Harness{
-		ID:  "01991f3d-1115-7000-8000-000000000000",
-		Key: "expired", DisplayName: "Expired", ExpiresAt: time.Now().UTC().Add(-time.Minute),
+		ID:         "01991f3d-1115-7000-8000-000000000000",
+		HarnessKey: "expired", DisplayName: "Expired", ExpiresAt: time.Now().UTC().Add(-time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
