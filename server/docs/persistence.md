@@ -1,7 +1,8 @@
 # loop-server 持久化
 
-数据库保存页面可见 Conversation、Message 和 Operator/Harness 在线注册。Conv CRD 保存唤醒与
-消费位置，Operator 领域进度由业务 CRD 保存；AgentLedger 承载完整执行轨迹，不替代可见消息。
+本文定义页面可见事实的存储归属与身份：数据库保存 Conversation、Message 和 Operator/Harness
+在线注册。同一份 Message 同时支持页面历史与参与者消费，不另建一份业务消息 queue 表。
+消费协议由 [Conversation](conversation.md) 定义，跨存储的责任分层见 [Kernel](../../docs/kernel.md)。
 
 数据库差异由 repo 的 GORM Dialector 封装，使用 DATABASE_DRIVER 与 DATABASE_DSN 配置。
 Quick Start 默认临时 SQLite，持久部署由使用方提供外部 MySQL。Redis 是事件交付桥，不是数据库
@@ -37,7 +38,7 @@ Speak 的稳定 Key 以 Conversation + Actor 为范围，存储层生成全局�
 
 revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状态转换在事务内递增。
 每条消息分别更新，不能因为 block ID 相同就跨消息合并。持久化与 replay 见
-[页面交付](task-delivery.md)。
+[页面交付](ue.md#页面交付)。
 
 task_id 仅关联 UI／Redis 交付，可以为空。purpose=input 的消息是开启该交付的真实用户发言，
 其 delivery_state/completion 保存 UI 关闭意图；这些字段不控制 Actor 是否还可以发言。
@@ -56,7 +57,7 @@ reply_to_id 是答复关联的唯一依据，不能用最近消息、相邻位�
 问题生命周期独立于 UI delivery；关闭页面流不取消问题，普通发言不自动表示批准。
 类型化契约见 [Runtime](../../docs/runtime.md)。
 
-## 时间、分页与并行展示
+## 时间与分页
 
 表主键使用 UUIDv7，消息按 id 排序并分页，不维护额外 sequence。
 UUIDv7 的时间顺序不是多节点数据库的全局提交顺序；当前采用人类输入通常有先后的假设，
@@ -65,5 +66,4 @@ UUIDv7 的时间顺序不是多节点数据库的全局提交顺序；当前采�
 created_at 与 updated_at 表达首次到最后一次可见活动。Harness 事件携带时间戳，
 完成投影不把每条消息的结束时间改成整个页面流的完成时间，重试不缩短活动区间。
 
-详情按相交时间区间分组，同组按 Actor 分列。与前组无交集的时间段重新靠左，
-卡片按内容自然高度展示，不按持续时长拉伸。区间代表可见活动，不是精确执行耗时或因果关系。
+时间区间如何用于并行展示见 [消息呈现](ue.md#消息呈现)，不由存储层规定页面布局。

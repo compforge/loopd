@@ -8,6 +8,9 @@ Client 与 Reconcile 调度，loop-runtime 联合 server 提供数据读取、�
 Operator 持久化的领域 CRD；Harness 恢复由 Adapter 及执行端保证。runtime 不恢复 Go 调用栈，
 也不建立通用持久 Effect 引擎。跨组件边界见 [Kernel](kernel.md)。
 
+本文面向 Operator 开发者，定义 Verb 的调用与组合契约；独立参与者的整体协作模型见 Kernel，
+服务端消费、存储和页面交付机制分别下沉到 server 的领域文档。
+
 ## 参与者与接入
 
 Human 与 Operator 在持久会话中独立发言，不要求轮流说话或每条输入对应一条答案。
@@ -70,8 +73,13 @@ Conv.Workspace 按 User conv + Actor 懒创建并复用内部会话。Operator �
 
 ## 消费与连续输入
 
+Operator 把 DB 中持久化的消息当作自己的输入 queue，经 runtime 消费，不直接连接数据库。
+各 Operator 独立选择 Poll、Speak 和 Commit 的时机；持续输入是常态，不需要等当前回答结束
+才能提交下一条消息。Commit 应跟随可安全恢复的处理进度，而不是仅仅跟随 Poll 返回。
+
 Poll / Commit 参考 Kafka 的消费语义。Poll 不传 After 时从 Committed 恢复；同一次执行继续
 拉取时传上次返回的 Position，响应丢失则用相同参数重试。只有安全处理了连续前缀，才 Commit。
+位置定义、通知重试与至少一次消费的限制见 [Conversation](../server/docs/conversation.md)。
 
 何时接受补充、重做计划还是继续执行，属于 Operator 业务。runtime 不把普通消息自动映射成
 Harness steer/followup，也不规定一条消息就是一个新任务。Read 不改变消费位置。
@@ -164,4 +172,4 @@ Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Mess
 [Human](../runtime/human.go)、[Harness](../runtime/harness.go) 和
 [Router](../operators/router/internal/router/router.go) 是能力入口。
 Go 测试覆盖消费重读、交付和交互，Web 测试覆盖消息投影与卡片展示。
-流式与收尾协议见 [Delivery](../server/docs/task-delivery.md)。
+页面交互与交付协议见 [UE](../server/docs/ue.md)。

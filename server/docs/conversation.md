@@ -3,8 +3,17 @@
 Conversation 是参与者共享的交流空间，Message 是可见内容的事实来源。Conv CRD 保存参与者的
 唤醒信号与消费位置，不保存消息正文或 Operator 的领域状态。
 
-Human 与 Operator 独立运行。人可以连续追加消息，Operator 也可以先回应一部分、继续工作，
-再发出更多消息；平台不规定一问一答，也不把一次页面流当作业务任务边界。
+本文拥有持久消息的通知、拉取与提交协议。独立参与者模型见 [Kernel](../../docs/kernel.md)，
+Verb 的调用方式见 [Runtime](../../docs/runtime.md)；这里不规定 Operator 何时处理补充输入。
+
+## DB 作为协作 queue
+
+参与者通过保留的 Message 协作，不直接等待对方调用返回。各 Actor 在同一 Conv 中有独立的
+消费位置：A Commit 不会替 B 确认，也不会删除历史。Read 是查看共享记录，Poll 是领取自己的
+待消费输入；两者不能混用来推断“已经处理完”。
+
+这不是严格只追加的事件日志：消息内容仍可以按 revision 更新，Poll 的位置按 Message ID
+推进，不把每次流式增量当作新输入。Redis 的流位置服务页面重连，与 Actor 的消费位置无关。
 
 ## 定向消息与共享历史
 
@@ -59,5 +68,6 @@ Ask/Confirm 的卡片回复有精确 reply_to_id 和类型化结果；普通发�
 何时 Poll、补充消息是否合并进工作、是否需要领域 CRD，由 Operator 决定。编排恢复靠领域 CRD，
 Harness 恢复靠 Adapter；Conv 消费位置不恢复 Go 调用栈。
 
+消息和会话的存储归属见 [持久化](persistence.md)，页面交互与续接见 [UE](ue.md)。
 Operator 只使用 runtime，不导入 server 的 repo/model，也不直接访问聊天数据库或 Redis。
 当前 Operator API 使用可信部署边界，不构成完整多租户身份认证或消息可见性 ACL。

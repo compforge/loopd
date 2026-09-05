@@ -3,9 +3,9 @@
 ## 项目定位与边界
 
 loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-loop-server 保存跨参与者的 Conversation 与 Message，通过 Conv CRD 的定向信号唤醒 Operator。
-Operator 通过 Poll/Commit 消费消息，自行决定业务执行边界及是否创建领域 CRD。Harness 持有智能执行状态，loopd
-不保存 Operator 领域表。
+独立参与者通过持久化消息协作，自行决定何时接收、回应和确认安全消费。DB 保存会话消息，
+Conv CRD 保存消费进度并触发 Reconcile，Redis 服务页面流与重连。Operator 自行定义业务执行边界
+及领域 CRD，Harness 持有智能执行状态；loopd 不保存 Operator 领域表。稳定模型见 `docs/kernel.md`。
 
 Conversation 中的公开角色统一为 `user`、`operator`、`harness`。Agent、Assistant、Session 等外部
 概念通过 Harness Adapter 接入后，不再进入 loopd 公共模型。
@@ -39,7 +39,7 @@ loopd/
 
 ## References
 
-- `docs/kernel.md` — loopd 稳定模型、主流程和扩展边界
+- `docs/kernel.md` — 独立参与者协作模型、状态与恢复责任、设计文档分工
 - `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、消息上下文、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `server/docs/conversation.md` — Conv 消息接收与 Poll 契约
