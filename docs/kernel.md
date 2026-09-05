@@ -56,6 +56,20 @@ Loop = Resource(spec + status) + Reconcile
 spec 表达目标和约束，status 表达最新观测；Reconciler 读取权威事实，判断继续、等待、重试
 还是完成。Event 只提示变化，不能取代状态读取。
 
+CRD 与 Reconcile 提供持续收敛的结构，但仅对资源做 CRUD 不足以完成协作。CRD 承载状态，
+Reconcile 决定下一步，Verb 将判断连接到实际能力：读取会话、调用 Harness、向 Human 发起
+Ask/Confirm，以及发布过程和回答。loop-runtime 与 server 共同提供这些协作机制，通过类型化
+Verb 向 Operator 暴露；Verb 的 Effect 分为 read 与 write。
+
+这层基础设施承接数据读取、流式输出的交付与持久化，以及经 server 间接送达前端的链路，
+并提供扩展接入。Operator 开发者专注业务判断与编排，不必自行处理聊天存储、事件传输
+和页面连接细节。
+
+恢复责任分层：编排层依靠 CRD 持久化领域进度，Operator 重启后通过 Reconcile 读取状态并继续
+收敛；Harness 层由 Adapter 及其执行端保证执行恢复，loopd 不接管这层责任。agentd 是持久执行
+的承载方，agentgo 仅用于进程内模拟，不提供跨重启执行恢复。消息续接与交付重试属于聊天交付
+机制，不替代这两层的恢复。
+
 通用 Task 携带问答身份、目标路由与唤醒信息，不复制 Query、History、回答或 Operator 领域
 状态。简单 Operator 直接 Reconcile Task；复杂 Operator 再创建自己的领域 CRD。LongHorizon
 的 Manager、Executor、Auditor 等角色可以由其 Operator 定义，不进入通用内核。
@@ -94,8 +108,8 @@ AgentUE 拥有页面语义模型、Reducer、Redis Bridge 和续接。runtime �
 事件，页面按 task_id 从任意实例观察；server 在完成阶段固化 Message。事件传输标识与语义
 顺序分别负责续接和幂等，不能将事件流当作完整执行历史。
 
-流式观察跨实例并不自动保证跨重启恢复。长期执行依赖 Harness 的持久状态与相应存储配置；
-各能力的恢复边界分别见 Runtime 和 Task 交付文档。
+流式观察跨实例不等于编排或 Harness 执行恢复；前者依靠 CRD 状态重新调谐，后者依靠 Adapter
+及执行端的持久状态。调用契约与消息交付边界分别见 Runtime 和 Task 交付文档。
 
 ## 领域设计入口
 

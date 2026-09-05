@@ -13,6 +13,8 @@ Operator 提供 Resource 和 Reconciler 中的业务逻辑。loop-runtime 沿用
 
 两者在同一 Operator 内组合。controller-runtime 负责资源控制循环，loop-runtime 补充 Human、
 Conversation 与 Harness 的协作能力；已有的 Manager、调度队列、重试和资源 Client 直接复用。
+Verb 是 Reconcile 读取协作事实、推进实际工作的能力入口，不替代 Reconcile 的业务判断。
+“Loop is a CRD” 的落地既需要状态收敛结构，也需要这些可执行的协作能力，而不只是资源 CRUD。
 
 | 关注点 | controller-runtime | loop-runtime | Operator |
 |---|---|---|---|
@@ -35,6 +37,24 @@ Operator process
 Operator 通过公共契约接入，不导入 server 的 repo/model，也不直接写聊天数据库或 Redis。
 Harness Adapter 在 Operator 进程的 runtime 一侧装配，server 不执行 Adapter。业务自有数据库、
 API 和领域 CRD 可以通过普通 Client 访问，无需先进入 loopd Core。
+
+### Verb 背后的公共机制
+
+Verb 是 Operator 面向协作基础设施的入口，底层机制由 runtime 与 server 配合承担，而不是
+要求每个 Operator 自己实现一套数据访问、流式交付和交付重试逻辑：
+
+- 数据读取：按 Task 或 Conversation 获取消息与上下文，屏蔽聊天存储和服务端组装细节。
+- 输出交付：runtime 按 Message 发布流式输出，server 协调事件传输与消息固化，再通过
+  AgentUE 交付前端；Operator 不需要感知页面连接，也不直接操作聊天数据库或 Redis。
+- 扩展接入：业务通过 Operator 扩展编排策略，Harness 通过 Adapter 接入，差异不进入聊天核心。
+- 交付可靠性：公共层提供消息续接、交付收尾重试及各 Verb 约定的幂等能力。流式续接
+  不等于执行恢复，也不意味着每个增量都已固化到数据库。
+
+执行恢复不由 runtime 的内存状态保证。编排层由 Operator 将领域进度与稳定动作身份持久化到
+CRD，重启后通过 Reconcile 重新读取并推进；Harness 层由 Adapter 及其执行端负责，loopd 只按
+契约接入，不实现 Harness 内部恢复。agentd 承担持久执行，agentgo 只是进程内模拟。
+
+Operator 需要理解这些调用契约和恢复边界，但无需关注其存储、传输与前端交付的实现细节。
 
 ## 接入与运行流程
 
