@@ -43,7 +43,8 @@ func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 2, Block: map[string]any{
+	start, middle, end, next := int64(1700000000000), int64(1700000001000), int64(1700000002000), int64(1700000003000)
+	first := marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 2, Timestamp: &start, Block: map[string]any{
 		"id": "call-a/text", "type": "text", "content": "plan", "call_id": "call-a", "effect_key": "plan",
 	}})
 	for i := 0; i < 2; i++ {
@@ -60,17 +61,21 @@ func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
 		t.Fatalf("live detail=%+v err=%v", live, err)
 	}
 	liveID := live[0].ID
-	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpAppend, Seq: 3, Mask: "block.content", Block: map[string]any{
+	if !live[0].CreatedAt.Equal(time.UnixMilli(start)) || !live[0].UpdatedAt.Equal(live[0].CreatedAt) {
+		t.Fatalf("initial activity interval=%v → %v", live[0].CreatedAt, live[0].UpdatedAt)
+	}
+	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpAppend, Seq: 3, Timestamp: &end, Mask: "block.content", Block: map[string]any{
 		"id": "call-a/text", "type": "text", "content": " done", "call_id": "call-a", "effect_key": "plan",
 	}})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 4, Block: map[string]any{
+	// Later delivery with an earlier source timestamp must not regress activity.
+	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 4, Timestamp: &middle, Block: map[string]any{
 		"id": "call-a/tool", "type": "tool", "name": "search", "call_id": "call-a", "effect_key": "plan",
 	}})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 5, Block: map[string]any{
+	if _, err := producer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 5, Timestamp: &next, Block: map[string]any{
 		"id": "call-b/text", "type": "text", "content": "result", "call_id": "call-b", "effect_key": "work/0",
 	}})); err != nil {
 		t.Fatal(err)
@@ -110,6 +115,10 @@ func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
 	details, err := store.ListMessages(ctx, detail.ID, "", 100)
 	if err != nil || len(details) != 2 || details[0].ID != liveID {
 		t.Fatalf("details=%+v err=%v", details, err)
+	}
+	if !details[0].CreatedAt.Equal(time.UnixMilli(start)) || !details[0].UpdatedAt.Equal(time.UnixMilli(end)) ||
+		!details[1].CreatedAt.Equal(time.UnixMilli(next)) || !details[1].UpdatedAt.Equal(time.UnixMilli(next)) {
+		t.Fatalf("completion/replay changed individual activity intervals: %+v", details)
 	}
 	var saved struct {
 		Meta   map[string]any   `json:"meta"`
@@ -159,7 +168,7 @@ func TestEnsureDetailMessageConcurrentIdentity(t *testing.T) {
 	ids := make(chan string, 8)
 	for i := 0; i < cap(ids); i++ {
 		wg.Go(func() {
-			message, err := coordinator.ensureDetail(ctx, parent, "same-call", map[string]any{"effect_key": "work/0"})
+			message, err := coordinator.ensureDetail(ctx, parent, "same-call", map[string]any{"effect_key": "work/0"}, time.Time{})
 			if err != nil {
 				t.Error(err)
 				return
@@ -186,7 +195,7 @@ func TestDirectHarnessOutputStaysInMainMessage(t *testing.T) {
 		map[string]any{"id": "text", "type": "text", "content": "direct answer", "call_id": "direct-call"},
 	}}
 	// A direct Harness response must not consult the detail repository at all.
-	result, err := New(nil, nil, nil).persistDetails(context.Background(), model.Message{Kind: "harness"}, snapshot)
+	result, err := New(nil, nil, nil).persistDetails(context.Background(), model.Message{Kind: "harness"}, snapshot, nil)
 	if err != nil || len(result["blocks"].([]any)) != 1 {
 		t.Fatalf("direct output=%+v err=%v", result, err)
 	}

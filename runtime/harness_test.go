@@ -96,6 +96,11 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatalf("published events = %#v", published)
 	}
 	publishedMu.Unlock()
+	for _, event := range published[1:] {
+		if event.Timestamp == nil || *event.Timestamp <= 0 {
+			t.Fatalf("Harness output omitted AgentUE activity timestamp: %#v", event)
+		}
+	}
 
 	again, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
 	if err != nil {

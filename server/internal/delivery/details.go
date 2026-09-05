@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"fmt"
+	"time"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
@@ -10,7 +11,7 @@ import (
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
-func (coordinator *Coordinator) ensureDetail(ctx context.Context, response model.Message, callID string, block map[string]any) (model.Message, error) {
+func (coordinator *Coordinator) ensureDetail(ctx context.Context, response model.Message, callID string, block map[string]any, at time.Time) (model.Message, error) {
 	// The temporary Harness is identified by its Call, not by the shared
 	// adapter name. Registered Harness identity can be added at that boundary.
 	effectKey, _ := block["effect_key"].(string)
@@ -22,8 +23,11 @@ func (coordinator *Coordinator) ensureDetail(ctx context.Context, response model
 	}
 	message, created, err := coordinator.repo.EnsureDetailMessage(ctx,
 		model.Conversation{ID: uuid.V7(), Name: "处理详情", ParentMessageID: &response.ID},
-		model.Message{ID: uuid.V7(), TaskID: response.TaskID, Kind: string(loopd.RoleHarness), ActorKey: callID, Content: content},
+		model.Message{ID: uuid.V7(), TaskID: response.TaskID, Kind: string(loopd.RoleHarness), ActorKey: callID, Content: content, CreatedAt: at, UpdatedAt: at},
 	)
+	if err == nil && !created && !at.IsZero() {
+		err = coordinator.repo.ObserveMessageActivity(ctx, message.ID, at)
+	}
 	if err == nil && created {
 		coordinator.logger.InfoContext(ctx, "detail message created", "parent_message_id", response.ID,
 			"conversation_id", message.ConversationID, "message_id", message.ID,
@@ -34,7 +38,7 @@ func (coordinator *Coordinator) ensureDetail(ctx context.Context, response model
 
 // persistDetails separates visible ownership without changing the task-wide
 // AgentUE stream: the stream is transport, not the main Message's content.
-func (coordinator *Coordinator) persistDetails(ctx context.Context, response model.Message, snapshot map[string]any) (map[string]any, error) {
+func (coordinator *Coordinator) persistDetails(ctx context.Context, response model.Message, snapshot map[string]any, activity map[string]activityInterval) (map[string]any, error) {
 	if response.Kind != string(loopd.RoleOperator) {
 		return snapshot, nil
 	}
@@ -56,9 +60,15 @@ func (coordinator *Coordinator) persistDetails(ctx context.Context, response mod
 	}
 	for _, callID := range callIDs {
 		block := grouped[callID][0].(map[string]any)
-		message, err := coordinator.ensureDetail(ctx, response, callID, block)
+		interval := activity[callID]
+		message, err := coordinator.ensureDetail(ctx, response, callID, block, interval.first)
 		if err != nil {
 			return nil, err
+		}
+		if !interval.last.IsZero() {
+			if err := coordinator.repo.ObserveMessageActivity(ctx, message.ID, interval.last); err != nil {
+				return nil, err
+			}
 		}
 		effectKey, _ := block["effect_key"].(string)
 		content, err := agentueui.MarshalSnapshot(map[string]any{
@@ -68,10 +78,31 @@ func (coordinator *Coordinator) persistDetails(ctx context.Context, response mod
 		if err != nil {
 			return nil, err
 		}
-		if _, err := coordinator.repo.UpdateMessageContent(ctx, message.ConversationID, message.ID, content); err != nil {
+		if err := coordinator.repo.SaveDetailContent(ctx, message.ID, content); err != nil {
 			return nil, fmt.Errorf("persist detail message %q: %w", message.ID, err)
 		}
 	}
 	snapshot["blocks"] = mainBlocks
 	return snapshot, nil
+}
+
+type activityInterval struct{ first, last time.Time }
+
+func (interval *activityInterval) include(at time.Time) {
+	if at.IsZero() {
+		return
+	}
+	if interval.first.IsZero() || at.Before(interval.first) {
+		interval.first = at
+	}
+	if at.After(interval.last) {
+		interval.last = at
+	}
+}
+
+func eventTime(event agentueui.Event) time.Time {
+	if event.Timestamp == nil {
+		return time.Time{}
+	}
+	return time.UnixMilli(*event.Timestamp).UTC()
 }

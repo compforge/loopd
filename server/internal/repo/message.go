@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
@@ -234,4 +235,26 @@ func ensureConversation(db *gorm.DB, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ObserveMessageActivity only widens the interval. Conditional updates remain
+// safe when different servers deliver accepted events to SQL out of order.
+func (store *Store) ObserveMessageActivity(ctx context.Context, id string, at time.Time) error {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	if err := store.db.WithContext(ctx).Model(&model.Message{}).
+		Where("id = ? AND created_at > ?", id, at).UpdateColumn("created_at", at).Error; err != nil {
+		return mapError(err)
+	}
+	return mapError(store.db.WithContext(ctx).Model(&model.Message{}).
+		Where("id = ? AND updated_at < ?", id, at).UpdateColumn("updated_at", at).Error)
+}
+
+// SaveDetailContent materializes an already observed stream. GORM's automatic
+// updated_at would incorrectly extend every Harness to Task completion time.
+func (store *Store) SaveDetailContent(ctx context.Context, id string, content []byte) error {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	return mapError(store.db.WithContext(ctx).Model(&model.Message{}).
+		Where("id = ?", id).UpdateColumn("content", content).Error)
 }
