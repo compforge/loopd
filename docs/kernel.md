@@ -1,8 +1,34 @@
 # loopd Kernel
 
 loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-参与者在持久 Conversation 中发言；server 保存 Message，通过 Conv CRD 唤醒收件者；
-Operator 用 runtime Verb 读取、执行、协作并发布结果。
+独立参与者通过持久化消息协作：各自运行，自己决定何时接收消息、何时回应，处理到安全位置再确认消费。
+Conversation 是共享交流空间，不是由一次请求驱动、等待一个答案后结束的固定工作流。
+
+## 协作模型
+
+Human 可以在 Operator 工作期间持续发言；Operator 可以先回应一部分，再继续工作和发言。
+双方不互相占有生命周期，也不必轮流执行。Operator 通过 Poll 接收输入，通过 Speak 回应，
+在结果或领域进度足以支持安全恢复后 Commit；何时做这些事，由各 Operator 的业务决定。
+
+这套参与者模型也容纳 Harness。角色描述身份，不表示谁是主、谁是辅；但统一身份不等于统一
+执行协议：Operator 使用 Poll/Commit，Harness 的接入和执行恢复仍由 Adapter 契约负责。
+
+协作所需的状态各有归属：
+
+| 载体 | 责任 | 不承担 |
+|---|---|---|
+| DB | 保存 Conversation 与 Message，作为可查询、可重复消费的消息记录 | Operator 领域进度、完整执行轨迹 |
+| Conv CRD | 保存参与者消费进度与定向信号，通过 Watch 触发 Reconcile | 消息正文、业务工作完成判定 |
+| Redis | 传递页面增量，支持跨 server 实例重连与 replay | 参与者消费进度、业务执行恢复 |
+
+可以把 DB 理解成协作 queue，但消费不会删除消息，也不争抢一个全局消费位置；参与者各自
+维护消费进度，历史仍可 Read。Poll 表示收到，Commit 表示可安全越过该消费前缀，不表示整个
+会话或 Operator 的工作结束。
+
+这里参考 Kafka 的 Producer 与多 Consumer 模型：参与者发言时是 Producer，接收消息时是
+Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费面向自己的消息、独立提交进度，
+更接近不同 consumer group 各自消费，而不是同一 group 内竞争分配消息。loopd 借用这种
+生产与消费解耦的协作语义，不实现 Kafka 的分区、消费者组协调协议，也不宣称具备其全部日志保证。
 
 ## 定位与边界
 
@@ -38,14 +64,13 @@ CRD 持有状态，Reconcile 判断下一步，Verb 将判断连接到实际协�
 完成编排；runtime 联合 server 提供读取数据、调用 Harness、Ask/Confirm、发布与持久化流式输出、
 间接送达页面等机制。Verb 的 Effect 分为 read 与 write，不增加通用持久 Effect 引擎。
 
-Conv CRD 是 server 与参与者之间的协作边界，只保存定向唤醒信号和接收游标，不复制消息正文。
-Poll 是 write Verb：拉取发给参与者的消息并记录 Position；Commit 确认连续安全消费前缀。
-Read/Context 读取消息与历史，不改变消费位置；Speak 发言，不暗示工作完成。
-最新消息 ID 只是触发信号，Poll 仍从数据库查询。接收不是业务完成，不是领域 checkpoint。
+Conv CRD 是 server 与 Operator 之间的协作边界。Reconcile 是可重复调度的执行入口，
+不是“一条消息执行一次”的回调；唤醒只提示可能有工作，Poll 仍以 DB 的消息记录为准。
+Read/Context 只观察历史；Poll/Commit 改变消费位置，因此是 write Verb。
 
-Operator 自己决定何时 Poll、如何处理补充发言，以及是否需要自己的领域 CRD。
-Router 示例在同一次执行中等当前批 Harness 完成，再 Poll 并重新 plan；不强制一条消息对应
-一个业务任务，也不要求额外 Work CRD。LongHorizon 的角色和领域状态由其 Operator 自行定义。
+Operator 自己决定何时接收补充发言、如何组织工作，以及是否需要领域 CRD。
+runtime 不把普通发言自动解释成 steer/followup，也不替 Operator 定义业务任务。
+具体业务策略属于 Operator，不能反过来成为所有参与者必须遵循的交互回合。
 
 ## 交付与恢复
 
@@ -65,9 +90,16 @@ Router 示例在同一次执行中等当前批 Harness 完成，再 Poll 并重�
 - Harness 恢复由 Adapter 和执行端保证；agentd 可承载持久执行，agentgo 是进程内 demo。
 - 聊天层负责消息快照、通知重试、流式续接与交付收尾，不接管以上执行恢复。
 
-## 领域设计入口
+## 文档分工
 
-- [Runtime](runtime.md)：Operator Verb、注册、Poll、Harness 与 Human 协作。
-- [Conversation](../server/docs/conversation.md)：定向接收、游标与恢复边界。
-- [聊天持久化](../server/docs/persistence.md)：可见记录与处理详情。
-- [页面交付](../server/docs/task-delivery.md)：提交、流式续接与完成重试。
+Kernel 只定义跨功能稳定的参与者模型、协作主线与恢复责任。调用契约和领域机制分别由以下
+文档拥有，不在 Kernel 展开参数、状态分支或示例 Operator 的策略。
+
+| 文档 | 回答的问题 |
+|---|---|
+| [Runtime](runtime.md) | Operator 开发者如何接入、组合 Verb，并承担哪些调用与恢复责任？ |
+| [Conversation](../server/docs/conversation.md) | 持久消息如何定向通知、Poll、Commit，消费与重试保证到哪里？ |
+| [持久化](../server/docs/persistence.md) | 可见事实存在哪里，User/Operator conv、消息身份和快照如何归属？ |
+| [用户交互](../server/docs/ue.md) | 页面如何布局、呈现消息与交互卡片，如何流式交付、重连和收尾？ |
+
+README 面向使用者介绍价值与最短使用路径；AGENTS.md 保留代码地图、关键约定及上述文档索引。
