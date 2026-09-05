@@ -13,7 +13,9 @@ export interface Actor {
 export interface Conversation {
   id: string;
   name?: string;
-  parent_message_id?: string;
+  actor_kind: ActorKind;
+  actor_key: string;
+  task_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -50,9 +52,9 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
   return page.data;
 }
 
-export async function findDetailConversation(messageID: string, signal?: AbortSignal): Promise<Conversation | undefined> {
+export async function findDetailConversation(taskID: string, signal?: AbortSignal): Promise<Conversation | undefined> {
 	const page = await requestJSON<Page<Conversation>>(
-		`/v1/conversations?parent_message_id=${encodeURIComponent(messageID)}`, { signal },
+		`/v1/conversations?task_id=${encodeURIComponent(taskID)}`, { signal },
 	);
 	return page.data[0];
 }

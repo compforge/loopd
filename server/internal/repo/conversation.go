@@ -9,25 +9,25 @@ import (
 type ConversationRepository interface {
 	CreateConversation(context.Context, model.Conversation) (model.Conversation, error)
 	GetConversation(context.Context, string) (model.Conversation, error)
-	FindConversationByParentMessage(context.Context, string) (model.Conversation, error)
+	FindConversationByTask(context.Context, string) (model.Conversation, error)
 	ListConversations(context.Context, string, int) ([]model.Conversation, error)
 }
 
-func (store *Store) FindConversationByParentMessage(ctx context.Context, messageID string) (model.Conversation, error) {
+func (store *Store) FindConversationByTask(ctx context.Context, taskID string) (model.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var conversation model.Conversation
-	err := store.db.WithContext(ctx).Where("parent_message_id = ?", messageID).First(&conversation).Error
+	err := store.db.WithContext(ctx).Where("task_id = ?", taskID).First(&conversation).Error
 	return conversation, mapError(err)
 }
 
 // ListConversations returns root conversations newest first. Detail
-// conversations belong to an Operator message and are not top-level chat
+// conversations belong to a Task and are not top-level chat
 // navigation entries.
 func (store *Store) ListConversations(ctx context.Context, before string, limit int) ([]model.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	query := store.db.WithContext(ctx).Where("parent_message_id IS NULL")
+	query := store.db.WithContext(ctx).Where("task_id IS NULL AND actor_kind = ?", "user")
 	if before != "" {
 		query = query.Where("id < ?", before)
 	}

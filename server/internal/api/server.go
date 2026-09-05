@@ -56,6 +56,7 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
 	engine.POST("/v1/conversations/:conversation_id/tasks/:task_id/replies", server.adapt(server.replyHuman))
 	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
+	engine.GET("/v1/tasks/:task_id/messages", server.adapt(server.listTaskMessages))
 	engine.POST("/v1/tasks/:task_id/events", server.adapt(server.appendTaskEvent))
 	engine.POST("/v1/tasks/:task_id/complete", server.adapt(server.completeTask))
 }

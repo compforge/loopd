@@ -24,7 +24,7 @@ func TestChatCreatesVisibleMessagesWithOneTask(t *testing.T) {
 	chat := NewChatService(store, tasks, nopChatRunner{}, nil)
 	ctx := context.Background()
 
-	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
+	conversation, err := conversations.CreateConversation(ctx, "Planning", "user-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestChatRollsBackMessagesWhenTaskCreationFails(t *testing.T) {
 	chat := NewChatService(store, &recordingTaskClient{createErr: errors.New("api unavailable")}, streams, nil)
 	ctx := context.Background()
 
-	conversation, err := conversations.CreateConversation(ctx, "Planning", "")
+	conversation, err := conversations.CreateConversation(ctx, "Planning", "user-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,14 +173,14 @@ func TestChatCompleteReportsTaskRetirementFailure(t *testing.T) {
 	}
 }
 
-func TestDetailConversationReferencesActorMessage(t *testing.T) {
+func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
 	messages := NewMessageService(store, nil)
 	chat := NewChatService(store, nopTaskClient{}, nopChatRunner{}, nil)
 	ctx := context.Background()
 
-	root, err := conversations.CreateConversation(ctx, "Root", "")
+	root, err := conversations.CreateConversation(ctx, "Root", "user-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,24 +191,44 @@ func TestDetailConversationReferencesActorMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := conversations.CreateConversation(ctx, "Operator work", answer.ID)
+	detail, err := conversations.CreateConversation(ctx, "Operator work", "", answer.TaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.ParentMessageID != answer.ID {
-		t.Fatalf("parent_message_id = %q, want %q", detail.ParentMessageID, answer.ID)
+	if detail.TaskID != answer.TaskID || detail.ActorKind != loopd.RoleOperator || detail.ActorKey != "operator-1" {
+		t.Fatalf("work conversation ownership = %+v", detail)
 	}
-	if _, err := conversations.CreateConversation(ctx, "Duplicate", answer.ID); !errors.Is(err, repo.ErrConflict) {
+	if root.ActorKind != loopd.RoleUser || root.ActorKey != "user-1" || root.TaskID != "" {
+		t.Fatalf("user conversation ownership = %+v", root)
+	}
+	if _, err := conversations.CreateConversation(ctx, "Duplicate", "", answer.TaskID); !errors.Is(err, repo.ErrConflict) {
 		t.Fatalf("duplicate detail error = %v, want %v", err, repo.ErrConflict)
 	}
-	detailMessage, err := messages.CreateMessage(
+	_, err = messages.CreateMessage(
 		ctx, detail.ID, answer.TaskID, loopd.RoleOperator, "operator-1", textContent("working"),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conversations.CreateConversation(ctx, "Nested", detailMessage.ID); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("nested detail error = %v, want %v", err, ErrInvalid)
+	if _, err := messages.CreateMessage(ctx, detail.ID, "other-task", loopd.RoleHarness, "call", textContent("wrong task")); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("cross-task message error = %v", err)
+	}
+	if _, err := chat.Create(ctx, detail.ID, "user-1", loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, textContent("nested chat")); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("nested chat error = %v", err)
+	}
+	// Switching the target of a later question must not transfer the user's
+	// conversation to that target or reuse a previous Task's work conversation.
+	other, err := chat.Create(ctx, root.ID, "user-1", loopd.ActorRef{Kind: loopd.RoleHarness, Key: "direct"}, textContent("next"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherDetail, err := conversations.CreateConversation(ctx, "Harness work", "", other.TaskID)
+	if err != nil || otherDetail.ActorKind != loopd.RoleHarness || otherDetail.ActorKey != "direct" || otherDetail.ID == detail.ID {
+		t.Fatalf("other work conversation = %+v, error = %v", otherDetail, err)
+	}
+	unchanged, err := conversations.GetConversation(ctx, root.ID)
+	if err != nil || unchanged.ActorKind != root.ActorKind || unchanged.ActorKey != root.ActorKey || unchanged.TaskID != "" {
+		t.Fatalf("user conversation changed = %+v, error = %v", unchanged, err)
 	}
 }
 

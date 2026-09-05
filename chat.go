@@ -5,9 +5,12 @@ import (
 )
 
 type Conversation struct {
-	ID              string `json:"id"`
-	Name            string `json:"name,omitempty"`
-	ParentMessageID string `json:"parent_message_id,omitempty"`
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	// Actor identifies the conversation's organizer, not every message sender.
+	ActorKind Role   `json:"actor_kind"`
+	ActorKey  string `json:"actor_key"`
+	TaskID    string `json:"task_id,omitempty"`
 	Timestamped
 }
 

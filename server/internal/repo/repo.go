@@ -111,6 +111,10 @@ func Open(config Config) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd database: %w", err)
 	}
+	if err := migrations.ConversationOwnership(db.WithContext(migrationCtx)); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("migrate conversation ownership: %w", err)
+	}
 	return store, nil
 }
 

@@ -20,19 +20,34 @@ Operator/Harness 注册与发现属于 [Runtime](../../docs/runtime.md) 的协�
 
 ## Conversation
 
+会话沿用以下习惯叫法：
+
+- **User conv**：用户的主会话，`actor_kind=user`，`actor_key` 为用户标识，`task_id` 为空。
+- **Operator conv**：Operator 组织的工作／详情会话，`actor_kind=operator`，`actor_key` 为
+  Operator 的逻辑标识，`task_id` 为本次任务 ID；其中可以有多个 Harness、Operator 或 User 的消息。
+
+它们共用 Conversation 模型和表，不另设会话类型字段。工作会话若归属于 Harness，使用
+`actor_kind=harness`，不把它的真实归属强行标为 Operator。
+
 `conversations` 表包含：
 
 - `id`：UUIDv7 主键；
 - `name`：会话的可读名称；
-- `parent_message_id`：可空；Operator 详情会话引用的主链路 Message ID；
+- `actor_kind`、`actor_key`：会话组织者的类型与逻辑身份，不限制其中 Message 的发送者；
+- `task_id`：可空；工作会话所属的 Task ID；
 - `created_at`、`updated_at`：记录时间。
 
-主会话的 `parent_message_id` 为 `NULL`。详情会话只允许引用主会话中的 response Message，不继续嵌套；
-同一条 Message 在 v1 中最多关联一个详情会话。
+User Conversation 的 `task_id` 为 `NULL`，actor 由 server 根据调用者身份确定。
+每次提问可以更换 Operator/Harness，但不会改变会话归属。工作 Conversation 关联非空 Task ID，
+actor 从该 Task 的目标推导，而不是从最近一条 Message 推断，也不是 Pod 或进程身份。
+同一 Task 在 v1 中最多关联一个工作会话，多个 Harness 共享这个会话，不按参与者拆分。
 
-左侧导航只列主会话。选择主会话中的 Message 后，按它的 ID 查找 `parent_message_id` 相同的详情
-会话，右侧展示该会话的 Message；没有关联会话就展示空状态。Task ID 关联一次执行，不替代
-这个父子关系，也不作为页面选中 Message 的标识。
+左侧导航只列 User Conversation。选择其中的 Message 后，按它的 `task_id` 查找工作会话，
+右侧展示该会话的 Message；没有工作会话就展示空状态。原始问题、反问、用户选择和最终回答
+可以打开同一份处理详情，页面选中项仍使用 Message ID。
+
+Conversation 只保存会话名称、组织归属等聊天信息，不承担 Task 完成意图、重试状态或 Operator
+领域状态。Task 继续由 CRD 提供路由与唤醒；读取聊天事实不依赖 CRD 仍然存活。
 
 Operator 内部的临时 Harness Call 各对应详情会话中的一条 `harness` Message，actor_key 使用
 该 Call 的身份；同一次 Call 的文本和工具块保存在同一条 Message 中。effect_key 是可见步骤名，
@@ -90,7 +105,7 @@ Bridge 承载运行中的页面事件，任务完成时由 server 将它们折�
 ### Human 消息扩展
 
 Message 的可选 `reply_to_message_id`，指向同一 Conversation 与 Task 中被答复的消息。
-它是答复关联的唯一依据，与详情 Conversation 的 parent_message_id 归属不同，也不定义执行顺序。
+它是答复关联的唯一依据，与工作 Conversation 的 task_id 归属不同，也不定义执行顺序。
 不能用消息相邻、时间顺序、Actor 或 task_id 代替引用；Human 答复缺少引用或目标无效时拒绝。
 消息按时间展示不要求各 Actor 串行工作；一个 Task 可以并行产生多条提问，并按任意顺序收录答复。
 

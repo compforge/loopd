@@ -5,19 +5,19 @@ import { findDetailConversation, listConversations, listMessages, SseFrameDecode
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Conversation navigation", () => {
-  it("separates root navigation from lookup by exact parent Message ID", async () => {
+  it("separates user navigation from work conversation lookup by Task ID", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(Response.json({ data: [{ id: "root" }] }))
-      .mockResolvedValueOnce(Response.json({ data: [{ id: "child", parent_message_id: "message/1" }] }))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: "child", task_id: "task/1" }] }))
       .mockResolvedValueOnce(Response.json({ data: [] }));
     vi.stubGlobal("fetch", fetch);
     expect(await listConversations()).toEqual([{ id: "root" }]);
-    expect(await findDetailConversation("message/1")).toEqual({ id: "child", parent_message_id: "message/1" });
-    expect(await findDetailConversation("message/2")).toBeUndefined();
+    expect(await findDetailConversation("task/1")).toEqual({ id: "child", task_id: "task/1" });
+    expect(await findDetailConversation("task/2")).toBeUndefined();
     expect(fetch.mock.calls.map(([path]) => path)).toEqual([
       "/v1/conversations?limit=100",
-      "/v1/conversations?parent_message_id=message%2F1",
-      "/v1/conversations?parent_message_id=message%2F2",
+      "/v1/conversations?task_id=task%2F1",
+      "/v1/conversations?task_id=task%2F2",
     ]);
   });
   it("reads all child Messages rather than truncating long tasks to one page", async () => {

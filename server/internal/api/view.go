@@ -20,8 +20,8 @@ type page[T any] struct {
 }
 
 type createConversationRequest struct {
-	Name            string `json:"name,omitempty"`
-	ParentMessageID string `json:"parent_message_id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	TaskID string `json:"task_id,omitempty"`
 }
 
 type registrationRequest struct {

@@ -32,7 +32,7 @@ Operator 和内部 Harness 通过 loop-runtime 向任意 server 实例发布 Age
 写入共享 Redis Stream。页面可按 task_id 连接任意实例观察，HTTP/SSE 连接不拥有执行生命周期。
 
 Task Stream 同时传输主回答与详情消息的可见事件，不等于主回答 Message 的 content。server 接受
-Harness 的首批输出时，为主回答建立详情 Conversation 和 Harness Message；重复交付复用身份。
+Harness 的首批输出时，为 Task 建立工作 Conversation 和 Harness Message；重复交付复用身份。
 页面先查询真实子会话及其 Message，再按 Harness 身份叠加 Task Stream 中的流式输出。
 详情列表只在选中的任务运行时轮询；完成与刷新后读取数据库快照。
 

@@ -12,6 +12,7 @@ import (
 type TaskRepository interface {
 	GetConversation(context.Context, string) (model.Conversation, error)
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
+	ListMessagesByTask(context.Context, string, string, int) ([]model.Message, error)
 	ListMessagesThrough(context.Context, string, string, int) ([]model.Message, bool, error)
 }
 
@@ -23,6 +24,18 @@ type TaskService struct {
 
 func NewTaskService(repository TaskRepository, logger *slog.Logger) *TaskService {
 	return &TaskService{repo: repository, logger: loggerOrDefault(logger)}
+}
+
+func (service *TaskService) ListMessages(ctx context.Context, taskID, after string, limit int) ([]loopd.Message, error) {
+	rows, err := service.repo.ListMessagesByTask(ctx, taskID, after, pageSize(limit))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]loopd.Message, len(rows))
+	for i, row := range rows {
+		result[i] = messageFromModel(row)
+	}
+	return result, nil
 }
 
 // GetContext reconstructs the current task input, response, and bounded

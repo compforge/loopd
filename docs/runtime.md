@@ -88,6 +88,16 @@ Conversation 的历史跨 Operator/Harness 共享。`Chat.Conversation`、`Chat.
 入口；需要更早消息时按返回的水位和截断信息补读，需要固定长期输入时由领域 Resource 保存相关
 Message 引用。内存中的 TaskContext 不承担领域 checkpoint，也不能替代外部系统的当前事实。
 
+`Task.Messages(ctx, taskID, after, limit)` 分页读取这次任务的全部可见 Message，包含主会话中的
+输入、回答和 Human 交互，以及工作会话中的协作输出；每条结果保留自己的 conversation_id。
+`Chat.History` 只读取指定 Conversation，不递归合并工作会话，主会话历史可以跨多个 Task。
+二者都是当前持久消息的读取，不是 AgentLedger 完整执行轨迹，也不隐式等待消息完成。
+按 ID 翻页不负责感知已读消息后续修订；观察实时变化使用 Chat 流，读取 Human 权威状态使用 handle.Get。
+
+Reconcile 用 Task ID 读取事实后发起 Effect，无需额外 Task 表。当前问题仍按显式 input 身份
+定位，不能把后来的 user 回复当作原始问题；固定输入上下文用 Task.Get 的历史截止点，后续交互
+使用 Task.Messages 或 Human handle 读取最新状态。
+
 ## 当前提供的 Effect Action
 
 Effect Action 指通过 runtime 发起执行或改变外部协作状态的动作。当前 Reconcile 推进一次
@@ -103,11 +113,11 @@ runtime 还提供以下会改变协作状态的 API，分别用于会话创建�
 
 | Action | 作用 | 身份与重试边界 |
 |---|---|---|
-| `Loop.Chat.CreateConversation` | 创建主会话，或关联主回答的详情会话 | 没有通用 EffectKey；不能将重复创建视为自动复用同一会话 |
+| `Loop.Chat.CreateConversation` | 创建 User Conversation，或关联 Task 的工作会话 | 每个 Task 最多一个工作会话，重复创建返回冲突；不带 Task ID 每次创建新主会话 |
 | `Loop.Chat.Send`（不带 task_id） | 提交问题，创建 Message 与 Task，并返回观察流 | 每次提交创建新问答；取得 task_id 后，用该 ID 续接观察 |
 | `Loop.Operator.Register` / `Loop.Harness.Register` | 注册可接收 Task 的目标，并启动后台续租 | 按参与者类型与稳定 key 更新同一注册记录；续租随 runtime 生命周期运行 |
 
-`Task.Get`、`Chat.Conversation`、`Chat.History`、Call 的 `Value/Stream/Wait` 以及带 task_id 的
+`Task.Get`、`Task.Messages`、`Chat.Conversation`、`Chat.History`、Call 的 `Value/Stream/Wait` 以及带 task_id 的
 `Chat.Send` 都是读取或观察已有工作。`Task.Watch` 配置 Controller 的唤醒入口。这些能力不会
 发起新的业务执行，不作为 Effect Action。
 
@@ -339,7 +349,7 @@ server.Run 负责无人在线时的 deadline 与通知重试，必须随服务�
 ## 可见过程与回答
 
 `Chat.Emit` 发布 AgentUE 可见事件，`Chat.Complete` 请求固化回答并完成交付。内部 Harness 可以
-贡献工具状态和处理详情，主回答由用户选中的 Operator 汇总。详情 Conversation 挂在主回答下，
+贡献工具状态和处理详情，主回答由用户选中的 Operator 汇总。工作 Conversation 关联本次 Task，
 其聊天存储关系见 [聊天持久化](../server/docs/persistence.md)。
 
 当前实现中，同一 runtime 对同一 Task 的并行发布串行分配 AgentUE seq，用于语义顺序和发布幂等；
