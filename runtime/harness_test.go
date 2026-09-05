@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/harness"
@@ -32,7 +33,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input.Key != "input/route" || input.Actor.Kind != loopd.RoleHarness || !input.Stream {
+			if input.Key != "input/route" || input.Actor.Kind != loopd.ActorKindHarness || !input.Stream {
 				t.Errorf("output=%+v", input)
 			}
 			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)})
@@ -175,4 +176,45 @@ func (call fakeHarnessCall) ID() string                   { return call.id }
 func (call fakeHarnessCall) Events() <-chan harness.Event { return call.events }
 func (call fakeHarnessCall) Wait(context.Context) (harness.Result, error) {
 	return harness.Result{Text: "done"}, nil
+}
+
+// +case=`Custom output identity and execution timeout are part of Call idempotency, independent of UI delivery.`
+func TestCustomPromptIdentityAndTimeout(t *testing.T) {
+	var author loopd.ActorRef
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/speak") {
+			var in loopd.SpeakRequest
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			author = in.Actor
+			_ = json.NewEncoder(w).Encode(loopd.Message{ID: "output", Revision: 1, Content: in.Content})
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"event"}`))
+	}))
+	defer server.Close()
+	adapter := &fakeHarnessAdapter{}
+	runtime, err := New(server.URL, Options{HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"demo": adapter}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	role := loopd.ActorRef{Kind: "operator/longhorizon/executor", Key: "run-uid"}
+	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "run/round/1/executor", EffectKey: "execute", Target: "demo", Text: "work", Actor: &role, Timeout: time.Minute}
+	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if author != role {
+		t.Fatalf("author=%+v", author)
+	}
+	for _, change := range []func(*Prompt){func(p *Prompt) { p.Timeout = time.Second }, func(p *Prompt) { p.ConversationID = "other" }, func(p *Prompt) { p.Actor = &loopd.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"} }} {
+		changed := prompt
+		change(&changed)
+		if _, err := runtime.Loop.Harness.Prompt(context.Background(), changed); !errors.Is(err, ErrCallConflict) {
+			t.Fatalf("changed identity accepted: %v", err)
+		}
+	}
 }

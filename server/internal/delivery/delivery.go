@@ -182,7 +182,7 @@ func transportMessage(input model.Message) model.Message {
 }
 
 func visibleMessage(m model.Message) loopd.Message {
-	return loopd.Message{TargetKind: loopd.Role(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 
 func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {

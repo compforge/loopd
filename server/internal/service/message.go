@@ -51,7 +51,7 @@ func (service *MessageService) CreateMessage(
 	ctx context.Context,
 	conversationID string,
 	taskID string,
-	kind loopd.Role,
+	kind loopd.ActorKind,
 	key string,
 	content json.RawMessage,
 ) (loopd.Message, error) {
@@ -98,10 +98,10 @@ func (service *MessageService) ListMessages(
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
-		TargetKind: loopd.Role(value.TargetKind), TargetKey: value.TargetKey,
+		TargetKind: loopd.ActorKind(value.TargetKind), TargetKey: value.TargetKey,
 		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
-		Kind: loopd.Role(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
+		Kind: loopd.ActorKind(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 }

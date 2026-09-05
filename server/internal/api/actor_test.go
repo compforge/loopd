@@ -54,7 +54,7 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 	if err := json.Unmarshal(response.Body(), &actors); err != nil {
 		t.Fatal(err)
 	}
-	if len(actors.Data) != 1 || actors.Data[0].Kind != loopd.RoleOperator || actors.Data[0].Key != "router" {
+	if len(actors.Data) != 1 || actors.Data[0].Kind != loopd.ActorKindOperator || actors.Data[0].Key != "router" {
 		t.Fatalf("actors = %#v", actors.Data)
 	}
 }

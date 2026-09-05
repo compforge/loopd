@@ -40,7 +40,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err != nil || task.ActorKey != "alice" {
 		t.Fatalf("trusted principal=%+v %v", task, err)
 	}
-	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
+	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
 	data, _ := json.Marshal(request)
 	created := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if created.StatusCode() != 200 {
@@ -79,6 +79,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	// +case=`Questions are conversation-owned even without a UI delivery ID.`
 	request.EffectKey = "independent"
+	request.Actor = loopd.ActorRef{Kind: "operator/longhorizon/manager", Key: "run-uid"}
 	data, _ = json.Marshal(request)
 	independent := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if independent.StatusCode() != 200 {
@@ -87,6 +88,9 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err := json.Unmarshal(independent.Body(), &question); err != nil {
 		t.Fatal(err)
 	}
+	if question.Message.Kind != request.Actor.Kind || question.Message.Key != "run-uid" {
+		t.Fatalf("custom actor lost: %+v", question.Message)
+	}
 	if question.Message.TaskID != "" {
 		t.Fatalf("unexpected delivery dependency: %+v", question)
 	}
@@ -94,6 +98,12 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 		`{"reply_to_id":"`+question.Message.ID+`","outcome":"dismissed"}`)
 	if dismissed.StatusCode() != 200 {
 		t.Fatalf("dismiss independent=%d %s", dismissed.StatusCode(), dismissed.Body())
+	}
+	if err := json.Unmarshal(dismissed.Body(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Reply == nil || result.Reply.TargetKind != request.Actor.Kind || result.Reply.TargetKey != "run-uid" || result.Reply.ReplyToID != question.Message.ID {
+		t.Fatalf("custom reply routing=%+v", result)
 	}
 }
 func TestBrowserIdentityIsAnOpaqueCredential(t *testing.T) {

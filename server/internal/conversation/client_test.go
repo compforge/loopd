@@ -18,7 +18,7 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	if err := conversationv1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	actor := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}
+	actor := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}
 	kube := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&conversationv1.Conversation{}).
 		WithObjects(&conversationv1.Conversation{
@@ -88,8 +88,8 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	c := NewClient(kube, "test", 0)
-	a := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
-	b := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "b"}
+	a := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
+	b := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "b"}
 	for _, signal := range []struct {
 		id    string
 		actor loopd.ActorRef

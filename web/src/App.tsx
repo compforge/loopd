@@ -335,13 +335,13 @@ export function App() {
             const active = selectedMessageID === message.id;
             return (
               <article
-                className={`message ${message.kind} ${active ? "selected" : ""}`}
+                className={`message ${message.kind.startsWith("operator/") ? "operator" : message.kind} ${active ? "selected" : ""}`}
                 key={message.id}
                 id={`message-${message.id}`}
                 onClick={() => setSelectedMessageID(message.id)}
               >
                 <div className="message-author">
-                  <span>{message.kind === "user" ? "YOU" : message.key.toUpperCase()}</span>
+                  <span title={`${message.kind} / ${message.key}`}>{message.kind === "user" ? "YOU" : message.kind.startsWith("operator/") ? message.kind.split("/").at(-1)!.toUpperCase() : message.key.toUpperCase()}</span>
                   {isLive && <span className="run-badge running">STREAMING</span>}
                 </div>
                 <div className="bubble">

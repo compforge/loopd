@@ -105,3 +105,30 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
+
+# Optional three-role CLI reference Operator. AgentGo calls are process-local.
+longhorizon:
+  runTimeout: 24h
+  retentionTTL: 24h
+  enabled: false
+  image:
+    repository: ghcr.io/compforge/loop-longhorizon
+    tag: latest
+    pullPolicy: IfNotPresent
+  model:
+    provider: openai
+    name: gpt-5-mini
+    baseURL: ""
+    existingSecret: ""
+    existingSecretKey: api-key
+  maxRounds: 25
+  managerTimeout: 5m
+  executorTimeout: 30m
+  auditorTimeout: 5m
+  humanTimeout: 30m
+  workspace:
+    # Empty uses ephemeral storage. A claim preserves artifacts across restarts.
+    existingClaim: ""
+    sizeLimit: 2Gi
+  resources: {}
+  extraEnv: []

@@ -32,6 +32,9 @@ Message 用 kind/actor_key 表达发送者，target_kind/target_key 表达收件
 Speak 的稳定 Key 以 Conversation + Actor 为范围，存储层生成全局唯一 output_key。
 同身份重试返回已有消息，新发言使用新 key；TaskID 不参与发言幂等身份。
 
+自定义 Operator 角色使用完整 kind/key 发言和定向接收，kind 长度上限 128；在线服务发现仍由
+Operator/Harness Registry 管理，不因出现新角色而自动注册服务。
+
 消息保存 AgentUE semantic model JSON，包含 version、biz、meta 与 blocks。文字、工具展示、
 文件等可以共存一条消息；delta 不另建 Message。完整 prompt、工具原始输入输出、重试与成本
 属于执行轨迹，只有页面需要展示的部分进入 Message。

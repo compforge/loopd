@@ -110,3 +110,7 @@ Kernel 只定义跨功能稳定的 Actor 模型、协作主线与恢复责任。
 | [用户交互](../server/docs/ue.md) | 页面如何布局、呈现消息与交互卡片，如何流式交付、重连和收尾？ |
 
 README 面向使用者介绍价值与最短使用路径；AGENTS.md 保留代码地图、关键约定及上述文档索引。
+
+Actor 的内置 kind 为 user、operator、harness；Operator 可用 `operator/<operator-key>/<role>`
+标识自己的参与者。自定义 kind/key 同样拥有发言身份和消费位置，不把领域角色注册进 Core。
+例如 LongHorizon 三个角色共享工作会话，以 Run UID 区分作者实例，细节由 Operator 文档定义。

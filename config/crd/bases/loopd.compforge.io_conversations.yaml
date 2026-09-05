@@ -57,9 +57,8 @@ spec:
                       minLength: 1
                       type: string
                     kind:
-                      enum:
-                      - operator
-                      - harness
+                      maxLength: 128
+                      pattern: ^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$
                       type: string
                   required:
                   - key
@@ -84,9 +83,8 @@ spec:
                       minLength: 1
                       type: string
                     kind:
-                      enum:
-                      - operator
-                      - harness
+                      maxLength: 128
+                      pattern: ^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$
                       type: string
                     position:
                       description: |-

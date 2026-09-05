@@ -148,7 +148,7 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: "input", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
+	r := loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
 	q, err := store.CreateHuman(ctx, r)
 	if err != nil {
 		t.Fatal(err)

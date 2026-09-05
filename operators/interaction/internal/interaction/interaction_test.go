@@ -22,7 +22,7 @@ const conversationID = "conv"
 func userMessage(id, taskID, text string) loopd.Message {
 	content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 		"blocks": []map[string]any{{"id": "text", "type": "text", "content": text}}})
-	return loopd.Message{ID: id, ConversationID: conversationID, Kind: loopd.RoleUser,
+	return loopd.Message{ID: id, ConversationID: conversationID, Kind: loopd.ActorKindUser,
 		Key: "user", TargetKind: actor.Kind, TargetKey: actor.Key, Purpose: "input",
 		TaskID: taskID, Content: content}
 }
@@ -96,7 +96,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error(err)
 		}
 		if request.Timeout != 10*time.Second || request.ConversationID != conversationID ||
-			request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.RoleUser, Key: "user"}) ||
+			request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "user"}) ||
 			!strings.HasPrefix(request.EffectKey, request.ReplyToID+"/") {
 			f.t.Errorf("invalid question identity or timeout: %+v", request)
 		}
@@ -122,7 +122,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error(err)
 			return
 		}
-		if request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.RoleUser, Key: "user"}) ||
+		if request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "user"}) ||
 			request.Key != request.ReplyToID+"/summary" || request.Stream {
 			f.t.Errorf("invalid summary identity: %+v", request)
 		}
@@ -231,8 +231,8 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 	f.step(time.Second)
 	f.mu.Lock()
 	f.messages = append(f.messages, userMessage("02", "", "确认"),
-		loopd.Message{ID: "03", Kind: loopd.RoleUser, Key: "user", Purpose: "human_reply", ReplyToID: "card"},
-		loopd.Message{ID: "04", Kind: loopd.RoleOperator, Key: "other"})
+		loopd.Message{ID: "03", Kind: loopd.ActorKindUser, Key: "user", Purpose: "human_reply", ReplyToID: "card"},
+		loopd.Message{ID: "04", Kind: loopd.ActorKindOperator, Key: "other"})
 	f.mu.Unlock()
 	f.step(time.Second)
 	f.mu.Lock()

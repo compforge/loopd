@@ -85,3 +85,8 @@ func (h *HumanHandle) Wait(ctx context.Context) (loopd.HumanResult, error) {
 		}
 	}
 }
+
+// Get observes a persisted question after an Operator restart.
+func (h Human) Get(ctx context.Context, messageID string) (loopd.HumanResult, error) {
+	return (&HumanHandle{client: h.client, messageID: messageID}).Get(ctx)
+}

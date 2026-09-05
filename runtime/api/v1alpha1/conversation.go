@@ -12,7 +12,8 @@ const ConversationKind = "Conversation"
 // ConversationParticipant carries a recipient-specific wake signal. A signal
 // for B must not overwrite the signal for A when Kubernetes coalesces updates.
 type ConversationParticipant struct {
-	// +kubebuilder:validation:Enum=operator;harness
+	// +kubebuilder:validation:MaxLength=128
+	// +kubebuilder:validation:Pattern=`^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$`
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
@@ -28,7 +29,8 @@ type ConversationSpec struct {
 }
 
 type ConversationConsumer struct {
-	// +kubebuilder:validation:Enum=operator;harness
+	// +kubebuilder:validation:MaxLength=128
+	// +kubebuilder:validation:Pattern=`^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$`
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`

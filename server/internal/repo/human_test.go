@@ -31,7 +31,7 @@ func humanStore(t *testing.T) *Store {
 	return s
 }
 func question(key string) loopd.HumanRequest {
-	return loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.RoleOperator, Key: "operator"}, Target: loopd.ActorRef{Kind: loopd.RoleUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []loopd.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
+	return loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "operator"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []loopd.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
 }
 
 // +case=`两个并行问题按相反顺序答复，只按引用收口且 输入消息保持原身份`

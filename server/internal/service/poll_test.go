@@ -40,9 +40,9 @@ func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	poll := NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
-	a := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
-	b := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "b"}
-	c := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "c"}
+	a := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
+	b := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "b"}
+	c := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "c"}
 	say := func(key string, target loopd.ActorRef, stream bool) model.Message {
 		t.Helper()
 		message, err := store.Speak(ctx, "conv", loopd.SpeakRequest{Key: key, Actor: a, Target: target, Stream: stream, Content: textContent(key)})
@@ -112,8 +112,8 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	a := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
-	b := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "b"}
+	a := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
+	b := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "b"}
 	coordinator := testConversationCoordinator(t)
 	poll := NewPollService(store, coordinator, nil)
 	for _, message := range []model.Message{
@@ -143,7 +143,7 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 	if len(result.Messages) != 2 || result.Messages[0].ID != "001" || result.Messages[1].ID != "004" {
 		t.Fatalf("A's batch = %+v", result)
 	}
-	if result.Messages[0].TargetKind != loopd.RoleOperator || result.Messages[0].TargetKey != "a" {
+	if result.Messages[0].TargetKind != loopd.ActorKindOperator || result.Messages[0].TargetKey != "a" {
 		t.Fatal("target lost in public message mapping")
 	}
 	repeated, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: a, Limit: 2})
@@ -193,7 +193,7 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 	coordinator := &interruptedCoordinator{ConversationCoordinator: testConversationCoordinator(t), fail: true}
 	poll := NewPollService(store, coordinator, nil)
 	chat := NewChatService(store, nopChatRunner{}, nil, poll)
-	target := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "router"}
+	target := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}
 	if _, err := chat.Create(ctx, "conv", "alice", target, textContent("hello")); err != nil {
 		t.Fatalf("notification failure must not ask the user to resend committed input: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 		t.Fatalf("pending after retry = %+v, %v", pending, err)
 	}
 	result, err := recovered.Poll(ctx, "conv", loopd.PollRequest{Actor: target})
-	if err != nil || len(result.Messages) != 1 || result.Messages[0].Kind != loopd.RoleUser {
+	if err != nil || len(result.Messages) != 1 || result.Messages[0].Kind != loopd.ActorKindUser {
 		t.Fatalf("received = %+v, %v", result, err)
 	}
 	if err := recovered.Commit(ctx, "conv", loopd.CommitRequest{Actor: target, Through: result.Position}); err != nil {

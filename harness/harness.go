@@ -4,11 +4,13 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	loopd "github.com/compforge/loopd"
 )
 
 type Request struct {
+	Timeout        time.Duration
 	CallID         string
 	IdempotencyKey string
 	Prompt         string

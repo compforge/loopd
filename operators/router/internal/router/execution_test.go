@@ -59,7 +59,7 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 			server.mu.Lock()
 			server.inbox = [][]loopd.Message{{{
 				ID: "message-3", ConversationID: "conversation-1", TaskID: "task-2",
-				Kind: loopd.RoleUser, Content: semanticModel("Please include the new constraint."),
+				Kind: loopd.ActorKindUser, Content: semanticModel("Please include the new constraint."),
 			}}}
 			polls := server.polls
 			server.mu.Unlock()
@@ -114,7 +114,7 @@ func TestInputArrivingDuringSummaryDoesNotStarveCurrentAnswer(t *testing.T) {
 	server := newLoopServer(t, "task-1")
 	// No input at the batch boundary; one arrives before the summary boundary.
 	server.inbox = [][]loopd.Message{nil, {{
-		ID: "new", Kind: loopd.RoleUser, TaskID: "task-2", Content: semanticModel("A late constraint"),
+		ID: "new", Kind: loopd.ActorKindUser, TaskID: "task-2", Content: semanticModel("A late constraint"),
 	}}}
 	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
 		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},

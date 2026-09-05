@@ -8,7 +8,7 @@ import (
 )
 
 func TestConversationPredicateUsesUncommittedInputNotReceipt(t *testing.T) {
-	actor := loopd.ActorRef{Kind: loopd.RoleOperator, Key: "a"}
+	actor := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
 	predicate := ConversationPredicate(actor)
 	old := &convapi.Conversation{
 		Spec:   convapi.ConversationSpec{Participants: []convapi.ConversationParticipant{{Kind: "operator", Key: "a", EndOffset: "003"}}},

@@ -81,7 +81,7 @@ func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurren
 		Complete(reconciler)
 }
 
-var routerActor = loopd.ActorRef{Kind: loopd.RoleOperator, Key: OperatorKey}
+var routerActor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: OperatorKey}
 
 func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	// Receive one initial input. Further inputs join this execution only at the
@@ -94,7 +94,7 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind != loopd.RoleUser {
+	if message.Kind != loopd.ActorKindUser {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
 			loopd.CommitRequest{Actor: routerActor, Through: inbox.Position})
 	}

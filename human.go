@@ -47,7 +47,7 @@ func (r HumanRequest) Validate() error {
 	if strings.TrimSpace(r.ConversationID) == "" || strings.TrimSpace(r.EffectKey) == "" || strings.TrimSpace(r.Title) == "" || strings.TrimSpace(r.Prompt) == "" || r.Timeout <= 0 {
 		return fmt.Errorf("conversation_id, effect_key, title, prompt and positive timeout are required")
 	}
-	if r.Actor.Kind != RoleOperator || r.Actor.Key == "" || r.Target.Kind != RoleUser || r.Target.Key == "" {
+	if !r.Actor.Valid() || !r.Actor.Kind.IsOperator() || !r.Target.Valid() || r.Target.Kind != ActorKindUser {
 		return fmt.Errorf("conversation Human request requires an operator sender and user recipient")
 	}
 	switch r.Type {

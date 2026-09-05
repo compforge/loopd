@@ -1,0 +1,142 @@
+{{- if .Values.longhorizon.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "loopd.fullname" . }}-longhorizon
+  labels:
+    {{- include "loopd.labels" . | nindent 4 }}
+---
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "loopd.fullname" . }}-longhorizon
+rules:
+  - apiGroups: ["loopd.compforge.io"]
+    resources: ["conversations"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["longhorizon.loopd.compforge.io"]
+    resources: ["runs", "executions", "audits"]
+    verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+  - apiGroups: ["longhorizon.loopd.compforge.io"]
+    resources: ["runs/status", "executions/status", "audits/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "loopd.fullname" . }}-longhorizon
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "loopd.fullname" . }}-longhorizon
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "loopd.fullname" . }}-longhorizon
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "loopd.fullname" . }}-longhorizon
+  labels:
+    {{- include "loopd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: longhorizon
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "loopd.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: longhorizon
+  template:
+    metadata:
+      labels:
+        {{- include "loopd.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: longhorizon
+    spec:
+      serviceAccountName: {{ include "loopd.fullname" . }}-longhorizon
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: longhorizon
+          image: "{{ .Values.longhorizon.image.repository }}:{{ .Values.longhorizon.image.tag }}"
+          imagePullPolicy: {{ .Values.longhorizon.image.pullPolicy }}
+          env:
+            - name: LOOP_LH_SERVER_URL
+              value: {{ printf "http://%s:%v" (include "loopd.serverName" .) .Values.server.service.port | quote }}
+            - name: LOOP_LH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOOP_LH_WORKSPACE
+              value: /workspace
+            - name: LOOP_LH_MODEL_PROVIDER
+              value: {{ .Values.longhorizon.model.provider | quote }}
+            - name: LOOP_LH_MODEL
+              value: {{ .Values.longhorizon.model.name | quote }}
+            - name: LOOP_LH_BASE_URL
+              value: {{ .Values.longhorizon.model.baseURL | quote }}
+            {{- if .Values.longhorizon.model.existingSecret }}
+            - name: LOOP_LH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.longhorizon.model.existingSecret }}
+                  key: {{ .Values.longhorizon.model.existingSecretKey }}
+            {{- end }}
+            - name: LOOP_LH_RUN_TIMEOUT
+              value: {{ .Values.longhorizon.runTimeout | quote }}
+            - name: LOOP_LH_RETENTION_TTL
+              value: {{ .Values.longhorizon.retentionTTL | quote }}
+            - name: LOOP_LH_MAX_ROUNDS
+              value: {{ .Values.longhorizon.maxRounds | quote }}
+            - name: LOOP_LH_MANAGER_TIMEOUT
+              value: {{ .Values.longhorizon.managerTimeout | quote }}
+            - name: LOOP_LH_EXECUTOR_TIMEOUT
+              value: {{ .Values.longhorizon.executorTimeout | quote }}
+            - name: LOOP_LH_AUDITOR_TIMEOUT
+              value: {{ .Values.longhorizon.auditorTimeout | quote }}
+            - name: LOOP_LH_HUMAN_TIMEOUT
+              value: {{ .Values.longhorizon.humanTimeout | quote }}
+            {{- with .Values.longhorizon.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.longhorizon.resources | nindent 12 }}
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: workspace
+          {{- if .Values.longhorizon.workspace.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.longhorizon.workspace.existingClaim }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.longhorizon.workspace.sizeLimit }}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}
