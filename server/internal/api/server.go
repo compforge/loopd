@@ -42,8 +42,9 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/healthz", func(_ context.Context, request *hertzapp.RequestContext) {
 		request.JSON(consts.StatusOK, map[string]bool{"ok": true})
 	})
-	engine.PUT("/v1/actors/:kind/:key", server.adapt(server.registerActor))
 	engine.GET("/v1/actors", server.adapt(server.listActors))
+	engine.PUT("/v1/operators/:key", server.adapt(server.registerOperator))
+	engine.PUT("/v1/harnesses/:key", server.adapt(server.registerHarness))
 	engine.POST("/v1/conversations", server.adapt(server.createConversation))
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultActorLease = 30 * time.Second
-	maxActorLease     = 5 * time.Minute
+	defaultRegistryLease = 30 * time.Second
+	maxRegistryLease     = 5 * time.Minute
 )
 
 type ActorRepository interface {
@@ -32,47 +32,48 @@ func NewActorService(repository ActorRepository, logger *slog.Logger) *ActorServ
 	return &ActorService{repo: repository, logger: loggerOrDefault(logger)}
 }
 
-func (service *ActorService) Register(
+func (service *ActorService) RegisterOperator(
 	ctx context.Context,
-	actor loopd.Actor,
+	key string,
+	displayName string,
+	description string,
 	lease time.Duration,
 ) (loopd.Actor, error) {
-	actor.Key = strings.TrimSpace(actor.Key)
-	actor.DisplayName = strings.TrimSpace(actor.DisplayName)
-	actor.Description = strings.TrimSpace(actor.Description)
-	if !actor.ActorRef.ValidTarget() || lease < 0 || lease > maxActorLease {
-		return loopd.Actor{}, ErrInvalid
-	}
-	if lease == 0 {
-		lease = defaultActorLease
-	}
-	expiresAt := time.Now().UTC().Add(lease)
-	var err error
-	switch actor.Kind {
-	case loopd.RoleOperator:
-		var registered model.Operator
-		registered, err = service.repo.RegisterOperator(ctx, model.Operator{
-			ID: uuid.V7(), Key: actor.Key, DisplayName: actor.DisplayName,
-			Description: actor.Description, ExpiresAt: expiresAt,
-		})
-		actor = operatorFromModel(registered)
-	case loopd.RoleHarness:
-		var registered model.Harness
-		registered, err = service.repo.RegisterHarness(ctx, model.Harness{
-			ID: uuid.V7(), Key: actor.Key, DisplayName: actor.DisplayName,
-			Description: actor.Description, ExpiresAt: expiresAt,
-		})
-		actor = harnessFromModel(registered)
-	}
+	key, displayName, description, expiresAt, err := registration(key, displayName, description, lease)
 	if err != nil {
 		return loopd.Actor{}, err
 	}
-	service.logger.DebugContext(ctx, "actor lease renewed",
-		"kind", actor.Kind,
-		"key", actor.Key,
-		"expires_at", expiresAt,
-	)
-	return actor, nil
+	registered, err := service.repo.RegisterOperator(ctx, model.Operator{
+		ID: uuid.V7(), Key: key, DisplayName: displayName,
+		Description: description, ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		return loopd.Actor{}, err
+	}
+	service.logRenewal(ctx, loopd.RoleOperator, registered.Key, expiresAt)
+	return operatorFromModel(registered), nil
+}
+
+func (service *ActorService) RegisterHarness(
+	ctx context.Context,
+	key string,
+	displayName string,
+	description string,
+	lease time.Duration,
+) (loopd.Actor, error) {
+	key, displayName, description, expiresAt, err := registration(key, displayName, description, lease)
+	if err != nil {
+		return loopd.Actor{}, err
+	}
+	registered, err := service.repo.RegisterHarness(ctx, model.Harness{
+		ID: uuid.V7(), Key: key, DisplayName: displayName,
+		Description: description, ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		return loopd.Actor{}, err
+	}
+	service.logRenewal(ctx, loopd.RoleHarness, registered.Key, expiresAt)
+	return harnessFromModel(registered), nil
 }
 
 func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
@@ -93,6 +94,21 @@ func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
 		actors = append(actors, harnessFromModel(harness))
 	}
 	return actors, nil
+}
+
+func (service *ActorService) logRenewal(ctx context.Context, kind loopd.Role, key string, expiresAt time.Time) {
+	service.logger.DebugContext(ctx, "registry lease renewed", "kind", kind, "key", key, "expires_at", expiresAt)
+}
+
+func registration(key, displayName, description string, lease time.Duration) (string, string, string, time.Time, error) {
+	key = strings.TrimSpace(key)
+	if key == "" || lease < 0 || lease > maxRegistryLease {
+		return "", "", "", time.Time{}, ErrInvalid
+	}
+	if lease == 0 {
+		lease = defaultRegistryLease
+	}
+	return key, strings.TrimSpace(displayName), strings.TrimSpace(description), time.Now().UTC().Add(lease), nil
 }
 
 func operatorFromModel(value model.Operator) loopd.Actor {

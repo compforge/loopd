@@ -185,7 +185,7 @@ loop-runtime 向 Operator 暴露少量 typed capability，使领域 Reconcile �
 Human interaction 的控制骨架：
 
 ```text
-Actor.Register     注册并持续续租当前 Operator 或可直聊 Harness
+Operator.Register  注册并持续续租当前 Operator
 Chat.Conversation 读取 Conversation
 Chat.History     显式读取 Conversation 的增量历史
 Chat.Send        首次请求创建两条 Message 与 Task CRD；带 task_id 时续接同一 AgentUE 事件流
@@ -194,6 +194,7 @@ Chat.Complete    折叠事件并固化 response Message，然后结束事件流
 Task.Get         按 Task ID 读取当前 input、response 与 Conversation History
 Task.Watch       为指定 Actor 注册 Task Reconciler
 Harness.Prompt   以 prompt、tools 和可选 Harness target 发起或恢复一次 Call
+Harness.Register 注册并持续续租可直接接收 Task 的 Harness
 ```
 
 Ask / Confirm 通过同一 Task 下的 Conversation Message 请求 Human 输入，不另设独立任务资源或轮询 API。

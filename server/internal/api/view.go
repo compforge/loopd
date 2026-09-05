@@ -24,7 +24,7 @@ type createConversationRequest struct {
 	ParentMessageID string `json:"parent_message_id,omitempty"`
 }
 
-type registerActorRequest struct {
+type registrationRequest struct {
 	DisplayName  string `json:"display_name,omitempty"`
 	Description  string `json:"description,omitempty"`
 	LeaseSeconds int    `json:"lease_seconds,omitempty"`

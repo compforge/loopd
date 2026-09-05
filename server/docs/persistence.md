@@ -22,7 +22,8 @@ repo 层，service 与 API 不感知数据库类型。
 - `expires_at`：本次注册的租约终点；
 - `created_at`、`updated_at`：记录时间。
 
-Operator 或可直接接收 Task 的 Harness 通过 loop-runtime 注册，并按租期三分之一的间隔续租。多个副本
+Operator 与可直接接收 Task 的 Harness 分别通过 loop-runtime 的 Registry 注册，并按租期
+三分之一的间隔续租。多个副本
 使用相同 `key` 续租同一逻辑记录；进程退出时不主动删除，避免一个副本误删其他副本的可用性。
 `GET /v1/actors` 只聚合 `expires_at` 晚于当前时间的 Operator 与 Harness，不返回 Human。过期记录保留供
 后续续租复用，但不会再出现在选择列表中。Operator 内部按请求临时创建的 Harness 不登记为可直聊 Actor。

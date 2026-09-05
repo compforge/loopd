@@ -11,7 +11,10 @@ server 是 loop-server 组件，数据库拥有 Conversation 与 Message 两类�
 ```text
 server/
 ├── server.go               # 组件组装与资源生命周期
-├── internal/api/           # Hertz 适配；Actor、Conversation、Message、Chat、Task handler 分文件
+├── internal/api/           # Hertz 适配；Actor 发现、Registry、Conversation、Message、Chat、Task 分文件
+│   ├── actor.go            # Actor 聚合发现
+│   ├── operator.go         # Operator Registry
+│   └── harness.go          # Harness Registry
 ├── internal/delivery/      # loopd 完成语义；借助 AgentUE Bridge 续接事件并固化 Message
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
@@ -25,7 +28,7 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
-│   ├── actor.go            # Actor 在线注册与发现
+│   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；Message 与 Task CRD 的提交边界
 │   └── task.go             # TaskService；按 task_id 组装 Operator 上下文
 └── docs/persistence.md     # 聊天事实、Actor 注册与 UUIDv7 游标约束

@@ -51,8 +51,9 @@ loopd/
     实例，再进入共享 Redis Stream。AgentGo Adapter 只用于进程内演示，生产级执行恢复由 agentd 持有。
 11. 根目录 `VERSION` 是 loopd 当前版本，使用 SemVer。任何代码改动都必须在同一变更中递增
     `VERSION`；初始版本为 `0.0.1`。
-12. Operator 与可直聊 Harness 通过 loop-runtime 定期续租；`/v1/actors` 只发现未过期的注册。Operator
-    内部临时 Harness 不注册为可直接接收 Task 的 Actor。
+12. Operator 与可直聊 Harness 分别通过 loop-runtime 的 Operator/Harness Registry 定期续租；
+    `/v1/actors` 是 loop-server 提供给 UI 的聚合发现视图。Operator 内部临时 Harness 不注册为可直接
+    接收 Task 的目标。
 
 ## References
 

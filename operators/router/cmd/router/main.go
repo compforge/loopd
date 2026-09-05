@@ -10,7 +10,6 @@ import (
 
 	agent "github.com/compforge/agentgo"
 	"github.com/compforge/agentgo/llm"
-	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/harness"
 	agentgoharness "github.com/compforge/loopd/harness/agentgo"
 	operatorrouter "github.com/compforge/loopd/operators/router/internal/router"
@@ -70,8 +69,8 @@ func run() error {
 	defer runtime.Close()
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelRegister()
-	if err := runtime.Loop.Actor.Register(registerCtx, loopd.Actor{
-		ActorRef:    loopd.ActorRef{Kind: loopd.RoleOperator, Key: operatorrouter.OperatorKey},
+	if err := runtime.Loop.Operator.Register(registerCtx, loopruntime.OperatorRegistration{
+		Key:         operatorrouter.OperatorKey,
 		DisplayName: "Router",
 		Description: "Routes a request to one or more temporary Harness calls and summarizes the result.",
 	}); err != nil {

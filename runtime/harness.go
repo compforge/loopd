@@ -19,8 +19,9 @@ import (
 var ErrCallConflict = errors.New("harness call conflicts with an existing effect")
 
 type Harness struct {
-	chat  Chat
-	state *harnessState
+	chat     Chat
+	registry registry
+	state    *harnessState
 }
 
 type harnessState struct {
@@ -39,15 +40,33 @@ type Prompt struct {
 	Tools     []loopd.Tool
 }
 
-func newHarness(ctx context.Context, adapters map[string]provider.Adapter, logger *slog.Logger) Harness {
+type HarnessRegistration struct {
+	Key         string
+	DisplayName string
+	Description string
+}
+
+func newHarness(
+	ctx context.Context,
+	client *client,
+	leaseDuration time.Duration,
+	adapters map[string]provider.Adapter,
+	logger *slog.Logger,
+) Harness {
 	values := make(map[string]provider.Adapter, len(adapters))
 	for key, adapter := range adapters {
 		values[key] = adapter
 	}
-	return Harness{state: &harnessState{
+	return Harness{registry: newRegistry(ctx, client, "harness", "harnesses", leaseDuration, logger), state: &harnessState{
 		ctx: ctx, adapters: values, logger: logger,
 		calls: make(map[string]*Call),
 	}}
+}
+
+func (service Harness) Register(ctx context.Context, value HarnessRegistration) error {
+	return service.registry.register(ctx, registration{
+		key: value.Key, displayName: value.DisplayName, description: value.Description,
+	})
 }
 
 // Prompt starts or resumes one process-local Call. The effect identity avoids

@@ -33,7 +33,7 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
 
-	registered := performJSON(t, engine, "PUT", "/v1/actors/operator/router", `{
+	registered := performJSON(t, engine, "PUT", "/v1/operators/router", `{
 		"display_name":"Router",
 		"description":"Routes requests",
 		"lease_seconds":30
