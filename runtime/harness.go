@@ -254,6 +254,12 @@ func (call *Call) follow(
 			continue
 		}
 		value.Seq = 0
+		// Stamp once before delivery: retries must carry the same event bytes.
+		// AgentUE's timestamp is the visible output time, not Task completion.
+		if value.Timestamp == nil {
+			now := time.Now().UnixMilli()
+			value.Timestamp = &now
+		}
 		if value.Block != nil {
 			// AgentUE retains extra block fields on creation/full replacement;
 			// masked deltas only update their field, so identity never appends.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
@@ -21,6 +22,8 @@ type MessageRepository interface {
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
 	UpdateMessageContent(context.Context, string, string, []byte) (model.Message, error)
 	EnsureDetailMessage(context.Context, model.Conversation, model.Message) (model.Message, bool, error)
+	ObserveMessageActivity(context.Context, string, time.Time) error
+	SaveDetailContent(context.Context, string, []byte) error
 }
 
 type Failure struct {
@@ -83,7 +86,7 @@ func (coordinator *Coordinator) Emit(ctx context.Context, taskID string, data js
 		if response.Kind == string(loopd.RoleOperator) {
 			// Only accepted events create visible identities. If DB creation
 			// fails, retrying the same Redis sequence safely repairs it.
-			if _, err := coordinator.ensureDetail(ctx, response, callID, event.Block); err != nil {
+			if _, err := coordinator.ensureDetail(ctx, response, callID, event.Block, eventTime(event)); err != nil {
 				return "", err
 			}
 		}
@@ -112,6 +115,7 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 	lastSeq := uint64(0)
 	lastOp := agentueui.Op("")
 	hasFailure := false
+	activity := make(map[string]activityInterval)
 	for _, value := range values {
 		event, parseErr := agentueui.Parse(value.Data)
 		if parseErr != nil {
@@ -131,6 +135,11 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 			hasFailure = true
 		}
 		lastOp = event.Op
+		if callID, _ := event.Block["call_id"].(string); callID != "" {
+			interval := activity[callID]
+			interval.include(eventTime(event))
+			activity[callID] = interval
+		}
 	}
 	status := agentuerunner.StatusCompleted
 	if failure != nil && lastOp != agentueui.OpEnd && !hasFailure {
@@ -156,7 +165,7 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 	}
 	// Detail Messages must be durable before the task becomes terminal. A
 	// retry overwrites the same identities, never appends duplicate Messages.
-	snapshot, err = coordinator.persistDetails(ctx, response, snapshot)
+	snapshot, err = coordinator.persistDetails(ctx, response, snapshot, activity)
 	if err != nil {
 		return err
 	}

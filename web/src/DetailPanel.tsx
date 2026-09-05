@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import type { UIModel } from "@compforge/agentue/ui";
 import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
 import { detailMessageModel, traceColor, traceLabel } from "./trace";
+import { groupParallelMessages } from "./parallel";
 
 interface Detail {
   parentMessageID: string;
@@ -43,6 +44,8 @@ export function DetailPanel({ message, liveModel, running, status }: {
   }, [messageID, running]);
 
   const selected = detail?.parentMessageID === messageID ? detail : undefined;
+  const groups = groupParallelMessages(selected?.messages ?? []);
+  const indices = new Map((selected?.messages ?? []).map((item, index) => [item.id, index]));
   return (
     <aside className="detail-panel">
       <header className="detail-header">
@@ -62,8 +65,18 @@ export function DetailPanel({ message, liveModel, running, status }: {
           </div>
           <div className="timeline">
             {selected.messages.length === 0 && <div className="muted-state">等待处理消息…</div>}
-            {selected.messages.map((item, index) => (
-              <DetailMessage key={item.id} message={item} index={index} liveModel={liveModel} />
+            {groups.map((group) => (
+              <section className="detail-group" key={group.columns[0][0].id}>
+                <div className="parallel-scroll">
+                  <div className="parallel-columns" style={{ gridTemplateColumns: `repeat(${group.columns.length}, 240px)` }}>
+                    {group.columns.map((column) => (
+                      <div className="parallel-column" key={column[0].id}>
+                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} liveModel={liveModel} />)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
             ))}
           </div>
         </div>
@@ -86,6 +99,9 @@ function DetailMessage({ message, index, liveModel }: { message: Message; index:
         <span className="block-kind">{message.kind.toUpperCase()}</span>
       </div>
       <div className="detail-card-title">{title}</div>
+      <div className="detail-card-time" title={`${message.created_at} → ${message.updated_at}`}>
+        {activityTime(message.created_at)} → {activityTime(message.updated_at)}
+      </div>
       {!model && <p>消息内容无法显示。</p>}
       {model?.blocks.map((block) => (
         <div key={block.id}>
@@ -97,4 +113,11 @@ function DetailMessage({ message, index, liveModel }: { message: Message; index:
       {model?.meta.error && <p>{model.meta.error.message}</p>}
     </article>
   );
+}
+
+function activityTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString([], {
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
 }

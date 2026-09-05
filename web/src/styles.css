@@ -15,7 +15,7 @@ button { color: inherit; }
 
 .shell {
   display: grid;
-  grid-template-columns: 264px minmax(460px, 1fr) 348px;
+  grid-template-columns: 264px minmax(460px, 1fr) clamp(348px, 36vw, 640px);
   /* Keep long histories inside each panel instead of growing the viewport row. */
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
@@ -199,6 +199,10 @@ button { color: inherit; }
 .run-badge.failed { color: #873e37; background: #f1dcd8; }
 
 .timeline { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+.parallel-scroll { overflow-x: auto; padding-bottom: 5px; }
+.parallel-columns { display: grid; gap: 10px; align-items: start; }
+.parallel-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.detail-card-time { margin-top: 6px; color: #8b8e85; font-size: 9px; line-height: 1.5; }
 .detail-card { position: relative; padding: 13px 14px; border: 1px solid #d9d9d2; border-radius: 10px; background: #faf9f6; }
 .detail-card.failed { border-color: #dfbbb6; background: #fff5f3; }
 .timeline-node { position: absolute; top: 13px; right: 14px; z-index: 1; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid #bcc4bd; border-radius: 50%; color: #657268; background: #f0efea; font-size: 8px; font-weight: 800; }
