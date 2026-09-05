@@ -91,6 +91,52 @@ func TestChatHTTPFlow(t *testing.T) {
 	if len(result.Data) != 2 || result.Data[0].TaskID != taskID || result.Data[1].ID != task.Response.ID {
 		t.Fatalf("history = %#v", result.Data)
 	}
+
+	childResponse := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"Details","parent_message_id":"`+task.Response.ID+`"}`)
+	if childResponse.StatusCode() != 201 {
+		t.Fatalf("create detail=%s", childResponse.Body())
+	}
+	var child loopd.Conversation
+	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
+		t.Fatal(err)
+	}
+	if child.ParentMessageID != task.Response.ID {
+		t.Fatalf("parent=%s", child.ParentMessageID)
+	}
+	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.RoleHarness, "call-1",
+		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"detail output"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		query      string
+		expectedID string
+	}{
+		{"", conversation.ID},
+		{"?parent_message_id=" + task.Response.ID, child.ID},
+		{"?parent_message_id=" + task.Input.ID, ""},
+		{"?parent_message_id=missing-message", ""},
+	} {
+		response := ut.PerformRequest(engine, "GET", "/v1/conversations"+test.query, nil).Result()
+		if response.StatusCode() != 200 {
+			t.Fatalf("query %s: %s", test.query, response.Body())
+		}
+		var page page[loopd.Conversation]
+		if err := json.Unmarshal(response.Body(), &page); err != nil {
+			t.Fatal(err)
+		}
+		if test.expectedID == "" {
+			if len(page.Data) != 0 {
+				t.Fatalf("unexpected details=%+v", page.Data)
+			}
+		} else if len(page.Data) != 1 || page.Data[0].ID != test.expectedID {
+			t.Fatalf("query %s: %+v", test.query, page.Data)
+		}
+	}
+	childMessages := ut.PerformRequest(engine, "GET", "/v1/conversations/"+child.ID+"/messages", nil).Result()
+	if childMessages.StatusCode() != 200 || !strings.Contains(string(childMessages.Body()), "detail output") {
+		t.Fatalf("child messages=%s", childMessages.Body())
+	}
 }
 
 type nopTaskClient struct{}

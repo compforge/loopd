@@ -27,6 +27,14 @@ Operator/Harness 表的租约及发现语义见 [在线注册与发现](registry
 主会话的 `parent_message_id` 为 `NULL`。详情会话只允许引用主会话中的 response Message，不继续嵌套；
 同一条 Message 在 v1 中最多关联一个详情会话。
 
+左侧导航只列主会话。选择主会话中的 Message 后，按它的 ID 查找 `parent_message_id` 相同的详情
+会话，右侧展示该会话的 Message；没有关联会话就展示空状态。Task ID 关联一次执行，不替代
+这个父子关系，也不作为页面选中 Message 的标识。
+
+Operator 内部的临时 Harness Call 各对应详情会话中的一条 `harness` Message，actor_key 使用
+该 Call 的身份；同一次 Call 的文本和工具块保存在同一条 Message 中。effect_key 是可见步骤名，
+不代替身份。主回答只保存 Operator 自己的输出，不混存这些 Harness Message。
+
 ## Message
 
 `messages` 表包含：

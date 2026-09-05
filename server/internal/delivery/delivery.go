@@ -20,6 +20,7 @@ var ErrInvalidEvent = errors.New("invalid AgentUE event")
 type MessageRepository interface {
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
 	UpdateMessageContent(context.Context, string, string, []byte) (model.Message, error)
+	EnsureDetailMessage(context.Context, model.Conversation, model.Message) (model.Message, bool, error)
 }
 
 type Failure struct {
@@ -70,7 +71,24 @@ func (coordinator *Coordinator) Emit(ctx context.Context, taskID string, data js
 	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend {
 		return "", fmt.Errorf("%w: only set and append events may be emitted", ErrInvalidEvent)
 	}
-	return coordinator.events.Publish(ctx, taskID, data, event.Seq)
+	id, err := coordinator.events.Publish(ctx, taskID, data, event.Seq)
+	if err != nil {
+		return "", err
+	}
+	if callID, _ := event.Block["call_id"].(string); callID != "" {
+		response, err := coordinator.response(ctx, taskID)
+		if err != nil {
+			return "", err
+		}
+		if response.Kind == string(loopd.RoleOperator) {
+			// Only accepted events create visible identities. If DB creation
+			// fails, retrying the same Redis sequence safely repairs it.
+			if _, err := coordinator.ensureDetail(ctx, response, callID, event.Block); err != nil {
+				return "", err
+			}
+		}
+	}
+	return id, nil
 }
 
 func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, failure *Failure) error {
@@ -81,10 +99,11 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 	if state.Status.Terminal() {
 		return nil
 	}
-	conversationID, responseMessageID, err := coordinator.responseMessage(ctx, taskID)
+	response, err := coordinator.response(ctx, taskID)
 	if err != nil {
 		return err
 	}
+	conversationID, responseMessageID := response.ConversationID, response.ID
 	values, err := coordinator.events.EventsThrough(ctx, taskID, "")
 	if err != nil {
 		return err
@@ -135,6 +154,12 @@ func (coordinator *Coordinator) Complete(ctx context.Context, taskID string, fai
 	if hasFailure {
 		status = agentuerunner.StatusFailed
 	}
+	// Detail Messages must be durable before the task becomes terminal. A
+	// retry overwrites the same identities, never appends duplicate Messages.
+	snapshot, err = coordinator.persistDetails(ctx, response, snapshot)
+	if err != nil {
+		return err
+	}
 	content, err := agentueui.MarshalSnapshot(snapshot)
 	if err != nil {
 		return fmt.Errorf("marshal task %q snapshot: %w", taskID, err)
@@ -172,11 +197,11 @@ func (coordinator *Coordinator) Stream(
 	after string,
 	deliver func(Event) error,
 ) error {
-	taskConversationID, _, err := coordinator.responseMessage(ctx, taskID)
+	response, err := coordinator.response(ctx, taskID)
 	if err != nil {
 		return err
 	}
-	if taskConversationID != conversationID {
+	if response.ConversationID != conversationID {
 		return agentuerunner.ErrNotFound
 	}
 	replayer := agentuerunner.Replayer{Bridge: coordinator.events}
@@ -185,16 +210,17 @@ func (coordinator *Coordinator) Stream(
 	})
 }
 
-func (coordinator *Coordinator) responseMessage(ctx context.Context, taskID string) (string, string, error) {
+func (coordinator *Coordinator) response(ctx context.Context, taskID string) (model.Message, error) {
 	rows, err := coordinator.repo.ListRootMessagesByTask(ctx, taskID)
 	if err != nil {
-		return "", "", err
+		return model.Message{}, err
 	}
 	var conversationID, responseMessageID string
+	var response model.Message
 	hasUser := false
 	for _, row := range rows {
 		if conversationID != "" && conversationID != row.ConversationID {
-			return "", "", repo.ErrNotFound
+			return model.Message{}, repo.ErrNotFound
 		}
 		conversationID = row.ConversationID
 		if row.Kind == string(loopd.RoleUser) {
@@ -202,12 +228,13 @@ func (coordinator *Coordinator) responseMessage(ctx context.Context, taskID stri
 			continue
 		}
 		if responseMessageID != "" {
-			return "", "", repo.ErrNotFound
+			return model.Message{}, repo.ErrNotFound
 		}
 		responseMessageID = row.ID
+		response = row
 	}
 	if !hasUser || conversationID == "" || responseMessageID == "" {
-		return "", "", repo.ErrNotFound
+		return model.Message{}, repo.ErrNotFound
 	}
-	return conversationID, responseMessageID, nil
+	return response, nil
 }

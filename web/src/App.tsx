@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   applyPatch,
   parseUIModel,
   PatchOp,
-  type BaseBlock,
   type Snapshot,
   type UIModel,
 } from "@compforge/agentue/ui";
@@ -17,7 +16,7 @@ import {
   type Conversation,
   type Message,
 } from "./api";
-import { traceCallID, traceColor, traceLabel } from "./trace";
+import { DetailPanel } from "./DetailPanel";
 
 const activeTasksKey = "loopd.active-tasks";
 const selectedActorKey = "loopd.selected-actor";
@@ -47,7 +46,7 @@ export function App() {
   const [selectedActorID, setSelectedActorID] = useState<string>();
   const [selectedConversationID, setSelectedConversationID] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [selectedTaskID, setSelectedTaskID] = useState<string>();
+  const [selectedMessageID, setSelectedMessageID] = useState<string>();
   const [liveTask, setLiveTask] = useState<LiveTask>();
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
@@ -57,12 +56,8 @@ export function App() {
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
-  const operatorMessages = messages.filter((message) => message.kind === "operator");
-  const selectedOperatorMessage = operatorMessages.find((message) => message.task_id === selectedTaskID);
-  const detailModel = useMemo(() => {
-    if (liveTask?.target.kind === "operator" && liveTask.taskID === selectedTaskID) return toUIModel(liveTask.snapshot);
-    return selectedOperatorMessage ? safeModel(selectedOperatorMessage.content) : undefined;
-  }, [liveTask, selectedOperatorMessage, selectedTaskID]);
+  const selectedMessage = messages.find((message) => message.id === selectedMessageID);
+  const selectedIsLive = Boolean(selectedMessage && liveTask?.taskID === selectedMessage.task_id && selectedMessage.kind !== "user");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -109,14 +104,15 @@ export function App() {
   useEffect(() => {
     if (!selectedConversationID) {
       setMessages([]);
-      setSelectedTaskID(undefined);
+      setSelectedMessageID(undefined);
       return;
     }
     localStorage.setItem(selectedConversationKey, selectedConversationID);
     const controller = new AbortController();
     void refreshMessages(selectedConversationID, controller.signal).then((items) => {
-      const lastOperator = items.findLast((message) => message.kind === "operator");
-      setSelectedTaskID((current) => current ?? lastOperator?.task_id);
+      if (controller.signal.aborted) return;
+      const lastResponse = items.findLast((message) => message.kind !== "user");
+      setSelectedMessageID((current) => current ?? lastResponse?.id);
     });
     const active = readActiveTasks()[selectedConversationID];
     if (active && streamingConversation.current !== selectedConversationID) {
@@ -128,6 +124,7 @@ export function App() {
   async function refreshMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
     try {
       const items = await listMessages(conversationID, signal);
+      if (signal?.aborted) return [];
       setMessages(items);
       return items;
     } catch (cause) {
@@ -137,11 +134,12 @@ export function App() {
   }
 
   function selectConversation(conversationID: string) {
+    if (conversationID === selectedConversationID) return;
     streamAbort.current?.abort();
     streamingConversation.current = undefined;
     setMessages([]);
     setLiveTask(undefined);
-    setSelectedTaskID(undefined);
+    setSelectedMessageID(undefined);
     setSelectedConversationID(conversationID);
     setError(undefined);
   }
@@ -152,7 +150,7 @@ export function App() {
     setSelectedConversationID(undefined);
     setMessages([]);
     setLiveTask(undefined);
-    setSelectedTaskID(undefined);
+    setSelectedMessageID(undefined);
     setError(undefined);
   }
 
@@ -208,6 +206,7 @@ export function App() {
     let lastEventID = stored?.lastEventID ?? "";
     let snapshot: Snapshot = {};
     let failed = false;
+    let responseLoaded = false;
     const target = requestedTarget ?? stored?.target ?? legacyRouter;
 
     setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting", target });
@@ -224,7 +223,16 @@ export function App() {
             signal: controller.signal,
             onTaskID: (value) => {
               taskID = value;
-              if (target.kind === "operator") setSelectedTaskID(value);
+              if (!responseLoaded) {
+                responseLoaded = true;
+                // Select the server's response Message ID, not a synthetic
+                // live ID or Task ID; detail Conversations reference it.
+                void refreshMessages(conversationID, controller.signal).then((items) => {
+                  if (controller.signal.aborted) return;
+                  const response = items.find((item) => item.task_id === value && item.kind !== "user");
+                  if (response) setSelectedMessageID(response.id);
+                });
+              }
               writeActiveTask(conversationID, { taskID, lastEventID, target });
               setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "running", target });
             },
@@ -262,9 +270,7 @@ export function App() {
       }
 
       removeActiveTask(conversationID);
-      const items = await refreshMessages(conversationID, controller.signal);
-      const answer = items.find((message) => message.task_id === taskID && message.kind === target.kind);
-      if (answer?.kind === "operator") setSelectedTaskID(answer.task_id);
+      await refreshMessages(conversationID, controller.signal);
       const refreshed = await listConversations(controller.signal);
       setConversations(refreshed);
     } catch (cause) {
@@ -344,12 +350,12 @@ export function App() {
             const isLive = liveTask?.taskID === message.task_id && message.kind !== "user";
             const model = isLive ? toUIModel(liveTask.snapshot) : safeModel(message.content);
             const text = messageText(model, message.kind);
-            const active = message.kind === "operator" && selectedTaskID === message.task_id;
+            const active = selectedMessageID === message.id;
             return (
               <article
                 className={`message ${message.kind} ${active ? "selected" : ""}`}
                 key={message.id}
-                onClick={() => setSelectedTaskID(message.kind === "operator" ? message.task_id : undefined)}
+                onClick={() => setSelectedMessageID(message.id)}
               >
                 <div className="message-author">
                   <span>{message.kind === "user" ? "YOU" : message.key.toUpperCase()}</span>
@@ -421,74 +427,12 @@ export function App() {
         </form>
       </main>
 
-      <aside className="detail-panel">
-        <header className="detail-header">
-          <span className="eyebrow">OPERATOR TRACE</span>
-          <h2>处理详情</h2>
-        </header>
-        {!selectedTaskID || !detailModel ? (
-          <div className="detail-empty">
-            <div>◎</div>
-            <p>选择一条 Operator 消息，查看它如何调用 Harness 完成任务。</p>
-          </div>
-        ) : (
-          <DetailView
-            model={detailModel}
-            taskID={selectedTaskID}
-            status={liveTask?.taskID === selectedTaskID ? liveTask.status : "completed"}
-          />
-        )}
-      </aside>
-    </div>
-  );
-}
-
-function DetailView({ model, taskID, status }: { model: UIModel; taskID: string; status: RunStatus }) {
-  const details = model.blocks.filter((block) => block.id !== "answer");
-  const error = model.meta.error;
-  return (
-    <div className="detail-content">
-      <div className="task-summary">
-        <div>
-          <small>TASK</small>
-          <code>{shortID(taskID)}</code>
-        </div>
-        <RunBadge status={error ? "failed" : status} />
-      </div>
-      <div className="timeline">
-        {details.length === 0 && !error && <div className="muted-state">等待 Operator 产生处理事件…</div>}
-        {details.map((block, index) => (
-          <BlockCard block={block} index={index} key={block.id} />
-        ))}
-        {error && (
-          <div className="detail-card failed">
-            <div className="detail-card-title">执行失败</div>
-            <p>{error.message}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BlockCard({ block, index }: { block: BaseBlock; index: number }) {
-  const isTool = block.type === "tool";
-  const content = typeof block.content === "string" ? block.content : undefined;
-  const callID = traceCallID(block);
-  const effectKey = typeof block.effect_key === "string" ? block.effect_key : undefined;
-  const style = callID ? { "--harness-color": traceColor(callID) } as CSSProperties : undefined;
-  return (
-    <div className={`detail-card${callID ? " harness-trace" : ""}`} style={style}>
-      <div className="timeline-node">{index + 1}</div>
-      <div className="detail-card-head">
-        <span className={`block-kind ${isTool ? "tool" : "harness"}`}>{isTool ? "TOOL" : "HARNESS"}</span>
-        {typeof block.status === "string" && <span className="block-status">{block.status}</span>}
-      </div>
-      <div className="detail-card-title">
-        {traceLabel(block, index)}
-      </div>
-      {effectKey && isTool && typeof block.name === "string" && <div className="detail-card-subtitle">{block.name}</div>}
-      {content && <p>{content}</p>}
+      <DetailPanel
+        message={selectedMessage}
+        liveModel={selectedIsLive && liveTask ? toUIModel(liveTask.snapshot) : undefined}
+        running={Boolean(selectedIsLive && liveTask && !isTerminal(liveTask.status))}
+        status={selectedIsLive ? liveTask?.status : safeModel(selectedMessage?.content)?.meta.error ? "failed" : "completed"}
+      />
     </div>
   );
 }
@@ -524,9 +468,8 @@ function messageText(model: UIModel | undefined, kind: Message["kind"]): string 
   if (!model) return "";
   const answer = model.blocks.find((block) => block.id === "answer" && block.type === "text");
   if (answer && typeof answer.content === "string") return answer.content;
-  // An Operator response owns both its final answer and its internal Harness
-  // progress. Keep progress in the detail pane so the main conversation does
-  // not briefly expose implementation output while the answer is streaming.
+  // The task stream multiplexes main and detail output. Only the Operator's
+  // answer belongs in the main bubble; Harness output belongs to child Messages.
   if (kind === "operator") return model.meta.error?.message ?? "";
   return model.blocks
     .filter((block) => block.type === "text" && typeof block.content === "string")
@@ -561,10 +504,6 @@ function actorName(actor: Actor): string {
 function actorLabel(actor: Actor): string {
   const kind = actor.kind === "operator" ? "Operator" : "Harness";
   return `${kind} · ${actorName(actor)}`;
-}
-
-function shortID(value: string): string {
-  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
 }
 
 function relativeTime(value: string): string {
