@@ -14,13 +14,15 @@ import (
 func DomainKeys(db *gorm.DB) error {
 	migrator := db.Migrator()
 	for _, change := range []struct {
-		table  string
-		model  any
-		column string
+		table     string
+		model     any
+		oldColumn string
+		column    string
 	}{
-		{"messages", &model.Message{}, "sender_key"},
-		{"operators", &model.Operator{}, "operator_key"},
-		{"harnesses", &model.Harness{}, "harness_key"},
+		{"messages", &model.Message{}, "key", "actor_key"},
+		{"messages", &model.Message{}, "sender_key", "actor_key"},
+		{"operators", &model.Operator{}, "key", "operator_key"},
+		{"harnesses", &model.Harness{}, "key", "harness_key"},
 	} {
 		if !migrator.HasTable(change.model) {
 			continue
@@ -33,20 +35,20 @@ func DomainKeys(db *gorm.DB) error {
 		}
 		var hasOld, hasNew bool
 		for _, column := range columns {
-			hasOld = hasOld || column.Name() == "key"
+			hasOld = hasOld || column.Name() == change.oldColumn
 			hasNew = hasNew || column.Name() == change.column
 		}
 		if hasOld {
 			if hasNew {
-				return fmt.Errorf("%s has both key and %s; resolve the conflicting columns before startup", change.table, change.column)
+				return fmt.Errorf("%s has both %s and %s; resolve the conflicting columns before startup", change.table, change.oldColumn, change.column)
 			}
 			// Supplying the model lets GORM use CHANGE COLUMN on older MySQL.
-			if err := migrator.RenameColumn(change.model, "key", change.column); err != nil {
-				return fmt.Errorf("rename %s.key to %s: %w", change.table, change.column, err)
+			if err := migrator.RenameColumn(change.model, change.oldColumn, change.column); err != nil {
+				return fmt.Errorf("rename %s.%s to %s: %w", change.table, change.oldColumn, change.column, err)
 			}
 			slog.InfoContext(db.Statement.Context, "database column renamed", "table", change.table, "column", change.column)
 		}
-		oldIndex := "idx_" + change.table + "_key"
+		oldIndex := "idx_" + change.table + "_" + change.oldColumn
 		newIndex := "idx_" + change.table + "_" + change.column
 		if migrator.HasIndex(change.model, oldIndex) && !migrator.HasIndex(change.model, newIndex) {
 			if err := migrator.RenameIndex(change.model, oldIndex, newIndex); err != nil {

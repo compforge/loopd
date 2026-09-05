@@ -70,11 +70,11 @@ func (service *ChatService) Create(
 	}
 	userMessage := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-		Kind: string(loopd.RoleUser), SenderKey: userKey, Content: content,
+		Kind: string(loopd.RoleUser), ActorKey: userKey, Content: content,
 	}
 	responseMessage := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-		Kind: string(target.Kind), SenderKey: target.Key, Content: responseContent,
+		Kind: string(target.Kind), ActorKey: target.Key, Content: responseContent,
 	}
 	taskCreated := false
 	streamCreated := false

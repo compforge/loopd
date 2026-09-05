@@ -35,7 +35,7 @@ Operator/Harness 表的租约及发现语义见 [在线注册与发现](registry
 - `conversation_id`：所属 Conversation；
 - `task_id`：对应 Task CRD 名称的一次完整问答标识；反问、确认等可见消息继续使用同一值；
 - `kind`：发送者类型，只能是 `user`、`operator`、`harness`；
-- `key`：发送者在所属系统中的稳定标识；
+- `actor_key`：发送者在所属系统中的稳定标识；
 - `content`：页面可见的 AgentUE semantic model JSON；其中 `blocks` 按顺序承载 `text`、`tool`、
   `artifact` 等可扩展内容；
 - `created_at`、`updated_at`：创建时间与可见内容最后更新时间。

@@ -17,7 +17,7 @@ import {
   type Conversation,
   type Message,
 } from "./api";
-import { traceCallID, traceColor } from "./trace";
+import { traceCallID, traceColor, traceLabel } from "./trace";
 
 const activeTasksKey = "loopd.active-tasks";
 const selectedActorKey = "loopd.selected-actor";
@@ -485,10 +485,9 @@ function BlockCard({ block, index }: { block: BaseBlock; index: number }) {
         {typeof block.status === "string" && <span className="block-status">{block.status}</span>}
       </div>
       <div className="detail-card-title">
-        {effectKey || (isTool && typeof block.name === "string" ? block.name : blockLabel(block))}
+        {traceLabel(block, index)}
       </div>
       {effectKey && isTool && typeof block.name === "string" && <div className="detail-card-subtitle">{block.name}</div>}
-      {effectKey && callID && <div className="detail-card-subtitle" title={callID}>Call {shortID(callID)}</div>}
       {content && <p>{content}</p>}
     </div>
   );
@@ -533,12 +532,6 @@ function messageText(model: UIModel | undefined, kind: Message["kind"]): string 
     .filter((block) => block.type === "text" && typeof block.content === "string")
     .map((block) => block.content as string)
     .join("\n");
-}
-
-function blockLabel(block: BaseBlock): string {
-  const parts = block.id.split("/");
-  if (parts[0] === "harness" && parts[1]) return `Call ${shortID(parts[1])}`;
-  return block.type;
 }
 
 function textModel(text: string): UIModel {
