@@ -142,6 +142,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			response.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(response).Encode(loopd.TaskContext{
 				ID:           taskID,
+				Response:     loopd.Message{ID: "response", Purpose: "response"},
 				Conversation: loopd.Conversation{ID: "conversation-1"},
 				Input: loopd.Message{
 					ID: "message-2", ConversationID: "conversation-1", TaskID: taskID,
@@ -152,7 +153,13 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 					{ID: "message-2", Kind: loopd.RoleUser, Key: "user-1", Content: semanticModel("How should this work?")},
 				},
 			})
-		case request.Method == http.MethodPost && request.URL.Path == "/v1/tasks/"+taskID+"/events":
+		case request.Method == http.MethodPost && request.URL.Path == "/v1/tasks/"+taskID+"/outputs":
+			var input loopd.OutputRequest
+			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+				t.Error(err)
+			}
+			_ = json.NewEncoder(response).Encode(loopd.Message{ID: input.Actor.Key, TaskID: taskID, Purpose: "output"})
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):
 			var input struct {
 				Event json.RawMessage `json:"event"`
 			}

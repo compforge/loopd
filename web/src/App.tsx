@@ -17,7 +17,7 @@ import {
   type Message,
 } from "./api";
 import { HumanMessage } from "./HumanMessage";
-import { mergeMessage, applyHumanMessageEvent } from "./human";
+import { mergeMessage, applyMessageEvent } from "./message";
 import { DetailPanel } from "./DetailPanel";
 
 const activeTasksKey = "loopd.active-tasks";
@@ -28,6 +28,7 @@ const legacyRouter: Pick<Actor, "kind" | "key"> = { kind: "operator", key: "rout
 type RunStatus = "connecting" | "running" | "reconnecting" | "completed" | "failed";
 
 interface LiveTask {
+  messages?: Message[];
   responseMessageID?: string;
   conversationID: string;
   taskID: string;
@@ -228,7 +229,9 @@ export function App() {
 
     setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting", target, responseMessageID });
     try {
+      let liveMessages: Message[] = [];
       for (;;) {
+        liveMessages = [];
         let ended = false;
         try {
           await streamMessage({
@@ -243,7 +246,7 @@ export function App() {
               if (!responseLoaded) {
                 responseLoaded = true;
                 // Select the server's response Message ID, not a synthetic
-                // live ID or Task ID; detail Conversations reference it.
+                // live ID or Task ID; selection and Task grouping are distinct.
                 void refreshMessages(conversationID, controller.signal).then((items) => {
                   if (controller.signal.aborted) return;
                   const response = items.find((item) => item.task_id === value && (item.purpose === "response" || (!item.purpose && item.kind !== "user")));
@@ -255,14 +258,19 @@ export function App() {
             },
             onEvent: (delivery) => {
               const { event: patch, eventId, messageID, message } = delivery;
-              if (messageID && message?.purpose !== "response" && messageID !== responseMessageID) {
-                if (message?.purpose === "human_request" || message?.purpose === "human_reply") {
-                  setMessages((current) => applyHumanMessageEvent(current, delivery));
+              if (messageID && message) {
+                liveMessages = applyMessageEvent(liveMessages, delivery);
+                if (message.conversation_id === conversationID) {
+                  const updated = liveMessages.find((item) => item.id === messageID)!;
+                  setMessages((current) => mergeMessage(current, updated));
+                }
+                if (message.purpose !== "response") {
+                  setLiveTask((current) => current ? { ...current, messages: [...liveMessages] } : current);
                   return;
                 }
               }
               if (messageID) responseMessageID = messageID;
-              if (message) setMessages((current) => mergeMessage(current, message));
+
               snapshot = applyPatch(structuredClone(snapshot), patch);
               if (eventId) lastEventID = eventId;
               if (patch.op === PatchOp.ERROR || toUIModel(snapshot)?.meta.error) failed = true;
@@ -273,6 +281,7 @@ export function App() {
                 taskID,
                 lastEventID,
                 snapshot: structuredClone(snapshot),
+                messages: [...liveMessages],
                 status: ended ? (failed ? "failed" : "completed") : "running",
                 target, responseMessageID,
               });
@@ -463,7 +472,7 @@ export function App() {
 
       <DetailPanel
         message={selectedMessage}
-        liveModel={selectedIsLive && liveTask ? toUIModel(liveTask.snapshot) : undefined}
+        liveMessages={selectedIsLive ? liveTask?.messages : undefined}
         running={Boolean(selectedIsLive && liveTask && !isTerminal(liveTask.status))}
         status={selectedIsLive ? liveTask?.status : safeModel(selectedResponse?.content)?.meta.error ? "failed" : "completed"}
       />

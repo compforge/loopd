@@ -10,10 +10,10 @@ import (
 	"time"
 
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/domain"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/qiankunli/go-stdx/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var ErrInvalidHuman = errors.New("invalid Human request")
@@ -36,68 +36,6 @@ type replyBlock struct {
 	Type    string            `json:"type"`
 	Outcome loopd.HumanStatus `json:"outcome"`
 	Value   string            `json:"value,omitempty"`
-}
-
-// TaskPair accepts explicit identities, or an unambiguous legacy two-message pair.
-// It never picks a last/nearest message when multiple actors speak in parallel.
-func TaskPair(rows []model.Message) (input, response model.Message, err error) {
-	for _, row := range rows {
-		switch row.Purpose {
-		case "input":
-			if input.ID != "" {
-				return input, response, ErrConflict
-			}
-			input = row
-		case "response":
-			if response.ID != "" {
-				return input, response, ErrConflict
-			}
-			response = row
-		}
-	}
-	if input.ID == "" && response.ID == "" && len(rows) == 2 && rows[0].Purpose == "" && rows[1].Purpose == "" {
-		for _, row := range rows {
-			if row.Kind == "user" {
-				input = row
-			} else {
-				response = row
-			}
-		}
-	}
-	if input.ID == "" || response.ID == "" || input.Kind != "user" || response.Kind == "user" || input.TaskID != response.TaskID || input.ConversationID != response.ConversationID {
-		return input, response, ErrNotFound
-	}
-	return input, response, nil
-}
-
-// withHumanTask uses the original response as the lock shared by all Human
-// transitions and task completion. No external call runs inside the transaction.
-func (store *Store) withHumanTask(ctx context.Context, taskID string, fn func(*gorm.DB, model.Message, model.Message) error) error {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	rows, err := store.ListRootMessagesByTask(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	input, response, err := TaskPair(rows)
-	if err != nil {
-		return err
-	}
-	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&response, "id = ?", response.ID).Error; err != nil {
-			return err
-		}
-		if input.Purpose == "" {
-			if err := tx.Model(&model.Message{}).Where("id = ?", input.ID).Update("purpose", "input").Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.Message{}).Where("id = ?", response.ID).Updates(map[string]any{"purpose": "response", "reply_to_message_id": input.ID}).Error; err != nil {
-				return err
-			}
-		}
-		return fn(tx, input, response)
-	})
-	return mapError(err)
 }
 
 func decodeHuman(m model.Message) (humanContent, error) {
@@ -152,8 +90,9 @@ func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	return tx.Save(m).Error
 }
 func expireHuman(tx *gorm.DB, m *model.Message, c *humanContent, now time.Time, active bool) error {
-	if c.Blocks[0].Status == loopd.HumanPending && !now.Before(c.Blocks[0].Deadline) {
-		c.Blocks[0].Status = loopd.HumanTimeout
+	q := humanQuestion(*m, *c)
+	if q.Expire(now) {
+		c.Blocks[0].Status, c.Blocks[0].Reason = q.Status, q.Reason
 		return saveHuman(tx, m, *c, active)
 	}
 	return nil
@@ -167,7 +106,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 	data, _ := json.Marshal(r)
 	sum := sha256.Sum256(data)
 	fingerprint := hex.EncodeToString(sum[:])
-	err = store.withHumanTask(ctx, r.TaskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withTask(ctx, r.TaskID, func(tx *gorm.DB, input, response model.Message) error {
 		var existing []model.Message
 		if err := tx.Where("task_id = ? AND purpose = ?", r.TaskID, "human_request").Find(&existing).Error; err != nil {
 			return err
@@ -193,8 +132,9 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest, activ
 			return ErrConflict
 		}
 		now := time.Now().UTC()
-		deadline := now.Add(r.Timeout)
-		c := humanContent{Version: "1.0", Biz: "chat", Blocks: []loopd.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: loopd.HumanPending, Deadline: deadline}}}
+		question := domain.NewHumanQuestion(r, now)
+		deadline := question.Deadline
+		c := humanContent{Version: "1.0", Biz: "chat", Blocks: []loopd.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: question.Status, Deadline: deadline}}}
 		c.Meta.Human.EffectKey = r.EffectKey
 		c.Meta.Human.Timeout = r.Timeout
 		c.Meta.Human.Fingerprint = fingerprint
@@ -217,7 +157,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 	if err != nil {
 		return result, err
 	}
-	err = store.withHumanTask(ctx, m.TaskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withTask(ctx, m.TaskID, func(tx *gorm.DB, input, response model.Message) error {
 		if err := tx.First(&m, "id = ?", id).Error; err != nil {
 			return err
 		}
@@ -237,7 +177,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 // +spec=`答复只依 reply_to_message_id；deadline、答复和 Complete 竞争时只有一个终态`
 func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, actor string, r loopd.HumanReply) (result loopd.HumanResult, err error) {
 	rejected := false
-	err = store.withHumanTask(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
+	err = store.withTask(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
 		if input.ConversationID != conversationID {
 			return ErrNotFound
 		}
@@ -258,17 +198,26 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 		if err := expireHuman(tx, &m, &c, time.Now().UTC(), response.DeliveryState == ""); err != nil {
 			return err
 		}
-		if c.Blocks[0].Status != loopd.HumanPending {
-			result, err = humanResult(tx, m, c)
-			if err != nil {
-				return err
-			}
-			// Committed timeout must survive a rejected late reply.
-			rejected = result.Reply == nil || result.Reply.Key != actor || result.Status != r.Outcome || result.Value != r.Value
+		result, err = humanResult(tx, m, c)
+		if err != nil {
+			return err
+		}
+		var previous *domain.HumanAnswer
+		if result.Reply != nil {
+			previous = &domain.HumanAnswer{Actor: result.Reply.Key, Outcome: result.Status, Value: result.Value}
+		}
+		question := humanQuestion(m, c)
+		changed, resolveErr := question.Resolve(r, actor, previous, response.DeliveryState != "")
+		if errors.Is(resolveErr, domain.ErrHumanConflict) {
+			// Persist an observed timeout even when the late reply is rejected.
+			rejected = true
 			return nil
 		}
-		if response.DeliveryState != "" {
-			return ErrConflict
+		if resolveErr != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidHuman, resolveErr)
+		}
+		if !changed {
+			return nil
 		}
 		content, _ := json.Marshal(struct {
 			Version string         `json:"version"`
@@ -280,7 +229,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 		if err := tx.Create(&reply).Error; err != nil {
 			return err
 		}
-		c.Blocks[0].Status = r.Outcome
+		c.Blocks[0].Status, c.Blocks[0].Reason = question.Status, question.Reason
 		if err := saveHuman(tx, &m, c, true); err != nil {
 			return err
 		}
@@ -293,66 +242,11 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, taskID, acto
 	return
 }
 
-// BeginCompletion closes the create/reply gate durably before external delivery.
-// completion is persisted so Run can retry after process death or delete failure.
-func (store *Store) BeginCompletion(ctx context.Context, taskID string, completion []byte, failed bool) error {
-	blocked := false
-	err := store.withHumanTask(ctx, taskID, func(tx *gorm.DB, input, response model.Message) error {
-		if response.DeliveryState != "" {
-			if string(response.Completion) != string(completion) {
-				return ErrConflict
-			}
-			return nil
-		}
-		var pending []model.Message
-		if err := tx.Where("task_id = ? AND purpose = ? AND human_due_at IS NOT NULL", taskID, "human_request").Find(&pending).Error; err != nil {
-			return err
-		}
-		for i := range pending {
-			m := &pending[i]
-			c, err := decodeHuman(*m)
-			if err != nil {
-				return err
-			}
-			if err := expireHuman(tx, m, &c, time.Now().UTC(), true); err != nil {
-				return err
-			}
-			if c.Blocks[0].Status != loopd.HumanPending {
-				continue
-			}
-			if !failed {
-				blocked = true
-				continue
-			}
-			c.Blocks[0].Status = loopd.HumanFailure
-			c.Blocks[0].Reason = "task_ended"
-			if err := saveHuman(tx, m, c, false); err != nil {
-				return err
-			}
-		}
-		if blocked {
-			return nil
-		}
-		if err := tx.Model(&model.Message{}).Where("task_id = ? AND wake_pending = ?", taskID, true).Update("wake_pending", false).Error; err != nil {
-			return err
-		}
-		return tx.Model(&response).Updates(map[string]any{"delivery_state": "closing", "completion": completion}).Error
-	})
-	if err == nil && blocked {
-		return ErrConflict
-	}
-	return err
-}
-func (store *Store) FinishCompletion(ctx context.Context, taskID string) error {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	return store.db.WithContext(ctx).Model(&model.Message{}).Where("task_id = ? AND purpose = ?", taskID, "response").Update("delivery_state", "closed").Error
-}
 func (store *Store) HumanMaintenance(ctx context.Context) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []model.Message
-	err := store.db.WithContext(ctx).Where("human_due_at <= ? OR wake_pending = ? OR delivery_state = ?", time.Now().UTC(), true, "closing").Order("id ASC").Find(&rows).Error
+	err := store.db.WithContext(ctx).Where("human_due_at <= ? OR wake_pending = ?", time.Now().UTC(), true).Order("id ASC").Find(&rows).Error
 	return rows, err
 }
 func (store *Store) AcknowledgeHumanWake(ctx context.Context, id string, revision uint64) error {
@@ -364,4 +258,9 @@ func (store *Store) AcknowledgeHumanWake(ctx context.Context, id string, revisio
 func humanRequest(m model.Message, c humanContent) loopd.HumanRequest {
 	b := c.Blocks[0]
 	return loopd.HumanRequest{TaskID: m.TaskID, EffectKey: c.Meta.Human.EffectKey, Timeout: c.Meta.Human.Timeout, Type: b.Type, Title: b.Title, Prompt: b.Prompt, Choices: b.Choices, AllowOther: b.AllowOther, ConfirmLabel: b.ConfirmLabel, DeclineLabel: b.DeclineLabel}
+}
+
+func humanQuestion(m model.Message, c humanContent) domain.HumanQuestion {
+	b := c.Blocks[0]
+	return domain.HumanQuestion{Request: humanRequest(m, c), Status: b.Status, Deadline: b.Deadline, Reason: b.Reason}
 }

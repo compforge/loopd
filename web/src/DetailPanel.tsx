@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { UIModel } from "@compforge/agentue/ui";
+import { parseUIModel, type UIModel } from "@compforge/agentue/ui";
 import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
-import { detailMessageModel, traceColor, traceLabel } from "./trace";
+import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
 interface Detail {
@@ -12,9 +12,9 @@ interface Detail {
 }
 
 /** @spec 同一 Task 的消息共享工作 Conversation；切换 Task 不得显示上一个查询的结果。 */
-export function DetailPanel({ message, liveModel, running, status }: {
+export function DetailPanel({ message, liveMessages, running, status }: {
   message?: Message;
-  liveModel?: UIModel;
+  liveMessages?: Message[];
   running: boolean;
   status?: string;
 }) {
@@ -44,8 +44,18 @@ export function DetailPanel({ message, liveModel, running, status }: {
   }, [taskID, running]);
 
   const selected = detail?.taskID === taskID ? detail : undefined;
-  const groups = groupParallelMessages(selected?.messages ?? []);
-  const indices = new Map((selected?.messages ?? []).map((item, index) => [item.id, index]));
+  const visible = [...(selected?.messages ?? [])];
+  for (const item of liveMessages ?? []) {
+    if (item.conversation_id !== selected?.conversation?.id) continue;
+    const index = visible.findIndex((value) => value.id === item.id);
+    if (index < 0) visible.push(item);
+    else if ((item.revision ?? 0) >= (visible[index].revision ?? 0)) {
+      // The stream carries content updates; polling refreshes the activity interval.
+      visible[index] = { ...item, created_at: visible[index].created_at, updated_at: visible[index].updated_at };
+    }
+  }
+  const groups = groupParallelMessages(visible);
+  const indices = new Map(visible.map((item, index) => [item.id, index]));
   return (
     <aside className="detail-panel">
       <header className="detail-header">
@@ -64,14 +74,14 @@ export function DetailPanel({ message, liveModel, running, status }: {
             <span className={`run-badge ${status ?? "completed"}`}>{(status ?? "completed").toUpperCase()}</span>
           </div>
           <div className="timeline">
-            {selected.messages.length === 0 && <div className="muted-state">等待处理消息…</div>}
+            {visible.length === 0 && <div className="muted-state">等待处理消息…</div>}
             {groups.map((group) => (
               <section className="detail-group" key={group.columns[0][0].id}>
                 <div className="parallel-scroll">
                   <div className="parallel-columns" style={{ gridTemplateColumns: `repeat(${group.columns.length}, 240px)` }}>
                     {group.columns.map((column) => (
                       <div className="parallel-column" key={column[0].id}>
-                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} liveModel={liveModel} />)}
+                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} />)}
                       </div>
                     ))}
                   </div>
@@ -85,10 +95,10 @@ export function DetailPanel({ message, liveModel, running, status }: {
   );
 }
 
-function DetailMessage({ message, index, liveModel }: { message: Message; index: number; liveModel?: UIModel }) {
+function DetailMessage({ message, index }: { message: Message; index: number }) {
   const style = message.kind === "harness" ? { "--harness-color": traceColor(message.key) } as CSSProperties : undefined;
   let model: UIModel | undefined;
-  try { model = detailMessageModel(message, liveModel); } catch { /* Invalid persisted model is shown below. */ }
+  try { model = parseUIModel(message.content); } catch { /* Invalid persisted model is shown below. */ }
   const effectKey = model?.meta.effect_key;
   const title = typeof effectKey === "string" && effectKey ? effectKey
     : model?.blocks[0] ? traceLabel(model.blocks[0], index) : `步骤 ${index + 1}`;

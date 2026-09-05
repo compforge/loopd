@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -84,7 +85,12 @@ func New(config Config) (*Server, error) {
 }
 
 func (server *Server) Register(engine *route.Engine) { server.api.Register(engine) }
-func (server *Server) Run(ctx context.Context)       { server.human.Run(ctx, server.chat) }
+func (server *Server) Run(ctx context.Context) {
+	var workers sync.WaitGroup
+	workers.Go(func() { server.human.Run(ctx) })
+	workers.Go(func() { server.chat.Run(ctx) })
+	workers.Wait()
+}
 func (server *Server) Close() error {
 	return errors.Join(server.redis.Close(), server.store.Close())
 }

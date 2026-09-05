@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	loopd "github.com/compforge/loopd"
 )
 
 func TestChatSendStartsAndResumesOneTask(t *testing.T) {
@@ -74,6 +75,8 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 	var published, completed bool
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/task-1":
+			_, _ = io.WriteString(response, `{"id":"task-1","response":{"id":"response"}}`)
 		case strings.HasSuffix(request.URL.Path, "/events"):
 			published = true
 			response.Header().Set("Content-Type", "application/json")
@@ -103,5 +106,55 @@ func TestChatPublishesAndCompletesTask(t *testing.T) {
 	}
 	if !published || !completed {
 		t.Fatalf("published=%t completed=%t", published, completed)
+	}
+}
+
+func TestChatMainConvenienceSharesMessageSequence(t *testing.T) {
+	var sequences []uint64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"id":"task","response":{"id":"response"}}`)
+			return
+		}
+		if r.URL.Path != "/v1/tasks/task/messages/response/events" {
+			t.Errorf("destination=%s", r.URL.Path)
+		}
+		var input struct {
+			Event agentueui.Event `json:"event"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		sequences = append(sequences, input.Event.Seq)
+		_, _ = io.WriteString(w, `{"id":"cursor"}`)
+	}))
+	defer server.Close()
+	runtime, err := New(server.URL, Options{HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	event := agentueui.Event{Op: agentueui.OpSet, Block: map[string]any{"id": "text", "type": "text", "content": "text"}}
+	if _, err := runtime.Loop.Chat.Emit(context.Background(), "task", event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Loop.Chat.EmitMessage(context.Background(), "task", "response", event); err != nil {
+		t.Fatal(err)
+	}
+	if len(sequences) != 2 || sequences[0] != 2 || sequences[1] != 3 {
+		t.Fatalf("sequences=%v", sequences)
+	}
+}
+
+func TestWorkMessageEndIsNotTaskCompletion(t *testing.T) {
+	data, err := agentueui.End(2).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, purpose := range []string{"response", "output"} {
+		ended, err := IsEnd(loopd.Event{Data: data, Message: &loopd.Message{Purpose: purpose}})
+		if err != nil || ended != (purpose == "response") {
+			t.Fatalf("purpose=%s ended=%v err=%v", purpose, ended, err)
+		}
 	}
 }

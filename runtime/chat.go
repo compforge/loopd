@@ -27,16 +27,17 @@ type Chat struct {
 
 type chatState struct {
 	mu        sync.Mutex
-	sequences map[string]*taskSequence
+	sequences map[string]*messageSequence
+	responses map[string]string
 }
 
-type taskSequence struct {
+type messageSequence struct {
 	mu   sync.Mutex
 	next uint64
 }
 
 func newChat(client *client) Chat {
-	return Chat{client: client, state: &chatState{sequences: make(map[string]*taskSequence)}}
+	return Chat{client: client, state: &chatState{sequences: make(map[string]*messageSequence), responses: make(map[string]string)}}
 }
 
 type CreateConversationRequest struct {
@@ -79,8 +80,8 @@ func (chat Chat) Conversation(ctx context.Context, conversationID string) (loopd
 	return result, err
 }
 
-// Send starts a question when TaskID is empty, or resumes the same task when
-// TaskID is present. The HTTP connection only observes execution; closing the
+// Send is a write Effect creating work without TaskID, or a read Effect
+// observing existing work with TaskID. The HTTP connection only observes execution; closing the
 // stream does not cancel the Task or its Operator.
 func (chat Chat) Send(
 	ctx context.Context,
@@ -188,10 +189,45 @@ func (chat Chat) History(
 	return result.Data, err
 }
 
-// Emit publishes one Operator-produced set or append event for a Task. A zero
-// AgentUE seq is assigned from this Runtime's per-Task sequence.
+// Emit is a write Effect publishing to the initial main answer. Other messages
+// use EmitMessage; each message owns its AgentUE sequence.
 func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event) (loopd.Event, error) {
-	sequence := chat.sequence(taskID)
+	chat.state.mu.Lock()
+	messageID := chat.state.responses[taskID]
+	chat.state.mu.Unlock()
+	if messageID == "" {
+		task, err := (Task{client: chat.client}).Get(ctx, taskID)
+		if err != nil {
+			return loopd.Event{}, err
+		}
+		messageID = task.Response.ID
+		if messageID == "" {
+			return loopd.Event{}, fmt.Errorf("task %q has no initial response", taskID)
+		}
+		chat.state.mu.Lock()
+		chat.state.responses[taskID] = messageID
+		chat.state.mu.Unlock()
+	}
+	return chat.EmitMessage(ctx, taskID, messageID, event)
+}
+
+// Output is a write Effect creating or reusing a message by stable Task/key.
+func (chat Chat) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
+	var message loopd.Message
+	err := chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/outputs", request, &message)
+	return message, err
+}
+
+// EmitMessage is a write Effect. Equal block IDs and sequence numbers in other
+// messages never collide. The server verifies the message belongs to this Task.
+func (chat Chat) EmitMessage(ctx context.Context, taskID, messageID string, event agentueui.Event) (loopd.Event, error) {
+	result, err := chat.emit(ctx, "message/"+messageID, "/v1/tasks/"+url.PathEscape(taskID)+"/messages/"+url.PathEscape(messageID)+"/events", event)
+	result.MessageID = messageID
+	return result, err
+}
+
+func (chat Chat) emit(ctx context.Context, sequenceKey, path string, event agentueui.Event) (loopd.Event, error) {
+	sequence := chat.sequence(sequenceKey)
 	sequence.mu.Lock()
 	defer sequence.mu.Unlock()
 	if event.Seq == 0 {
@@ -204,7 +240,7 @@ func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event)
 	var result struct {
 		ID string `json:"id"`
 	}
-	err = chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/events", struct {
+	err = chat.client.do(ctx, http.MethodPost, path, struct {
 		Event json.RawMessage `json:"event"`
 	}{Event: data}, &result)
 	if err != nil {
@@ -216,19 +252,19 @@ func (chat Chat) Emit(ctx context.Context, taskID string, event agentueui.Event)
 	return loopd.Event{ID: result.ID, Data: data}, nil
 }
 
-func (chat Chat) sequence(taskID string) *taskSequence {
+func (chat Chat) sequence(messageID string) *messageSequence {
 	chat.state.mu.Lock()
 	defer chat.state.mu.Unlock()
-	sequence := chat.state.sequences[taskID]
+	sequence := chat.state.sequences[messageID]
 	if sequence == nil {
-		// loop-server initializes every Task stream with AgentUE seq 1.
-		sequence = &taskSequence{next: 2}
-		chat.state.sequences[taskID] = sequence
+		// loop-server initializes every message stream with AgentUE seq 1.
+		sequence = &messageSequence{next: 2}
+		chat.state.sequences[messageID] = sequence
 	}
 	return sequence
 }
 
-// Complete persists the latest AgentUE snapshot as the response Message and
+// Complete is a write Effect that persists all output Messages and
 // closes the task delivery. Repeating the same completion is safe.
 func (chat Chat) Complete(ctx context.Context, taskID string, failure *TaskFailure) error {
 	return chat.client.do(ctx, http.MethodPost, "/v1/tasks/"+url.PathEscape(taskID)+"/complete", struct {
@@ -236,10 +272,11 @@ func (chat Chat) Complete(ctx context.Context, taskID string, failure *TaskFailu
 	}{Error: failure}, nil)
 }
 
+// IsEnd reports Task completion on a Chat stream, not the end of a work message.
 func IsEnd(event loopd.Event) (bool, error) {
 	parsed, err := agentueui.Parse(event.Data)
 	if err != nil {
 		return false, err
 	}
-	return parsed.Op == agentueui.OpEnd, nil
+	return parsed.Op == agentueui.OpEnd && (event.Message == nil || event.Message.Purpose == "response"), nil
 }

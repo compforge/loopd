@@ -200,3 +200,10 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 		ut.Header{Key: "Content-Type", Value: "application/json"},
 	).Result()
 }
+
+func (completedChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
+	return loopd.Message{}, nil
+}
+func (completedChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+	return "", nil
+}

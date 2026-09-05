@@ -1,14 +1,4 @@
-import { parseUIModel, type BaseBlock, type UIModel } from "@compforge/agentue/ui";
-import type { Message } from "./api";
-
-// Only overlay streamed blocks onto a real child Message with matching actor
-// identity. Never invent detail Messages from the main response's blocks.
-export function detailMessageModel(message: Message, liveModel?: UIModel): UIModel {
-  const model = parseUIModel(message.content);
-  if (message.kind !== "harness" || !liveModel) return model;
-  const blocks = liveModel.blocks.filter((block) => traceCallID(block) === message.key);
-  return blocks.length ? { ...model, blocks } : model;
-}
+import type { BaseBlock } from "@compforge/agentue/ui";
 
 export function traceLabel(block: BaseBlock, index: number): string {
   if (typeof block.effect_key === "string" && block.effect_key) return block.effect_key;

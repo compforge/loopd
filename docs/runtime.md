@@ -98,39 +98,40 @@ Reconcile 用 Task ID 读取事实后发起 Effect，无需额外 Task 表。当
 定位，不能把后来的 user 回复当作原始问题；固定输入上下文用 Task.Get 的历史截止点，后续交互
 使用 Task.Messages 或 Human handle 读取最新状态。
 
-## 当前提供的 Effect Action
+## Effect：Read 与 Write
 
-Effect Action 指通过 runtime 发起执行或改变外部协作状态的动作。当前 Reconcile 推进一次
-问答的主要动作是调用 Harness、发布可见内容和完成问答；各动作使用自己的身份与重试契约。
+runtime 提供的协作操作统一称为 Effect，按调用者意图分为两类：
 
-| Action | 作用 | 身份与重试边界 |
-|---|---|---|
-| `Loop.Harness.Prompt` | 发起或复用一次 Harness 执行，返回 Call handle | `task ID + effect key`；同参数复用、参数变化冲突；跨重启去重由持久 Adapter 保证 |
-| `Loop.Chat.Emit` | 发布进展、工具状态、产物引用或最终回答内容 | 按 Task 与 AgentUE seq 保持发布幂等；重新分配 seq 表示新事件，本地序号不提供跨重启保证 |
-| `Loop.Chat.Complete` | 以成功或失败收口本次问答，请求固化回答、结束流并删除 Task | 按 task_id 重试同一次完成；发布内容与完成交付是两个动作 |
+- **Read Effect**：读取、等待或订阅已有事实，不发起新的业务工作。订阅建立本地观察，
+  服务端刷新到期状态或重建交付投影，不改变它的读取意图。
+- **Write Effect**：发起执行，或创建、发布、收口和维护协作事实。每项操作分别声明身份、
+  冲突和重试规则；write 不意味着统一幂等，也不意味着自动持久恢复。
 
-runtime 还提供以下会改变协作状态的 API，分别用于会话创建、问答入口和运行期注册：
+### Read Effect
 
-| Action | 作用 | 身份与重试边界 |
-|---|---|---|
-| `Loop.Chat.CreateConversation` | 创建 User Conversation，或关联 Task 的工作会话 | 每个 Task 最多一个工作会话，重复创建返回冲突；不带 Task ID 每次创建新主会话 |
-| `Loop.Chat.Send`（不带 task_id） | 提交问题，创建 Message 与 Task，并返回观察流 | 每次提交创建新问答；取得 task_id 后，用该 ID 续接观察 |
-| `Loop.Operator.Register` / `Loop.Harness.Register` | 注册可接收 Task 的目标，并启动后台续租 | 按参与者类型与稳定 key 更新同一注册记录；续租随 runtime 生命周期运行 |
+| 能力 | 操作与读取边界 |
+|---|---|
+| Task | `Get` 读取初始上下文；`Messages` 读取任务全部可见消息；`Watch` 订阅任务变化 |
+| Chat | `Conversation/History` 读取会话；带 task_id 的 `Send` 观察已有任务 |
+| Harness Call | `Value/Stream/Wait` 观察已有执行；本地观察不是持久订阅 |
+| Human handle | `Get/Wait` 读取或等待权威问题状态；停止等待不等于忽略问题 |
 
-`Task.Get`、`Task.Messages`、`Chat.Conversation`、`Chat.History`、Call 的 `Value/Stream/Wait` 以及带 task_id 的
-`Chat.Send` 都是读取或观察已有工作。`Task.Watch` 配置 Controller 的唤醒入口。这些能力不会
-发起新的业务执行，不作为 Effect Action。
+### Write Effect
 
-面向 Human 的 Effect Action 如下，输入、决议与恢复规则见后文“Human Effect：Ask 与 Confirm”。
+| 操作 | 身份与重试边界 |
+|---|---|
+| `Harness.Prompt` | task ID + EffectKey；同参数复用，变化冲突，跨重启去重由持久 Adapter 保证 |
+| `Human.Ask/Confirm` | task ID + EffectKey；复用原问题、deadline 和结果，变化冲突 |
+| `Chat.Output` | task ID + Key；创建或复用工作会话中的 Message，发送者不可变，同一发送者可有多条输出 |
+| `Chat.EmitMessage` | 按 Message 发布；该 Message 内的 seq 保持幂等，block ID 不跨消息唯一 |
+| `Chat.Emit` | 发布到初始主回答的便捷入口，与 EmitMessage 共用消息序号分配 |
+| `Chat.Complete` | 按 task_id 重试同一收口意图；固化所有输出并完成任务，不由某条消息的 end 自动触发 |
+| `Chat.CreateConversation` | 每个 Task 最多一个工作会话，重复创建冲突；不带 Task ID 每次创建新主会话 |
+| 不带 task_id 的 `Chat.Send` | 每次提交创建新工作；取得 task_id 后可续接观察 |
+| `Operator.Register/Harness.Register` | 按参与者类型与稳定 key 更新注册，后台续租随 runtime 生命周期运行 |
 
-| Action | 作用 | 身份与重试边界 |
-|---|---|---|
-| `Loop.Human.Ask` | 请求 Human 选择一个选项或提供自由文本 | `task ID + effect key` 复用问题 Message；同参数返回原问题或原结果，参数变化冲突 |
-| `Loop.Human.Confirm` | 请求 Human 明确接受或拒绝所描述的事项 | 同一问题保持原 deadline 与结果；拒绝、忽略和超时均由 Operator 处理 |
-
-Harness 与 Human 调用显式接受 EffectKey；runtime 没有通用的持久 Effect 引擎。Operator
-直接调用业务 API 时，幂等、结果核对与补偿由 Connector 和外部系统承担。Harness 取消和外部
-系统动作封装仍不在本次设计范围。
+Read/Write 是公共能力的分类，不增加统一 Effect CRD 或执行引擎。Operator 直接访问业务 API 时，
+幂等、结果核对与补偿仍由相应 Connector 和事实 owner 承担。
 
 ## Harness Call 与 Effect identity
 
@@ -168,7 +169,7 @@ Resource 与事实 owner 重新构造工作，不恢复 Go 调用栈、goroutine
 
 ### 输入、超时与结果
 
-两项 Action 都必须提供 TaskID、EffectKey、Title、Prompt 和有限正 Timeout（Go time.Duration，JSON 使用纳秒）。用户不理会问题
+两项 Write Effect 都必须提供 TaskID、EffectKey、Title、Prompt 和有限正 Timeout（Go time.Duration，JSON 使用纳秒）。用户不理会问题
 是正常情况，因此 Timeout 必填，不能省略、设为零或无限等待。它限定等待人的总时长，独立于
 HTTP timeout 与本地调用 context；server 首次持久化问题时确定 deadline，重试与重启不重置它。
 
@@ -203,7 +204,7 @@ Confirm 固定提供接受和拒绝两个决议，可用 ConfirmLabel/DeclineLab
 是 accepted/declined。需要任意多个业务选项时使用 Ask。两类交互都另外提供“忽略/取消”，返回
 独立的 dismissed；它不是一个 choices value，也不等同于 Confirm 的 declined。
 
-Action 创建或复用问题 Message，返回以其 ID 标识的 typed handle；`Get(ctx)` 读取权威请求
+Write Effect 创建或复用问题 Message，返回以其 ID 标识的 typed handle；`Get(ctx)` 读取权威请求
 状态，`Wait(ctx)` 等待终态。请求由 pending 进入且只能进入一个不可变终态：
 
 | 终态 | 含义与 Operator 处理 |
@@ -273,7 +274,7 @@ Web 在主会话按 block type 展示问题卡、输入或选项以及忽略操�
 
 ### 幂等、发布与唤醒
 
-同一 Task 的 Human Action 共享 EffectKey 命名空间。server 原子创建或读取问题 Message，比较
+同一 Task 的 Human Write Effect 共享 EffectKey 命名空间。server 原子创建或读取问题 Message，比较
 动作类型、问题、选项和 Timeout 等不可变输入；同 key 同参数返回原问题及结果，变化则冲突。
 已忽略或超时的问题不被重开；Operator 决定再次提问时使用新的步骤身份。
 
@@ -348,11 +349,13 @@ server.Run 负责无人在线时的 deadline 与通知重试，必须随服务�
 
 ## 可见过程与回答
 
-`Chat.Emit` 发布 AgentUE 可见事件，`Chat.Complete` 请求固化回答并完成交付。内部 Harness 可以
+`Chat.Output` 为工作输出建立 Message，随后用 `Chat.EmitMessage` 向它发布 AgentUE 事件。
+`Chat.Emit` 仅是向初始主回答发布的便捷入口；发送者、block 内容和 Call ID 不决定投递目标。
+`Chat.Complete` 请求固化全部输出并完成任务。内部 Harness 可以
 贡献工具状态和处理详情，主回答由用户选中的 Operator 汇总。工作 Conversation 关联本次 Task，
 其聊天存储关系见 [聊天持久化](../server/docs/persistence.md)。
 
-当前实现中，同一 runtime 对同一 Task 的并行发布串行分配 AgentUE seq，用于语义顺序和发布幂等；
+当前实现中，同一 runtime 对同一 Message 的并行发布串行分配 AgentUE seq，用于语义顺序和发布幂等；
 它不是多个独立 runtime 的全局分配器，也不在进程重启后自动恢复。Redis/SSE Event ID 则是续接
 传输位置，不能拿来替代 seq 或 Harness EffectKey。
 

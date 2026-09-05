@@ -3,7 +3,7 @@
 ## 项目定位与边界
 
 loopd 是 “Loop is a CRD” 在编排层的实现，也是 Human、Harness 与 Operator 的协作平台。
-loop-server 保存跨参与者的 Conversation 与 Message，并为每次问答创建通用 Task CRD；Operator
+loop-server 保存跨参与者的 Conversation 与 Message，并为每次用户发起的工作创建通用 Task CRD；同一 Task 可包含多轮问答。Operator
 Reconcile 该 Task，复杂 Operator 可以继续创建自己的领域 CRD。Harness 持有智能执行状态，loopd
 不保存 Operator 领域表。
 

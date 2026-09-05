@@ -23,7 +23,7 @@ export interface Conversation {
 export interface Message {
   id: string;
   reply_to_message_id?: string;
-  purpose?: "input" | "response" | "human_request" | "human_reply";
+  purpose?: "input" | "response" | "output" | "human_request" | "human_reply";
   revision?: number;
   conversation_id: string;
   task_id: string;

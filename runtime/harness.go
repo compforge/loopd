@@ -69,7 +69,7 @@ func (service Harness) Register(ctx context.Context, value HarnessRegistration) 
 	})
 }
 
-// Prompt starts or resumes one process-local Call. The effect identity avoids
+// Prompt is a write Effect starting or resuming one process-local Call. The effect identity avoids
 // duplicate starts while this Runtime is alive. A production Adapter such as
 // agentd must additionally make IdempotencyKey durable across process restarts.
 func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error) {
@@ -158,12 +158,14 @@ type Call struct {
 	terminalErr error
 }
 
+// Value is a read Effect observing the locally known execution state.
 func (call *Call) Value() loopd.HarnessCall {
 	call.mu.Lock()
 	defer call.mu.Unlock()
 	return call.value
 }
 
+// Wait is a read Effect; cancelling the wait does not cancel execution.
 func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	select {
 	case <-ctx.Done():
@@ -175,7 +177,7 @@ func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
 	}
 }
 
-// Stream replays locally observed deliveries after afterEventID and follows
+// Stream is a read Effect replaying locally observed deliveries after afterEventID and follows
 // the Call until completion. Durable page replay uses Chat.Send and SSE
 // Last-Event-ID; this process-local view is a convenience for the Reconciler.
 func (call *Call) Stream(ctx context.Context, afterEventID string) (<-chan loopd.Event, <-chan error) {
@@ -240,6 +242,7 @@ func (call *Call) follow(
 	logger *slog.Logger,
 ) {
 	var publishErr error
+	var output *loopd.Message
 	for event := range providerCall.Events() {
 		if publishErr != nil {
 			continue
@@ -266,7 +269,15 @@ func (call *Call) follow(
 			value.Block["call_id"] = call.value.ID
 			value.Block["effect_key"] = call.value.EffectKey
 		}
-		published, err := chat.Emit(ctx, taskID, value)
+		if output == nil {
+			message, err := chat.Output(ctx, taskID, loopd.OutputRequest{Key: call.value.EffectKey, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: call.value.ID}})
+			if err != nil {
+				publishErr = err
+				continue
+			}
+			output = &message
+		}
+		published, err := chat.EmitMessage(ctx, taskID, output.ID, value)
 		if err != nil {
 			publishErr = err
 			continue

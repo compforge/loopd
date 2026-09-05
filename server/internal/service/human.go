@@ -54,13 +54,12 @@ func humanError(err error) error {
 	return err
 }
 
-// Run persists deadlines without a browser or Operator, retries wake delivery,
-// and finishes interrupted Task completion from the original persisted intent.
-func (s *HumanService) Run(ctx context.Context, chat *ChatService) {
+// Run persists deadlines and retries Human wake delivery independently of clients.
+func (s *HumanService) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		if err := s.Maintain(ctx, chat); err != nil && ctx.Err() == nil {
+		if err := s.Maintain(ctx); err != nil && ctx.Err() == nil {
 			s.logger.ErrorContext(ctx, "maintain Human messages", "error", err)
 		}
 		select {
@@ -70,7 +69,7 @@ func (s *HumanService) Run(ctx context.Context, chat *ChatService) {
 		}
 	}
 }
-func (s *HumanService) Maintain(ctx context.Context, chat *ChatService) error {
+func (s *HumanService) Maintain(ctx context.Context) error {
 	rows, err := s.store.HumanMaintenance(ctx)
 	if err != nil {
 		return err
@@ -79,12 +78,6 @@ func (s *HumanService) Maintain(ctx context.Context, chat *ChatService) error {
 	for _, row := range rows {
 		if ctx.Err() != nil {
 			return ctx.Err()
-		}
-		if row.DeliveryState == "closing" {
-			if err := chat.resumeCompletion(ctx, row.TaskID, row.Completion); err != nil {
-				failures = append(failures, err)
-			}
-			continue
 		}
 		if row.HumanDueAt != nil {
 			if _, err := s.Get(ctx, row.ID); err != nil {
