@@ -10,7 +10,7 @@ loopd 位于 Agent 技术体系的 Orchestrator 层。模型推理、工具循�
 及基础设施提供；loopd 协调参与者、持久聊天、Task 分发和可见结果。
 
 - loop-server 提供 Chat API 和页面协作状态，拥有 Conversation、Message 与 Task 分发。
-- loop-runtime 是 Operator 的协作开发库，复用 controller-runtime 的资源控制循环，提供公共协作能力。
+- loop-runtime 是 Operator 的协作开发库，复用 controller-runtime 的资源控制循环，提供 Read/Write Effect 协作能力。
 - Operator 实现具体编排策略，可按复杂度拥有自己的领域 Resource。
 - Harness 拥有智能执行状态，通过 Adapter 接入，可被 Operator 调用或直接回答 Human。
 
@@ -31,7 +31,7 @@ Operator 依赖 runtime 公共契约，不依赖 server 私有实现；server �
 | Harness Execution | Harness 拥有的智能执行及恢复状态 |
 | Registration | server 保存的 Operator/Harness 在线发现租约 |
 
-Message 记录 Actor 发出的消息，记录顺序不定义 Actor 的执行顺序。同一 Task 可以包含并行工作；
+Message 记录 Actor 发出的消息，记录顺序不定义 Actor 的执行顺序。同一 Task 可以包含多轮问答和并行工作；
 消息回复只表达回答关系，执行依赖、等待与调度由 Operator 和 Harness 决定。
 
 Activity、Artifact 和流式事件是过程记录或投影，不独立拥有业务执行状态。在线发现也不代替
@@ -60,7 +60,7 @@ spec 表达目标和约束，status 表达最新观测；Reconciler 读取权威
 状态。简单 Operator 直接 Reconcile Task；复杂 Operator 再创建自己的领域 CRD。LongHorizon
 的 Manager、Executor、Auditor 等角色可以由其 Operator 定义，不进入通用内核。
 
-Task 只标记活跃问答。回答固化后结束流并删除 Task；领域长期状态留在 Operator Resource，
+Task 只标记活跃工作，不与某条 Message 共用身份。全部输出固化后结束聚合流并删除 Task；领域长期状态留在 Operator Resource，
 完整执行状态留在 Harness。HTTP/SSE 连接只负责观察，断开连接不取消执行。
 
 ## 两条协作路径

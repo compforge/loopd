@@ -364,3 +364,20 @@ func completionStore(t *testing.T) *repo.Store {
 	}
 	return store
 }
+
+func (failingCommitRepository) PendingCompletions(context.Context) ([]model.Message, error) {
+	return nil, nil
+}
+
+func (nopChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
+	return loopd.Message{}, nil
+}
+func (nopChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+	return "", nil
+}
+func (runner *recordingChatRunner) Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error) {
+	return loopd.Message{}, nil
+}
+func (runner *recordingChatRunner) EmitMessage(context.Context, string, string, json.RawMessage) (string, error) {
+	return "", nil
+}

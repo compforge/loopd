@@ -38,7 +38,7 @@ func TestHumanMaintenanceRecoversNotificationsAndCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := human.Maintain(ctx, chat); err == nil {
+	if err := human.Maintain(ctx); err == nil {
 		t.Fatal("expected failed wake delivery")
 	}
 	result, err := human.Get(ctx, q.Message.ID)
@@ -52,7 +52,7 @@ func TestHumanMaintenanceRecoversNotificationsAndCompletion(t *testing.T) {
 	recoveredTasks := &humanTasks{}
 	recovered := NewHumanService(store, recoveredTasks, nil)
 	recoveredChat := NewChatService(store, recoveredTasks, runner, nil)
-	if err := recovered.Maintain(ctx, recoveredChat); err != nil {
+	if err := recovered.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if recoveredTasks.wakes != 1 {
@@ -62,12 +62,12 @@ func TestHumanMaintenanceRecoversNotificationsAndCompletion(t *testing.T) {
 	if err := recoveredChat.Complete(ctx, message.TaskID, nil); err == nil {
 		t.Fatal("delete failure not surfaced")
 	}
-	pending, err = store.HumanMaintenance(ctx)
+	pending, err = store.PendingCompletions(ctx)
 	if err != nil || len(pending) != 1 || pending[0].DeliveryState != "closing" {
 		t.Fatalf("completion intent=%+v %v", pending, err)
 	}
 	recoveredTasks.deleteErr = nil
-	if err := recovered.Maintain(ctx, recoveredChat); err != nil {
+	if err := recoveredChat.Maintain(ctx); err != nil {
 		t.Fatal(err)
 	}
 	response, err := store.GetMessage(ctx, message.ID)

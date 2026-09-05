@@ -26,3 +26,10 @@ type Message struct {
 	Content          json.RawMessage `json:"content"`
 	Timestamped
 }
+
+// OutputRequest identifies one independently published message in the Task's work conversation.
+// Key is stable within the Task; separate outputs by the same actor use different keys.
+type OutputRequest struct {
+	Key   string   `json:"key"`
+	Actor ActorRef `json:"actor"`
+}

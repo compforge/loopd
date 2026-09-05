@@ -32,6 +32,9 @@ type Runtime struct {
 	cancel context.CancelFunc
 }
 
+// Loop exposes collaboration Effects. Read Effects observe existing facts;
+// write Effects initiate work or change collaboration state. Identity and retry
+// guarantees belong to each operation, not to a generic persistent Effect engine.
 type Loop struct {
 	Human    Human
 	Chat     Chat

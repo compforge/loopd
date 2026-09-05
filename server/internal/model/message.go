@@ -3,6 +3,7 @@ package model
 import "time"
 
 type Message struct {
+	OutputKey        *string    `gorm:"size:128;uniqueIndex:idx_message_output"`
 	ReplyToMessageID string     `gorm:"size:36;not null;default:'';index"`
 	Purpose          string     `gorm:"size:24;not null;default:'';index"`
 	Revision         uint64     `gorm:"not null;default:1"`
@@ -13,7 +14,7 @@ type Message struct {
 
 	ID             string `gorm:"primaryKey;size:36"`
 	ConversationID string `gorm:"size:36;not null;index:idx_message_conversation"`
-	TaskID         string `gorm:"size:36;not null;index:idx_message_task"`
+	TaskID         string `gorm:"size:36;not null;index:idx_message_task;uniqueIndex:idx_message_output"`
 	Kind           string `gorm:"size:16;not null"`
 	ActorKey       string `gorm:"size:128;not null"`
 	Content        []byte `gorm:"type:json;not null"`

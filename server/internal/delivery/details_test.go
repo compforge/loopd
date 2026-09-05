@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -11,25 +12,26 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/redis/go-redis/v9"
 )
 
-func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
-	ctx := context.Background()
-	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "detail.db")})
+func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
+	t.Helper()
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "output.db")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateConversation(ctx, model.Conversation{ID: "root"})
-	if err != nil {
+	ctx := context.Background()
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
 		t.Fatal(err)
 	}
+	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 	_, err = store.CreateChatMessages(ctx,
-		model.Message{ID: "user", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial},
+		model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial},
 		model.Message{ID: "response", ConversationID: "root", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -42,138 +44,119 @@ func TestDetailMessagesSurviveCompletionAndReplay(t *testing.T) {
 	if err := producer.Initialize(ctx, "task", initial); err != nil {
 		t.Fatal(err)
 	}
+	return store, producer, consumer
+}
+func outputRequest(key string) loopd.OutputRequest {
+	return loopd.OutputRequest{Key: key, Actor: loopd.ActorRef{Kind: loopd.RoleHarness, Key: "same-actor"}}
+}
+func outputText(t *testing.T, seq uint64, text string) json.RawMessage {
+	return marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: seq, Block: map[string]any{"id": "text", "type": "text", "content": text}})
+}
 
-	start, middle, end, next := int64(1700000000000), int64(1700000001000), int64(1700000002000), int64(1700000003000)
-	first := marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 2, Timestamp: &start, Block: map[string]any{
-		"id": "call-a/text", "type": "text", "content": "plan", "call_id": "call-a", "effect_key": "plan",
-	}})
-	for i := 0; i < 2; i++ {
-		if _, err := producer.Emit(ctx, "task", first); err != nil {
-			t.Fatal(err)
-		}
-	}
-	detail, err := store.FindConversationByTask(ctx, "task")
+// +case=`同一 Actor 多条输出可用相同 block ID 和 seq；重放按 Message 隔离且详情先于 Task end`
+func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
+	store, producer, consumer := outputFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a, err := producer.Output(ctx, "task", outputRequest("plan"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := store.ListMessages(ctx, detail.ID, "", 100)
-	if detail.ActorKind != "operator" || detail.ActorKey != "router" {
-		t.Fatalf("work conversation owner = %+v", detail)
-	}
-	if err != nil || len(live) != 1 || live[0].ActorKey != "call-a" {
-		t.Fatalf("live detail=%+v err=%v", live, err)
-	}
-	liveID := live[0].ID
-	if !live[0].CreatedAt.Equal(time.UnixMilli(start)) || !live[0].UpdatedAt.Equal(live[0].CreatedAt) {
-		t.Fatalf("initial activity interval=%v → %v", live[0].CreatedAt, live[0].UpdatedAt)
-	}
-	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpAppend, Seq: 3, Timestamp: &end, Mask: "block.content", Block: map[string]any{
-		"id": "call-a/text", "type": "text", "content": " done", "call_id": "call-a", "effect_key": "plan",
-	}})); err != nil {
+	b, err := producer.Output(ctx, "task", outputRequest("execute"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Later delivery with an earlier source timestamp must not regress activity.
-	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 4, Timestamp: &middle, Block: map[string]any{
-		"id": "call-a/tool", "type": "tool", "name": "search", "call_id": "call-a", "effect_key": "plan",
-	}})); err != nil {
+	if a.ID == b.ID || a.ConversationID != b.ConversationID {
+		t.Fatalf("outputs=%+v %+v", a, b)
+	}
+	for _, item := range []struct{ id, text string }{{a.ID, "plan"}, {b.ID, "execute"}} {
+		event := outputText(t, 2, item.text)
+		for i := 0; i < 2; i++ {
+			if _, err := producer.EmitMessage(ctx, "task", item.id, event); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// call_id is presentation metadata, never an implicit routing instruction.
+	main := marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 2, Block: map[string]any{"id": "text", "type": "text", "content": "summary", "call_id": "not-a-destination"}})
+	cursor, err := producer.Emit(ctx, "task", main)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 5, Timestamp: &next, Block: map[string]any{
-		"id": "call-b/text", "type": "text", "content": "result", "call_id": "call-b", "effect_key": "work/0",
-	}})); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := consumer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 6, Block: map[string]any{
-		"id": "answer", "type": "text", "content": "summary",
-	}})); err != nil {
-		t.Fatal(err)
-	}
-	if err := consumer.Complete(ctx, "task", nil); err != nil {
+	if err := store.BeginCompletion(ctx, "task", []byte("null"), false); err != nil {
 		t.Fatal(err)
 	}
 	if err := producer.Complete(ctx, "task", nil); err != nil {
 		t.Fatal(err)
 	}
-	// Rejected late events must not create empty detail records.
-	_, err = producer.Emit(ctx, "task", marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: 100, Block: map[string]any{
-		"id": "late/text", "type": "text", "content": "late", "call_id": "late-call",
-	}}))
-	if err == nil {
-		t.Fatal("accepted an event after completion")
+	seen := map[string]string{}
+	ends := map[string]bool{}
+	err = consumer.Stream(ctx, "task", "root", cursor, func(value Event) error {
+		e, err := agentueui.Parse(value.Data)
+		if err != nil {
+			return err
+		}
+		if e.Op == agentueui.OpSet {
+			seen[value.MessageID], _ = e.Block["content"].(string)
+		}
+		if e.Op == agentueui.OpEnd {
+			if value.MessageID == "response" && (!ends[a.ID] || !ends[b.ID]) {
+				t.Fatal("task end before output end")
+			}
+			ends[value.MessageID] = true
+		}
+		return nil
+	})
+	if err != nil || seen[a.ID] != "plan" || seen[b.ID] != "execute" || !ends["response"] {
+		t.Fatalf("seen=%v ends=%v err=%v", seen, ends, err)
 	}
-	rootMessages, err := store.ListMessages(ctx, "root", "", 100)
-	if err != nil || len(rootMessages) != 2 {
-		t.Fatalf("root messages=%+v err=%v", rootMessages, err)
+	for _, id := range []string{a.ID, b.ID, "response"} {
+		row, err := store.GetMessage(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var content struct{ Blocks []map[string]any }
+		if err := json.Unmarshal(row.Content, &content); err != nil {
+			t.Fatal(err)
+		}
+		if len(content.Blocks) != 1 {
+			t.Fatalf("mixed content=%s", row.Content)
+		}
 	}
-	var root struct {
-		Blocks []map[string]any `json:"blocks"`
+	if _, err := producer.EmitMessage(ctx, "task", a.ID, outputText(t, 3, "late")); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("late=%v", err)
 	}
-	if err := json.Unmarshal(rootMessages[0].Content, &root); err != nil {
+	if _, err := producer.Output(ctx, "task", outputRequest("late")); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("late output=%v", err)
+	}
+	if _, err := producer.EmitMessage(ctx, "another", a.ID, outputText(t, 3, "wrong")); !errors.Is(err, repo.ErrNotFound) {
+		t.Fatalf("scope=%v", err)
+	}
+	// All message snapshots survive loss of every Redis stream after retirement.
+	if err := store.FinishCompletion(ctx, "task"); err != nil {
 		t.Fatal(err)
 	}
-	// IDs in this fixture sort response before user.
-	if len(root.Blocks) != 1 || root.Blocks[0]["content"] != "summary" {
-		t.Fatalf("root content=%s", rootMessages[0].Content)
+	for _, key := range []string{"task", "message/" + a.ID, "message/" + b.ID} {
+		if err := producer.events.Delete(ctx, key); err != nil {
+			t.Fatal(err)
+		}
 	}
-	details, err := store.ListMessages(ctx, detail.ID, "", 100)
-	if err != nil || len(details) != 2 || details[0].ID != liveID {
-		t.Fatalf("details=%+v err=%v", details, err)
-	}
-	if !details[0].CreatedAt.Equal(time.UnixMilli(start)) || !details[0].UpdatedAt.Equal(time.UnixMilli(end)) ||
-		!details[1].CreatedAt.Equal(time.UnixMilli(next)) || !details[1].UpdatedAt.Equal(time.UnixMilli(next)) {
-		t.Fatalf("completion/replay changed individual activity intervals: %+v", details)
-	}
-	var saved struct {
-		Meta   map[string]any   `json:"meta"`
-		Blocks []map[string]any `json:"blocks"`
-	}
-	if err := json.Unmarshal(details[0].Content, &saved); err != nil {
+	count := 0
+	if err := consumer.Stream(ctx, "task", "root", "", func(value Event) error { count++; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if saved.Meta["effect_key"] != "plan" || len(saved.Blocks) != 2 || saved.Blocks[0]["content"] != "plan done" {
-		t.Fatalf("saved detail=%s", details[0].Content)
-	}
-	roots, err := store.ListConversations(ctx, "", 100)
-	if err != nil || len(roots) != 1 || roots[0].ID != "root" {
-		t.Fatalf("roots=%+v err=%v", roots, err)
-	}
-	contextMessages, err := store.ListRootMessagesByTask(ctx, "task")
-	if err != nil || len(contextMessages) != 2 {
-		t.Fatalf("task context messages=%+v err=%v", contextMessages, err)
-	}
-	var replayed int
-	if err := producer.Stream(ctx, "task", "root", "", func(event Event) error { replayed++; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if replayed == 0 {
-		t.Fatal("missing task replay")
+	if count != 4 {
+		t.Fatalf("closed snapshots+end=%d", count)
 	}
 }
 
-func TestEnsureDetailMessageConcurrentIdentity(t *testing.T) {
-	ctx := context.Background()
-	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "parallel.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	initial := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateConversation(ctx, model.Conversation{ID: "root"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent, err := store.CreateChatMessages(ctx,
-		model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial},
-		model.Message{ID: "parent", ConversationID: "root", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	coordinator := New(nil, store, nil)
+func TestEnsureOutputConcurrentIdentity(t *testing.T) {
+	_, producer, _ := outputFixture(t)
 	var wg sync.WaitGroup
 	ids := make(chan string, 8)
 	for i := 0; i < cap(ids); i++ {
 		wg.Go(func() {
-			message, err := coordinator.ensureDetail(ctx, parent, "same-call", map[string]any{"effect_key": "work/0"}, time.Time{})
+			message, err := producer.Output(context.Background(), "task", outputRequest("same"))
 			if err != nil {
 				t.Error(err)
 				return
@@ -183,25 +166,58 @@ func TestEnsureDetailMessageConcurrentIdentity(t *testing.T) {
 	}
 	wg.Wait()
 	close(ids)
-	var firstID string
+	first := ""
 	for id := range ids {
-		if firstID != "" && firstID != id {
-			t.Fatalf("duplicate message identities %s and %s", firstID, id)
+		if first != "" && first != id {
+			t.Fatalf("duplicate %s %s", first, id)
 		}
-		firstID = id
+		first = id
 	}
-	if firstID == "" {
-		t.Fatal("no detail Message created")
+	if first == "" {
+		t.Fatal("missing output")
+	}
+	changed := outputRequest("same")
+	changed.Actor.Key = "other"
+	if _, err := producer.Output(context.Background(), "task", changed); !errors.Is(err, repo.ErrConflict) {
+		t.Fatalf("changed actor=%v", err)
 	}
 }
 
-func TestDirectHarnessOutputStaysInMainMessage(t *testing.T) {
-	snapshot := map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{}, "blocks": []any{
-		map[string]any{"id": "text", "type": "text", "content": "direct answer", "call_id": "direct-call"},
-	}}
-	// A direct Harness response must not consult the detail repository at all.
-	result, err := New(nil, nil, nil).persistDetails(context.Background(), model.Message{Kind: "harness"}, snapshot, nil)
-	if err != nil || len(result["blocks"].([]any)) != 1 {
-		t.Fatalf("direct output=%+v err=%v", result, err)
+// A work message discovered after the stream starts must not be mistaken for the main response.
+func TestStreamDiscoversOutputDuringTask(t *testing.T) {
+	store, producer, consumer := outputFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	created := ""
+	observed := false
+	err := consumer.Stream(ctx, "task", "root", "", func(value Event) error {
+		e, err := agentueui.Parse(value.Data)
+		if err != nil {
+			return err
+		}
+		if created == "" && value.MessageID == "response" {
+			message, err := producer.Output(ctx, "task", outputRequest("later"))
+			if err != nil {
+				return err
+			}
+			created = message.ID
+			if _, err := producer.EmitMessage(ctx, "task", created, outputText(t, 2, "later")); err != nil {
+				return err
+			}
+			if err := store.BeginCompletion(ctx, "task", []byte("null"), false); err != nil {
+				return err
+			}
+			return producer.Complete(ctx, "task", nil)
+		}
+		if value.MessageID == created && e.Op == agentueui.OpSet {
+			observed = true
+		}
+		if value.MessageID == "response" && e.Op == agentueui.OpEnd && !observed {
+			t.Fatal("lost output")
+		}
+		return nil
+	})
+	if err != nil || !observed {
+		t.Fatalf("observed=%v err=%v", observed, err)
 	}
 }

@@ -19,6 +19,7 @@ import (
 type ChatRepository interface {
 	BeginCompletion(context.Context, string, []byte, bool) error
 	FinishCompletion(context.Context, string) error
+	PendingCompletions(context.Context) ([]model.Message, error)
 	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 }
 
@@ -28,6 +29,8 @@ type TaskClient interface {
 }
 
 type ChatDelivery interface {
+	Output(context.Context, string, loopd.OutputRequest) (loopd.Message, error)
+	EmitMessage(context.Context, string, string, json.RawMessage) (string, error)
 	Initialize(context.Context, string, json.RawMessage) error
 	Delete(context.Context, string) error
 	Emit(context.Context, string, json.RawMessage) (string, error)
@@ -254,4 +257,13 @@ func (service *ChatService) resumeCompletion(ctx context.Context, taskID string,
 		return err
 	}
 	return service.Complete(ctx, taskID, failure)
+}
+
+func (service *ChatService) Output(ctx context.Context, taskID string, request loopd.OutputRequest) (loopd.Message, error) {
+	message, err := service.delivery.Output(ctx, taskID, request)
+	return message, mapDeliveryError(err)
+}
+func (service *ChatService) EmitMessage(ctx context.Context, taskID, messageID string, event json.RawMessage) (string, error) {
+	id, err := service.delivery.EmitMessage(ctx, taskID, messageID, event)
+	return id, mapDeliveryError(err)
 }

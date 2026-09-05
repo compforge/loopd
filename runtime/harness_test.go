@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	loopd "github.com/compforge/loopd"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,7 +22,22 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		published   []agentueui.Event
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.Path != "/v1/tasks/task-1/events" {
+		if request.Method == http.MethodGet && request.URL.Path == "/v1/tasks/task-1" {
+			_ = json.NewEncoder(response).Encode(loopd.TaskContext{ID: "task-1", Response: loopd.Message{ID: "response"}})
+			return
+		}
+		if request.URL.Path == "/v1/tasks/task-1/outputs" {
+			var input loopd.OutputRequest
+			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+				t.Error(err)
+			}
+			if input.Key != "route" || input.Actor.Kind != loopd.RoleHarness {
+				t.Errorf("output=%+v", input)
+			}
+			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", TaskID: "task-1"})
+			return
+		}
+		if request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/events") {
 			http.NotFound(response, request)
 			return
 		}
@@ -88,11 +105,11 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	if err := <-streamErrors; err != nil {
 		t.Fatal(err)
 	}
-	if got, want := fmt.Sprint(observed), "[3-0 4-0 5-0]"; got != want {
+	if got, want := fmt.Sprint(observed), "[2-0 3-0 4-0]"; got != want {
 		t.Fatalf("event IDs = %s, want %s", got, want)
 	}
 	publishedMu.Lock()
-	if len(published) != 4 || published[0].Seq != 2 || published[1].Seq != 3 || published[2].Seq != 4 || published[3].Seq != 5 {
+	if len(published) != 4 || published[0].Seq != 2 || published[1].Seq != 2 || published[2].Seq != 3 || published[3].Seq != 4 {
 		t.Fatalf("published events = %#v", published)
 	}
 	publishedMu.Unlock()
