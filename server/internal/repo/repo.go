@@ -93,12 +93,16 @@ func Open(config Config) (*Store, error) {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping loopd %s database: %w", backend, err)
 	}
+	// Schema inspection spans many round trips, especially over a development
+	// tunnel. Give startup its own budget without relaxing request timeouts.
+	migrationCtx, cancelMigration := context.WithTimeout(context.Background(), time.Minute)
+	defer cancelMigration()
 	// Rename existing columns before AutoMigrate can add empty replacements.
-	if err := migrations.DomainKeys(db.WithContext(ctx)); err != nil {
+	if err := migrations.DomainKeys(db.WithContext(migrationCtx)); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd domain keys: %w", err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(
+	if err := db.WithContext(migrationCtx).AutoMigrate(
 		&model.Conversation{},
 		&model.Message{},
 		&model.Operator{},
