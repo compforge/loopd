@@ -41,7 +41,7 @@ loopd/
 ## References
 
 - `docs/kernel.md` — 独立参与者协作模型、状态与恢复责任、设计文档分工
-- `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、消息上下文、Harness Call 与结果发布
+- `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、共享历史、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `server/docs/conversation.md` — Conv 消息接收与 Poll 契约
 - `deploy/docker/README.md` — loop-server、Router 与 Web 镜像构建入口

@@ -14,12 +14,12 @@ import (
 // run keeps execution within the conversation reconciliation, without a Work
 // resource. This demo has no durable business checkpoint: Poll acknowledges
 // receipt, not completion. Harness recovery remains the adapter's responsibility.
-func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContext) (runErr error) {
+func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, messages []loopd.Message) (runErr error) {
 	var deliveryIDs []string
-	if scope.Message.TaskID != "" {
-		deliveryIDs = append(deliveryIDs, scope.Message.TaskID)
+	if input.TaskID != "" {
+		deliveryIDs = append(deliveryIDs, input.TaskID)
 	}
-	position := scope.Message.ID
+	position := input.ID
 	// UI streams are delivery identities, not business task boundaries.
 	// Several published messages may contribute to the same input range.
 	defer func() {
@@ -30,17 +30,17 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 		if runErr != nil {
 			failure = &loopruntime.DeliveryFailure{Code: "router_failed", Message: runErr.Error()}
 			reconciler.logger.ErrorContext(ctx, "Router execution failed",
-				"conversation_id", scope.Conversation.ID, "error", runErr)
+				"conversation_id", input.ConversationID, "error", runErr)
 		}
 		if runErr != nil {
 			// Failure is an explicit actor message, including when no UI stream exists.
 			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 				"meta":   map[string]any{"error": map[string]any{"code": "router_failed", "message": "Router 执行失败，请重试。"}},
 				"blocks": []any{map[string]any{"id": "failure", "type": "text", "content": "Router 执行失败，请重试。"}}})
-			if _, err := reconciler.loop.Conv.Speak(ctx, scope.Conversation.ID, loopd.SpeakRequest{
-				Key: scope.Message.ID + "/failure", Actor: routerActor,
-				Target:    loopd.ActorRef{Kind: scope.Message.Kind, Key: scope.Message.Key},
-				ReplyToID: scope.Message.ID, TaskID: scope.Message.TaskID, Content: content,
+			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
+				Key: input.ID + "/failure", Actor: routerActor,
+				Target:    loopd.ActorRef{Kind: input.Kind, Key: input.Key},
+				ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
 			}); err != nil {
 				runErr = errors.Join(runErr, err)
 				return
@@ -52,22 +52,19 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 		}
 		runErr = errors.Join(runErr, completionErr)
 		if completionErr == nil {
-			runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, scope.Conversation.ID,
+			runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, input.ConversationID,
 				loopd.CommitRequest{Actor: routerActor, Through: position}))
 		}
 	}()
-	workspace, err := reconciler.loop.Conv.Workspace(ctx, scope.Conversation.ID, routerActor)
+	workspace, err := reconciler.loop.Conv.Workspace(ctx, input.ConversationID, routerActor)
 	if err != nil {
 		return err
 	}
-	query, err := modelText(scope.Message.Content)
+	query, err := modelText(input.Content)
 	if err != nil {
 		return fmt.Errorf("read user query: %w", err)
 	}
-	history, err := conversationText(scope)
-	if err != nil {
-		return fmt.Errorf("read conversation history: %w", err)
-	}
+	history := conversationText(messages)
 	var tasks, results []string
 	summaries := 0
 	for round := 0; ; round++ {
@@ -79,7 +76,7 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 		if round > 0 {
 			planKey = fmt.Sprintf("plan/%d", round)
 		}
-		raw, err := reconciler.call(ctx, scope, workspace.ID, planKey, prompt)
+		raw, err := reconciler.call(ctx, input, workspace.ID, planKey, prompt)
 		if err != nil {
 			return err
 		}
@@ -91,10 +88,10 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 			return errors.New("initial Router plan must dispatch work")
 		}
 		reconciler.logger.InfoContext(ctx, "Router planned",
-			"conversation_id", scope.Conversation.ID, "round", round,
+			"conversation_id", input.ConversationID, "round", round,
 			"kind", next.Kind, "subtask_count", len(next.Tasks))
 		if next.Kind != "summary" {
-			batch, err := reconciler.executeBatch(ctx, scope, workspace.ID, query, history, round, next.Tasks)
+			batch, err := reconciler.executeBatch(ctx, input, workspace.ID, query, history, round, next.Tasks)
 			if err != nil {
 				return err
 			}
@@ -104,7 +101,7 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 		// Drain inputs only after the dispatched batch has finished. Arrival
 		// while waiting does not cancel/restart a Harness or launch another run.
 		through := position
-		additions, err := reconciler.pollAdditions(ctx, scope.Conversation.ID, &deliveryIDs, &position)
+		additions, err := reconciler.pollAdditions(ctx, input.ConversationID, &deliveryIDs, &position)
 		if err != nil {
 			return err
 		}
@@ -112,9 +109,9 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 				"meta":   map[string]any{"through_id": through, "phase": "progress"},
 				"blocks": []any{map[string]any{"id": "progress", "type": "text", "content": "阶段结果\n\n" + strings.Join(results, "\n\n")}}})
-			if _, err := reconciler.loop.Conv.Speak(ctx, scope.Conversation.ID, loopd.SpeakRequest{
-				Key: fmt.Sprintf("%s/progress/%d", scope.Message.ID, round), Actor: routerActor,
-				Target: loopd.ActorRef{Kind: scope.Message.Kind, Key: scope.Message.Key}, ReplyToID: scope.Message.ID, TaskID: scope.Message.TaskID, Content: content,
+			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
+				Key: fmt.Sprintf("%s/progress/%d", input.ID, round), Actor: routerActor,
+				Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
 			}); err != nil {
 				return err
 			}
@@ -125,7 +122,7 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 				summaryKey = fmt.Sprintf("summarize/%d", summaries)
 			}
 			summaries++
-			answer, err := reconciler.call(ctx, scope, workspace.ID, summaryKey, summaryPrompt(query, history, tasks, results))
+			answer, err := reconciler.call(ctx, input, workspace.ID, summaryKey, summaryPrompt(query, history, tasks, results))
 			if err != nil {
 				return err
 			}
@@ -136,16 +133,16 @@ func (reconciler *Reconciler) run(ctx context.Context, scope loopd.MessageContex
 				content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 					"meta":   map[string]any{"through_id": position},
 					"blocks": []any{map[string]any{"id": "answer", "type": "text", "content": answer}}})
-				_, err = reconciler.loop.Conv.Speak(ctx, scope.Conversation.ID, loopd.SpeakRequest{
-					Key: scope.Message.ID + "/answer", Actor: routerActor, Target: loopd.ActorRef{Kind: scope.Message.Kind, Key: scope.Message.Key},
-					ReplyToID: scope.Message.ID, TaskID: scope.Message.TaskID, Content: content,
+				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
+					Key: input.ID + "/answer", Actor: routerActor, Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key},
+					ReplyToID: input.ID, TaskID: input.TaskID, Content: content,
 				})
 				return err
 			}
 		}
 		query += "\n\nAdditional user messages (in order):\n" + strings.Join(additions, "\n")
 		reconciler.logger.InfoContext(ctx, "Router received additional input",
-			"conversation_id", scope.Conversation.ID, "message_count", len(additions))
+			"conversation_id", input.ConversationID, "message_count", len(additions))
 	}
 }
 
@@ -186,7 +183,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 	}
 }
 
-func (reconciler *Reconciler) executeBatch(ctx context.Context, scope loopd.MessageContext, workspaceID, query, history string, round int, tasks []string) ([]string, error) {
+func (reconciler *Reconciler) executeBatch(ctx context.Context, input loopd.Message, workspaceID, query, history string, round int, tasks []string) ([]string, error) {
 	calls := make([]*loopruntime.Call, len(tasks))
 	// Start the entire bounded batch before waiting, so independent work can
 	// run concurrently. Round-specific keys avoid replaying an earlier plan.
@@ -196,7 +193,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, scope loopd.Mess
 			key = fmt.Sprintf("work/%d/%d", round, index)
 		}
 		call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-			ConversationID: workspaceID, TaskID: scope.Message.TaskID, IdempotencyKey: scope.Message.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget,
+			ConversationID: workspaceID, TaskID: input.TaskID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget,
 			Text: executionPrompt(query, history, task),
 		})
 		if err != nil {
@@ -218,9 +215,9 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, scope loopd.Mess
 	return results, nil
 }
 
-func (reconciler *Reconciler) call(ctx context.Context, scope loopd.MessageContext, workspaceID, key, prompt string) (string, error) {
+func (reconciler *Reconciler) call(ctx context.Context, input loopd.Message, workspaceID, key, prompt string) (string, error) {
 	call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
-		ConversationID: workspaceID, TaskID: scope.Message.TaskID, IdempotencyKey: scope.Message.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
+		ConversationID: workspaceID, TaskID: input.TaskID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
 	})
 	if err != nil {
 		return "", fmt.Errorf("start %s Harness: %w", key, err)

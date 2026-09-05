@@ -35,8 +35,7 @@ server/
 │   ├── chat.go             # ChatService；输入提交与 UI 流交付
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
 │   ├── completion.go       # 页面交付收尾恢复，与 Human 生命周期独立
-│   ├── human.go            # Human 消息交互、持久到期与类型化答复
-│   └── context.go          # 按 Message 组装有界会话历史
+│   └── human.go            # Human 消息交互、持久到期与类型化答复
 └── docs/                   # 消息消费、可见事实持久化与用户交互的领域设计
 ```
 

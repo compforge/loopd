@@ -31,7 +31,6 @@ func TestChatHTTPFlow(t *testing.T) {
 		service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil),
 		service.NewChatService(store, completedChatRunner{}, nil, nil),
-		service.NewContextService(store, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))

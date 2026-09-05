@@ -66,7 +66,7 @@ CRD 持有状态，Reconcile 判断下一步，Verb 将判断连接到实际协�
 
 Conv CRD 是 server 与 Operator 之间的协作边界。Reconcile 是可重复调度的执行入口，
 不是“一条消息执行一次”的回调；唤醒只提示可能有工作，Poll 仍以 DB 的消息记录为准。
-Read/Context 只观察历史；Poll/Commit 改变消费位置，因此是 write Verb。
+Read 只观察历史；Poll/Commit 改变消费位置，因此是 write Verb。
 
 Operator 自己决定何时接收补充发言、如何组织工作，以及是否需要领域 CRD。
 runtime 不把普通发言自动解释成 steer/followup，也不替 Operator 定义业务任务。

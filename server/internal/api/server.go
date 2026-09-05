@@ -23,7 +23,6 @@ type Server struct {
 	conversations *service.ConversationService
 	messages      *service.MessageService
 	chat          *service.ChatService
-	context       *service.ContextService
 	logger        *slog.Logger
 }
 
@@ -32,13 +31,12 @@ func New(
 	conversations *service.ConversationService,
 	messages *service.MessageService,
 	chat *service.ChatService,
-	contexts *service.ContextService,
 	logger *slog.Logger,
 ) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{actors: actors, conversations: conversations, messages: messages, chat: chat, context: contexts, logger: logger}
+	return &Server{actors: actors, conversations: conversations, messages: messages, chat: chat, logger: logger}
 }
 
 func (server *Server) Register(engine *route.Engine) {
@@ -52,7 +50,6 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
-	engine.GET("/v1/conversations/:conversation_id/messages/:message_id/context", server.adapt(server.getMessageContext))
 	engine.POST("/v1/conversations/:conversation_id/poll", server.adapt(server.pollConversation))
 	engine.POST("/v1/conversations/:conversation_id/commit", server.adapt(server.commitConversation))
 	engine.POST("/v1/conversations/:conversation_id/speak", server.adapt(server.publishMessage))

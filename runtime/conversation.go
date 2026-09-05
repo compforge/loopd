@@ -10,13 +10,6 @@ import (
 // Conv exposes the persistent collaboration boundary to Operators.
 type Conv struct{ client *client }
 
-// Context is a read Verb returning a message and bounded history through it.
-func (conv Conv) Context(ctx context.Context, conversationID, messageID string) (loopd.MessageContext, error) {
-	var result loopd.MessageContext
-	err := conv.client.do(ctx, http.MethodGet, "/v1/conversations/"+url.PathEscape(conversationID)+"/messages/"+url.PathEscape(messageID)+"/context", nil, &result)
-	return result, err
-}
-
 // Poll is a write Verb recording receipt without committing consumption.
 // Pass the last successful result's Position as After while working.
 // On recovery omit After to replay inputs after the committed position.

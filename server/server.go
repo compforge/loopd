@@ -73,9 +73,8 @@ func New(config Config) (*Server, error) {
 	chatDelivery := delivery.New(events, store, config.Logger)
 	poll := service.NewPollService(store, config.Conversations, config.Logger)
 	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
-	contexts := service.NewContextService(store, config.Logger)
 	human := service.NewHumanService(store, config.Logger)
-	api := serverapi.New(actors, conversations, messages, chat, contexts, config.Logger)
+	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
 	api.Human = human
 	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)

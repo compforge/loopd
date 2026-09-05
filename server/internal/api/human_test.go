@@ -24,8 +24,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	defer store.Close()
 	convs := service.NewConversationService(store, nil)
 	chat := service.NewChatService(store, completedChatRunner{}, nil, nil)
-	tasks := service.NewContextService(store, nil)
-	server := New(service.NewActorService(store, nil), convs, service.NewMessageService(store, nil), chat, tasks, nil)
+	server := New(service.NewActorService(store, nil), convs, service.NewMessageService(store, nil), chat, nil)
 	server.Human = service.NewHumanService(store, nil)
 	actor := "alice"
 	server.HumanIdentity = func(context.Context, *hertzapp.RequestContext) (string, error) { return actor, nil }
