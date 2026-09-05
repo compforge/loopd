@@ -32,7 +32,16 @@ func TestClientLifecycle(t *testing.T) {
 		created.Spec.Target.Key != target.Key || created.Spec.Revision != 1 {
 		t.Fatalf("created Task = %#v", created.Spec)
 	}
+	if err := tasks.Wake(context.Background(), created.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubeClient.Get(context.Background(), key, &created); err != nil || created.Spec.Revision != 2 {
+		t.Fatalf("wake revision=%d %v", created.Spec.Revision, err)
+	}
 	if err := tasks.Delete(context.Background(), created.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.Wake(context.Background(), created.Name); err != nil {
 		t.Fatal(err)
 	}
 	if err := kubeClient.Get(context.Background(), key, &created); client.IgnoreNotFound(err) != nil || err == nil {

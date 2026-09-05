@@ -77,6 +77,7 @@ func (service *MessageService) ListMessages(
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
+		ReplyToMessageID: value.ReplyToMessageID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
 		Kind: loopd.Role(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
 		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
@@ -110,6 +111,9 @@ func validateContent(content json.RawMessage) error {
 	if err := json.Unmarshal(model.Meta, &meta); err != nil {
 		return err
 	}
+	if _, reserved := meta["human"]; reserved {
+		return ErrInvalid
+	}
 	blockIDs := make(map[string]struct{}, len(model.Blocks))
 	for _, rawBlock := range model.Blocks {
 		var block struct {
@@ -118,6 +122,9 @@ func validateContent(content json.RawMessage) error {
 		}
 		if err := json.Unmarshal(rawBlock, &block); err != nil {
 			return err
+		}
+		if block.Type == "ask" || block.Type == "confirm" || block.Type == "human_reply" {
+			return ErrInvalid
 		}
 		if block.ID == "" || block.Type == "" {
 			return ErrInvalid

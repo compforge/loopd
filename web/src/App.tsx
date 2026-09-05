@@ -16,6 +16,8 @@ import {
   type Conversation,
   type Message,
 } from "./api";
+import { HumanMessage } from "./HumanMessage";
+import { mergeMessage, applyHumanMessageEvent } from "./human";
 import { DetailPanel } from "./DetailPanel";
 
 const activeTasksKey = "loopd.active-tasks";
@@ -26,6 +28,7 @@ const legacyRouter: Pick<Actor, "kind" | "key"> = { kind: "operator", key: "rout
 type RunStatus = "connecting" | "running" | "reconnecting" | "completed" | "failed";
 
 interface LiveTask {
+  responseMessageID?: string;
   conversationID: string;
   taskID: string;
   lastEventID: string;
@@ -57,7 +60,7 @@ export function App() {
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
   const selectedMessage = messages.find((message) => message.id === selectedMessageID);
-  const selectedIsLive = Boolean(selectedMessage && liveTask?.taskID === selectedMessage.task_id && selectedMessage.kind !== "user");
+  const selectedIsLive = Boolean(selectedMessage && liveTask?.responseMessageID === selectedMessage.id);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -121,11 +124,23 @@ export function App() {
     return () => controller.abort();
   }, [selectedConversationID]);
 
+  const hasPendingHuman = messages.some((message) => message.purpose === "human_request" && message.content.blocks.some((block) => block.status === "pending"));
+  useEffect(() => {
+    if (!selectedConversationID || !hasPendingHuman || liveTask?.status === "running") return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => { void refreshMessages(selectedConversationID, controller.signal); }, 1000);
+    return () => { window.clearInterval(timer); controller.abort(); };
+  }, [selectedConversationID, hasPendingHuman, liveTask?.status]);
+
   async function refreshMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
     try {
       const items = await listMessages(conversationID, signal);
       if (signal?.aborted) return [];
-      setMessages(items);
+      setMessages((current) => {
+        let result = items;
+        for (const m of current) if (m.purpose === "human_request" || m.purpose === "human_reply") result = mergeMessage(result, m);
+        return result;
+      });
       return items;
     } catch (cause) {
       if (!isAbort(cause)) setError(errorMessage(cause));
@@ -207,9 +222,10 @@ export function App() {
     let snapshot: Snapshot = {};
     let failed = false;
     let responseLoaded = false;
+    let responseMessageID: string | undefined;
     const target = requestedTarget ?? stored?.target ?? legacyRouter;
 
-    setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting", target });
+    setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "connecting", target, responseMessageID });
     try {
       for (;;) {
         let ended = false;
@@ -229,17 +245,26 @@ export function App() {
                 // live ID or Task ID; detail Conversations reference it.
                 void refreshMessages(conversationID, controller.signal).then((items) => {
                   if (controller.signal.aborted) return;
-                  const response = items.find((item) => item.task_id === value && item.kind !== "user");
-                  if (response) setSelectedMessageID(response.id);
+                  const response = items.find((item) => item.task_id === value && (item.purpose === "response" || (!item.purpose && item.kind !== "user")));
+                  if (response) { responseMessageID = response.id; setSelectedMessageID(response.id); }
                 });
               }
               writeActiveTask(conversationID, { taskID, lastEventID, target });
-              setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "running", target });
+              setLiveTask({ conversationID, taskID, lastEventID, snapshot, status: "running", target, responseMessageID });
             },
-            onEvent: ({ event: patch, eventId }) => {
+            onEvent: (delivery) => {
+              const { event: patch, eventId, messageID, message } = delivery;
+              if (messageID && message?.purpose !== "response" && messageID !== responseMessageID) {
+                if (message?.purpose === "human_request" || message?.purpose === "human_reply") {
+                  setMessages((current) => applyHumanMessageEvent(current, delivery));
+                  return;
+                }
+              }
+              if (messageID) responseMessageID = messageID;
+              if (message) setMessages((current) => mergeMessage(current, message));
               snapshot = applyPatch(structuredClone(snapshot), patch);
               if (eventId) lastEventID = eventId;
-              if (patch.op === PatchOp.ERROR) failed = true;
+              if (patch.op === PatchOp.ERROR || toUIModel(snapshot)?.meta.error) failed = true;
               if (patch.op === PatchOp.END) ended = true;
               writeActiveTask(conversationID, { taskID, lastEventID, target });
               setLiveTask({
@@ -248,7 +273,7 @@ export function App() {
                 lastEventID,
                 snapshot: structuredClone(snapshot),
                 status: ended ? (failed ? "failed" : "completed") : "running",
-                target,
+                target, responseMessageID,
               });
             },
           });
@@ -263,7 +288,7 @@ export function App() {
             lastEventID,
             snapshot: structuredClone(snapshot),
             status: "reconnecting",
-            target,
+            target, responseMessageID,
           });
           await delay(1_500, controller.signal);
         }
@@ -284,9 +309,9 @@ export function App() {
 
   const renderedMessages = useMemo(() => {
     const values = [...messages];
-    if (liveTask?.taskID && !values.some((message) => message.task_id === liveTask.taskID && message.kind !== "user")) {
+    if (liveTask?.taskID && !values.some((message) => message.id === liveTask.responseMessageID)) {
       values.push({
-        id: `live-${liveTask.taskID}`,
+        id: liveTask.responseMessageID ?? `live-${liveTask.taskID}`,
         conversation_id: liveTask.conversationID,
         task_id: liveTask.taskID,
         kind: liveTask.target.kind,
@@ -347,7 +372,7 @@ export function App() {
             </div>
           )}
           {renderedMessages.map((message) => {
-            const isLive = liveTask?.taskID === message.task_id && message.kind !== "user";
+            const isLive = liveTask?.responseMessageID === message.id;
             const model = isLive ? toUIModel(liveTask.snapshot) : safeModel(message.content);
             const text = messageText(model, message.kind);
             const active = selectedMessageID === message.id;
@@ -355,6 +380,7 @@ export function App() {
               <article
                 className={`message ${message.kind} ${active ? "selected" : ""}`}
                 key={message.id}
+                id={`message-${message.id}`}
                 onClick={() => setSelectedMessageID(message.id)}
               >
                 <div className="message-author">
@@ -362,7 +388,14 @@ export function App() {
                   {isLive && liveTask && <RunBadge status={liveTask.status} />}
                 </div>
                 <div className="bubble">
-                  {text || (isLive ? <Typing /> : <span className="quiet">等待处理…</span>)}
+                  {message.reply_to_message_id && <a className="reply-reference" href={`#message-${message.reply_to_message_id}`}>查看所回复的消息</a>}
+                  {message.purpose === "human_request" || message.purpose === "human_reply" ? (
+                    <HumanMessage message={message} replyTo={renderedMessages.find((item) => item.id === message.reply_to_message_id)} onReply={(result) => setMessages((current) => {
+                      let next = mergeMessage(current, result.message);
+                      if (result.reply) next = mergeMessage(next, result.reply);
+                      return next;
+                    })} />
+                  ) : text || (isLive ? <Typing /> : <span className="quiet">等待处理…</span>)}
                 </div>
               </article>
             );

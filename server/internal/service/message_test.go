@@ -131,7 +131,7 @@ func TestChatDeletesTaskWhenDatabaseCommitFails(t *testing.T) {
 func TestChatCompleteRetiresTaskMarker(t *testing.T) {
 	tasks := &recordingTaskClient{}
 	streams := &recordingChatRunner{}
-	chat := NewChatService(nil, tasks, streams, nil)
+	chat := NewChatService(completionStore(t), tasks, streams, nil)
 
 	if err := chat.Complete(context.Background(), "task-1", nil); err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestChatCompleteRetiresTaskMarker(t *testing.T) {
 func TestChatCompleteKeepsTaskWhenDeliveryFails(t *testing.T) {
 	tasks := &recordingTaskClient{}
 	streams := &recordingChatRunner{completeErr: errors.New("redis unavailable")}
-	chat := NewChatService(nil, tasks, streams, nil)
+	chat := NewChatService(completionStore(t), tasks, streams, nil)
 
 	if err := chat.Complete(context.Background(), "task-1", nil); err == nil {
 		t.Fatal("Complete succeeded when delivery failed")
@@ -157,7 +157,7 @@ func TestChatCompleteKeepsTaskWhenDeliveryFails(t *testing.T) {
 func TestChatCompleteReportsTaskRetirementFailure(t *testing.T) {
 	tasks := &recordingTaskClient{deleteErr: errors.New("api unavailable")}
 	streams := &recordingChatRunner{}
-	chat := NewChatService(nil, tasks, streams, nil)
+	chat := NewChatService(completionStore(t), tasks, streams, nil)
 
 	err := chat.Complete(context.Background(), "task-1", nil)
 	if !errors.Is(err, ErrUnavailable) {
@@ -322,4 +322,25 @@ func textContent(text string) json.RawMessage {
 		"blocks":  []map[string]any{{"id": "text", "type": "text", "content": text}},
 	})
 	return value
+}
+
+func (failingCommitRepository) BeginCompletion(context.Context, string, []byte, bool) error {
+	return nil
+}
+func (failingCommitRepository) FinishCompletion(context.Context, string) error { return nil }
+
+func completionStore(t *testing.T) *repo.Store {
+	t.Helper()
+	store := openServiceStore(t)
+	ctx := context.Background()
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conversation-1"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.CreateChatMessages(ctx,
+		model.Message{ID: "input", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "alice", Content: textContent("question")},
+		model.Message{ID: "response", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "router", Content: textContent("")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }

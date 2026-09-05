@@ -13,7 +13,10 @@ loop-server 通过 `DATABASE_DRIVER` 选择数据库。Helm 在配置 MySQL 时�
 数据库配置统一为 `DATABASE_DRIVER` 与 `DATABASE_DSN`。SQLite/MySQL 的 GORM Dialector 选择只发生在
 repo 层，service 与 API 不感知数据库类型。
 
-Operator/Harness 表的租约及发现语义见 [在线注册与发现](registry.md)。本文只维护聊天持久化约束。
+持久化标识使用领域前缀，与 Go model 字段通过默认命名规则对应；公共 API 的 `kind/key` 表达不变。
+
+Operator/Harness 注册与发现属于 [Runtime](../../docs/runtime.md) 的协作能力，租约与注册记录
+约束由该文档统一维护。本文只维护聊天持久化约束。
 
 ## Conversation
 
@@ -44,6 +47,11 @@ Operator 内部的临时 Harness Call 各对应详情会话中的一条 `harness
 - `task_id`：对应 Task CRD 名称的一次完整问答标识；反问、确认等可见消息继续使用同一值；
 - `kind`：发送者类型，只能是 `user`、`operator`、`harness`；
 - `actor_key`：发送者在所属系统中的稳定标识；
+- `reply_to_message_id`：精确回复引用，未回复其他消息时为空；
+- `purpose`：input、response、human_request 或 human_reply，固定主链路身份；详情消息不使用这些用途；
+- `revision`：Human Message 快照版本，用于独立交付和拒绝过期投影；
+- `human_due_at`、`wake_pending`：可索引的到期调度投影与持久通知标记，不另存问题或答案；
+- `delivery_state`、`completion`：主 response 的收口状态与重试意图，用于协调交互和 Task 删除；
 - `content`：页面可见的 AgentUE semantic model JSON；其中 `blocks` 按顺序承载 `text`、`tool`、
   `artifact` 等可扩展内容；
 - `created_at`、`updated_at`：创建时间与可见内容最后更新时间。
@@ -69,10 +77,31 @@ block 除 `id` 和 `type` 外的字段由 biz 扩展。页面无需展示的 sys
 事件、重试与成本不进入 Message，由 AgentLedger 记录。流式 delta 也不作为独立 Message；AgentUE Redis
 Bridge 承载运行中的页面事件，任务完成时由 server 将它们折叠为可恢复的 content 快照。
 
+### Human 消息扩展
+
+Message 的可选 `reply_to_message_id`，指向同一 Conversation 与 Task 中被答复的消息。
+它是答复关联的唯一依据，与详情 Conversation 的 parent_message_id 归属不同，也不定义执行顺序。
+不能用消息相邻、时间顺序、Actor 或 task_id 代替引用；Human 答复缺少引用或目标无效时拒绝。
+消息按时间展示不要求各 Actor 串行工作；一个 Task 可以并行产生多条提问，并按任意顺序收录答复。
+
+沿用 content JSON，以 loopd 业务 block type `ask/confirm/human_reply` 表达问题、确认和用户
+答复；问题的受控 meta 保存 EffectKey 等控制信息，block 保存请求状态与 deadline。问题和答复
+本身就是 Message，不另存一份 Interaction 事实。每条消息独立保存 model；写入有效答复与问题
+收口必须原子完成。
+
+问题正文只存在于 block，受控 meta 只保存 EffectKey、Timeout 与指纹。调度投影在问题首次写入时
+设置，在进入终态时与 block 状态一并更新；唤醒标记只在成功通知 Kubernetes 后清除。
+超时只更新问题状态，主动忽略才形成 user 回复。类型与行为契约统一见
+[Runtime](../../docs/runtime.md)。
+
 ## UUIDv7 游标
 
-所有表主键由 service 使用 go-stdx 的 `uuid.V7()` 生成。消息列表使用 `id > after ORDER BY id`
+所有表主键使用 go-stdx 的 `uuid.V7()` 生成。消息列表使用 `id > after ORDER BY id`
 翻页，不维护额外 sequence。UUIDv7 在当前 loop-server 单实例进程内提供单调的时间有序 ID。
 
 UUIDv7 的时间顺序不等于多节点数据库的全局提交顺序。引入多实例写入前必须重新确认游标语义；不能
 仅凭不同进程生成的 UUIDv7 推断严格的全局先后关系。
+
+主 input/response 在创建事务中标记 purpose。只有恰好一条 user 和一条非 user 的未标记主链路
+可以作为无歧义存量数据读取；写入 Human 交互前在同一锁下固定这两个身份。其他多消息存量数据
+拒绝猜测配对，需要先修复身份。新问题还要求 Task CRD 存在，不能给已退休的存量问答追加交互。

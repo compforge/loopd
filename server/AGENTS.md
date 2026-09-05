@@ -16,6 +16,7 @@ server/
 │   ├── operator.go         # Operator Registry
 │   └── harness.go          # Harness Registry
 ├── internal/delivery/      # loopd 完成语义；借助 AgentUE Bridge 续接事件并固化 Message
+├── internal/migrations/    # 已有数据库的 Schema 迁移
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
 │   ├── message.go          # messages
@@ -30,6 +31,7 @@ server/
 │   ├── message.go          # MessageService
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；Message 与 Task CRD 的提交边界
+│   ├── human.go            # Human 消息交互、持久到期与 Task 唤醒
 │   └── task.go             # TaskService；按 task_id 组装 Operator 上下文
 └── docs/                   # 聊天持久化、Task 交付和在线发现的领域设计
 ```
@@ -40,12 +42,13 @@ server/
 2. `model/` 一张表一个文件，`repo/` 按同名模型拆分；不要重新聚合成巨型 store 文件。
 3. Message 只保存页面可见聊天；完整轨迹进入 AgentLedger，Operator 领域状态不进入 server 的表。
 4. server 拥有 Task 分发与最终 Message，AgentUE 拥有事件协议和续接；事务、完成顺序与重试必须
-   遵循 `docs/task-delivery.md`。存储和在线发现分别遵循对应领域文档。
+   遵循 `docs/task-delivery.md`。存储见 `docs/persistence.md`，注册发现及 runtime 契约见
+   `../docs/runtime.md`。
 
 ## References
 
 - `../AGENTS.md` — loopd 全局边界与代码地图
 - `docs/persistence.md` — Conversation 与 Message 持久化设计
 - `docs/task-delivery.md` — Task 创建、上下文、流式续接与完成补偿
-- `docs/registry.md` — Operator/Harness 在线注册与 Actor 聚合发现
+- `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
 - `../docs/kernel.md` — loopd 稳定理念和参与者边界

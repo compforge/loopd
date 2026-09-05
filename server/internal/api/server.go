@@ -16,6 +16,8 @@ import (
 )
 
 type Server struct {
+	Human         *service.HumanService
+	HumanIdentity HumanIdentity
 	actors        *service.ActorService
 	conversations *service.ConversationService
 	messages      *service.MessageService
@@ -50,6 +52,9 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
+	engine.POST("/v1/tasks/:task_id/human", server.adapt(server.createHuman))
+	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
+	engine.POST("/v1/conversations/:conversation_id/tasks/:task_id/replies", server.adapt(server.replyHuman))
 	engine.GET("/v1/tasks/:task_id", server.adapt(server.getTask))
 	engine.POST("/v1/tasks/:task_id/events", server.adapt(server.appendTaskEvent))
 	engine.POST("/v1/tasks/:task_id/complete", server.adapt(server.completeTask))
@@ -70,6 +75,8 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	typeName := "internal_error"
 	message := err.Error()
 	switch {
+	case errors.Is(err, repo.ErrForbidden):
+		status, typeName = consts.StatusForbidden, "forbidden"
 	case errors.Is(err, service.ErrInvalid):
 		status, typeName = consts.StatusBadRequest, "invalid_request"
 	case errors.Is(err, service.ErrConflict), errors.Is(err, repo.ErrConflict):

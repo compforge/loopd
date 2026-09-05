@@ -14,6 +14,8 @@ import (
 type TaskClient interface {
 	Create(context.Context, string, loopd.ActorRef) error
 	Delete(context.Context, string) error
+	Wake(context.Context, string) error
+	Exists(context.Context, string) (bool, error)
 }
 
 // NewKubernetesTaskClient creates the loop-server Task CRD client.

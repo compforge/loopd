@@ -28,3 +28,7 @@ type testTaskClient struct{}
 
 func (testTaskClient) Create(context.Context, string, loopd.ActorRef) error { return nil }
 func (testTaskClient) Delete(context.Context, string) error                 { return nil }
+
+func (testTaskClient) Wake(context.Context, string) error { return nil }
+
+func (testTaskClient) Exists(context.Context, string) (bool, error) { return true, nil }

@@ -139,6 +139,17 @@ func (stream *ChatStream) Next() (loopd.Event, error) {
 			}
 			value := bytes.TrimSuffix(data.Bytes(), []byte{'\n'})
 			stream.lastEventID = eventID
+			var envelope struct {
+				MessageID string          `json:"message_id"`
+				Message   *loopd.Message  `json:"message"`
+				Event     json.RawMessage `json:"event"`
+			}
+			if err := json.Unmarshal(value, &envelope); err != nil {
+				return loopd.Event{}, err
+			}
+			if envelope.MessageID != "" {
+				return loopd.Event{ID: eventID, Data: envelope.Event, MessageID: envelope.MessageID, Message: envelope.Message}, nil
+			}
 			return loopd.Event{ID: eventID, Data: append(json.RawMessage(nil), value...)}, nil
 		}
 		if strings.HasPrefix(line, "id:") {

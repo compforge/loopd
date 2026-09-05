@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	serverapi "github.com/compforge/loopd/server/internal/api"
@@ -17,11 +18,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// HumanIdentity resolves the trusted user principal for chat creation and replies.
+type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
+
 type Config struct {
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Tasks    TaskClient
-	Logger   *slog.Logger
+	Database      DatabaseConfig
+	Redis         RedisConfig
+	Tasks         TaskClient
+	Logger        *slog.Logger
+	HumanIdentity HumanIdentity
 }
 
 type DatabaseConfig struct {
@@ -38,6 +43,8 @@ type Server struct {
 	store *repo.Store
 	redis redis.UniversalClient
 	api   *serverapi.Server
+	human *service.HumanService
+	chat  *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
@@ -64,15 +71,20 @@ func New(config Config) (*Server, error) {
 	chatDelivery := delivery.New(events, store, config.Logger)
 	chat := service.NewChatService(store, config.Tasks, chatDelivery, config.Logger)
 	tasks := service.NewTaskService(store, config.Logger)
+	human := service.NewHumanService(store, config.Tasks, config.Logger)
+	api := serverapi.New(actors, conversations, messages, chat, tasks, config.Logger)
+	api.Human = human
+	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
+		human: human, chat: chat,
 		store: store,
 		redis: redisClient,
-		api:   serverapi.New(actors, conversations, messages, chat, tasks, config.Logger),
+		api:   api,
 	}, nil
 }
 
 func (server *Server) Register(engine *route.Engine) { server.api.Register(engine) }
-func (server *Server) Run(context.Context)           {}
+func (server *Server) Run(ctx context.Context)       { server.human.Run(ctx, server.chat) }
 func (server *Server) Close() error {
 	return errors.Join(server.redis.Close(), server.store.Close())
 }

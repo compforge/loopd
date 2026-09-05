@@ -9,6 +9,7 @@ import (
 	loopd "github.com/compforge/loopd"
 	taskv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	controllerclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -62,4 +63,29 @@ func (client *Client) Delete(ctx context.Context, taskID string) error {
 		return fmt.Errorf("delete Task %q: %w", taskID, err)
 	}
 	return nil
+}
+
+// Wake updates an existing marker; it never creates a retired Task.
+func (client *Client) Wake(ctx context.Context, taskID string) error {
+	ctx, cancel := context.WithTimeout(ctx, client.timeout)
+	defer cancel()
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		value := &taskv1alpha1.Task{}
+		if err := client.kubeClient.Get(ctx, controllerclient.ObjectKey{Name: taskID, Namespace: client.namespace}, value); err != nil {
+			return controllerclient.IgnoreNotFound(err)
+		}
+		value.Spec.Revision++
+		return controllerclient.IgnoreNotFound(client.kubeClient.Update(ctx, value))
+	})
+}
+
+func (client *Client) Exists(ctx context.Context, taskID string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, client.timeout)
+	defer cancel()
+	value := &taskv1alpha1.Task{}
+	err := client.kubeClient.Get(ctx, controllerclient.ObjectKey{Name: taskID, Namespace: client.namespace}, value)
+	if err != nil {
+		return false, controllerclient.IgnoreNotFound(err)
+	}
+	return value.DeletionTimestamp == nil, nil
 }

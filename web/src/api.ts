@@ -20,6 +20,9 @@ export interface Conversation {
 
 export interface Message {
   id: string;
+  reply_to_message_id?: string;
+  purpose?: "input" | "response" | "human_request" | "human_reply";
+  revision?: number;
   conversation_id: string;
   task_id: string;
   kind: ActorKind;
@@ -85,7 +88,7 @@ export interface StreamRequest {
   target?: Pick<Actor, "kind" | "key">;
   signal?: AbortSignal;
   onTaskID(taskID: string): void;
-  onEvent(message: SseMessage): void;
+  onEvent(message: MessageEvent): void;
 }
 
 export async function streamMessage(request: StreamRequest): Promise<void> {
@@ -119,12 +122,12 @@ export async function streamMessage(request: StreamRequest): Promise<void> {
     const chunk = await reader.read();
     if (chunk.done) break;
     for (const frame of frames.push(decoder.decode(chunk.value, { stream: true }))) {
-      request.onEvent(decodeSse(frame));
+      request.onEvent(decodeMessageFrame(frame));
     }
   }
-  for (const frame of frames.push(decoder.decode())) request.onEvent(decodeSse(frame));
+  for (const frame of frames.push(decoder.decode())) request.onEvent(decodeMessageFrame(frame));
   const tail = frames.finish();
-  if (tail) request.onEvent(decodeSse(tail));
+  if (tail) request.onEvent(decodeMessageFrame(tail));
 }
 
 export class SseFrameDecoder {
@@ -171,4 +174,28 @@ async function responseError(response: Response): Promise<Error> {
   } catch {
     return new Error(`loop-server returned ${response.status}`);
   }
+}
+
+export type MessageEvent = SseMessage & { messageID?: string; message?: Message };
+
+// The envelope belongs to loopd. AgentUE still validates an unchanged event.
+export function decodeMessageFrame(frame: string): MessageEvent {
+  const lines = frame.split("\n");
+  const raw = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+  const envelope = JSON.parse(raw) as { message_id?: string; message?: Message; event?: unknown };
+  if (!envelope.message_id) return decodeSse(frame);
+  const inner = lines.filter((line) => !line.startsWith("data:")).join("\n") + `\ndata: ${JSON.stringify(envelope.event)}`;
+  return { ...decodeSse(inner), messageID: envelope.message_id, message: envelope.message };
+}
+
+export interface HumanReply {
+  reply_to_message_id: string;
+  outcome: "success" | "dismissed";
+  value?: string;
+}
+export interface HumanResult { message: Message; reply?: Message; status: string; value?: string }
+export async function replyHuman(message: Message, reply: HumanReply): Promise<HumanResult> {
+  return requestJSON<HumanResult>(`/v1/conversations/${encodeURIComponent(message.conversation_id)}/tasks/${encodeURIComponent(message.task_id)}/replies`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reply),
+  });
 }

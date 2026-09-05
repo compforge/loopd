@@ -54,6 +54,9 @@ func (store *Store) EnsureDetailMessage(ctx context.Context, conversation model.
 		if err := tx.First(&root, "id = ?", parent.ConversationID).Error; err != nil {
 			return err
 		}
+		if parent.Purpose != "" && parent.Purpose != "response" {
+			return ErrConflict
+		}
 		if root.ParentMessageID != nil || parent.Kind != "operator" || parent.TaskID != message.TaskID {
 			return ErrConflict
 		}
@@ -109,6 +112,9 @@ func (store *Store) CreateChatMessages(
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 
+	userMessage.Purpose = "input"
+	responseMessage.Purpose = "response"
+	responseMessage.ReplyToMessageID = userMessage.ID
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if userMessage.ConversationID != responseMessage.ConversationID || userMessage.TaskID != responseMessage.TaskID {
 			return ErrConflict

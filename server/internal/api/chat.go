@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -19,6 +20,13 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	conversationID := request.Param("conversation_id")
 	taskID := input.TaskID
 	if taskID == "" {
+		if server.Human != nil {
+			identity, err := server.identity(ctx, request)
+			if err != nil {
+				return err
+			}
+			input.UserKey = identity
+		}
 		message, err := server.chat.Create(ctx, conversationID, input.UserKey, input.Target, input.Content)
 		if err != nil {
 			return err
@@ -36,7 +44,19 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			if writer == nil {
 				writer = hertzsse.NewWriter(request)
 			}
-			return writer.WriteEvent(event.ID, "", event.Data)
+			data := event.Data
+			if event.MessageID != "" {
+				var err error
+				data, err = json.Marshal(struct {
+					MessageID string          `json:"message_id"`
+					Message   any             `json:"message,omitempty"`
+					Event     json.RawMessage `json:"event"`
+				}{event.MessageID, event.Message, event.Data})
+				if err != nil {
+					return err
+				}
+			}
+			return writer.WriteEvent(event.ID, "", data)
 		},
 	)
 	if errors.Is(streamErr, context.Canceled) {

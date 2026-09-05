@@ -10,6 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/redis/go-redis/v9"
@@ -112,4 +113,84 @@ func marshalEvent(t *testing.T, event agentueui.Event) json.RawMessage {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// +case=`独立问题快照在主流结束前交付；相同 block ID 不折叠到主回答`
+func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "human.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv"}); err != nil {
+		t.Fatal(err)
+	}
+	initial := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
+	_, err = store.CreateChatMessages(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial}, model.Message{ID: "response", ConversationID: "conv", TaskID: "task", Kind: "operator", ActorKey: "router", Content: initial}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := loopd.HumanRequest{TaskID: "task", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
+	q, err := store.CreateHuman(ctx, r, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplyHuman(ctx, "conv", "task", "alice", loopd.HumanReply{ReplyToMessageID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "answer"}); err != nil {
+		t.Fatal(err)
+	}
+	redisServer := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	defer client.Close()
+	coordinator := New(agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond}), store, nil)
+	// No Redis stream exists. Observe must recover Human snapshots from Messages.
+	seen := map[string]bool{}
+	ended := false
+	completed := false
+	err = coordinator.Stream(ctx, "task", "conv", "", func(value Event) error {
+		if value.MessageID == "" {
+			t.Fatal("missing Message identity")
+		}
+		event, err := agentueui.Parse(value.Data)
+		if err != nil {
+			return err
+		}
+		if value.MessageID == q.Message.ID && event.Op == agentueui.OpStart {
+			seen["question"] = true
+		}
+		if value.Message != nil && value.Message.Purpose == "human_reply" {
+			seen["reply"] = true
+		}
+		if value.MessageID == "response" && !completed {
+			completed = true
+			if err := store.BeginCompletion(ctx, "task", []byte("null"), false); err != nil {
+				return err
+			}
+			return coordinator.Complete(ctx, "task", nil)
+		}
+		if event.Op == agentueui.OpEnd {
+			ended = true
+			if !seen["question"] || !seen["reply"] {
+				t.Fatal("end preceded human snapshots")
+			}
+		}
+		return nil
+	})
+	if err != nil || !ended {
+		t.Fatalf("stream ended=%v %v", ended, err)
+	}
+	response, err := store.GetMessage(ctx, "response")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content struct {
+		Blocks []json.RawMessage `json:"blocks"`
+	}
+	if err := json.Unmarshal(response.Content, &content); err != nil {
+		t.Fatal(err)
+	}
+	if len(content.Blocks) != 0 {
+		t.Fatalf("Human blocks leaked into main content: %s", response.Content)
+	}
 }
