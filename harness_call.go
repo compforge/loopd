@@ -49,6 +49,8 @@ type HarnessCall struct {
 // transport event identity used by SSE Last-Event-ID; Data is an AgentUE event
 // whose seq owns semantic ordering and publish idempotency.
 type Event struct {
-	ID   string          `json:"id"`
-	Data json.RawMessage `json:"data"`
+	MessageID string          `json:"message_id,omitempty"`
+	Message   *Message        `json:"message,omitempty"`
+	ID        string          `json:"id"`
+	Data      json.RawMessage `json:"data"`
 }

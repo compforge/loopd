@@ -33,16 +33,9 @@ func (service *TaskService) GetContext(ctx context.Context, taskID string) (loop
 	if err != nil {
 		return loopd.TaskContext{}, err
 	}
-	var input, response model.Message
-	for _, row := range rows {
-		if row.Kind == string(loopd.RoleUser) {
-			input = row
-		} else {
-			response = row
-		}
-	}
-	if input.ID == "" || response.ID == "" || input.ConversationID != response.ConversationID {
-		return loopd.TaskContext{}, repo.ErrNotFound
+	input, response, err := repo.TaskPair(rows)
+	if err != nil {
+		return loopd.TaskContext{}, err
 	}
 	conversation, err := service.repo.GetConversation(ctx, input.ConversationID)
 	if err != nil {

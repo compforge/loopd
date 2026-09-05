@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type Runtime struct {
 }
 
 type Loop struct {
+	Human    Human
 	Chat     Chat
 	Harness  Harness
 	Operator Operator
@@ -51,7 +53,8 @@ func New(baseURL string, options Options) (*Runtime, error) {
 		transport.IdleConnTimeout = 90 * time.Second
 		transport.MaxIdleConns = 100
 		transport.MaxIdleConnsPerHost = 20
-		options.HTTPClient = &http.Client{Transport: transport}
+		jar, _ := cookiejar.New(nil)
+		options.HTTPClient = &http.Client{Transport: transport, Jar: jar}
 	}
 	if options.RequestTimeout <= 0 {
 		options.RequestTimeout = 30 * time.Second
@@ -66,6 +69,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
 	loop.Chat = newChat(c)
+	loop.Human = Human{client: c}
 	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
 	loop.Harness.chat = loop.Chat
 	loop.Operator = Operator{registry: newRegistry(

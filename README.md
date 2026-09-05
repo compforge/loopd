@@ -25,9 +25,9 @@ history.
 - **loop-server** owns page-visible conversations and messages. It pairs each
   active chat request with a Task CRD so the work can outlive an HTTP request,
   browser connection, or server process.
-- **loop-runtime** is a Go client embedded in an Operator. It exposes stable
-  conversation and message capabilities through `r.Loop.Chat`, and lets a
-  Reconciler watch and resolve Tasks through `r.Loop.Task`.
+- **loop-runtime** is a Go toolkit for building Operators. It combines
+  controller-runtime resource reconciliation with loopd collaboration capabilities.
+  See the [runtime design](docs/runtime.md) for the Operator development contract.
 - **Harness adapters** let an Operator invoke agentd or another intelligent
   execution service through loop-runtime without leaking provider vocabulary
   into the public model. The bundled AgentGo adapter is an in-process demo;
@@ -55,22 +55,13 @@ execution.
 
 ## Long-running execution
 
-A question may run for minutes or days. Its lifecycle is independent from any
-HTTP request or browser connection:
+A question may run for minutes or days. Users can disconnect and return to the
+same conversation to follow its progress and read the answer. The selected
+Operator or Harness owns the work behind that answer, and an Operator can call
+multiple Harnesses before publishing its result.
 
-1. loop-server creates a user message and an empty target response message with one
-   `task_id`, initializes its AgentUE stream, then creates a same-ID Task CRD before committing the messages;
-2. the selected Operator or Harness watches the Task and resolves its current
-   input and conversation history through loop-runtime;
-3. a complex Operator may create a domain CRD, while a simple Operator handles
-   the shared Task directly;
-4. visible progress flows through the AgentUE Redis event bridge while full events enter AgentLedger;
-5. clients may reconnect to any server instance with the same `task_id` and continue from their last event ID;
-6. completion folds visible events into the selected Actor's response Message,
-   marks the stream terminal, and removes the Task marker.
-
-`Harness.Prompt` returns a handle. A Reconciler can consume its stream while
-doing other work, or call `Wait` when the Harness result is the only remaining
-dependency. Repeated calls use the same `(task ID, effect key)`; the AgentGo
-demo reuses the Call for the lifetime of one runtime, while a production agentd
-adapter must make that identity durable across Operator restarts.
+Recovery depends on the execution and storage configuration. The bundled
+AgentGo demo runs in process; durable execution across Operator restarts requires
+a persistent Harness adapter. See the [runtime design](docs/runtime.md) for the
+calling and recovery contract, and [Kubernetes deployment](deploy/k8s/README.md)
+for the storage and Quick Start limits.

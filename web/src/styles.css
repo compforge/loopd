@@ -227,3 +227,18 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .typing i { animation: none; }
 }
+
+.reply-reference { display: block; font-size: 11px; color: #64748b; margin-bottom: 8px; }
+.human-question { white-space: normal; min-width: 240px; }
+.human-question p { white-space: pre-wrap; margin: 10px 0; }
+.human-status { color: #64748b; font-size: 12px; margin: 8px 0; }
+.human-question fieldset { border: 0; padding: 0; margin: 0; }
+.human-actions { display: flex; gap: 8px; }
+.human-question button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; background: #fff; cursor: pointer; }
+.human-question button:disabled { cursor: default; opacity: .5; }
+.human-choices { display: grid; gap: 8px; }
+.human-choices button { text-align: left; }
+.human-choices small { display: block; color: #64748b; margin-top: 4px; }
+.human-question textarea { display: block; width: 100%; min-height: 70px; margin: 10px 0; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.human-question .human-dismiss { margin-top: 10px; color: #64748b; }
+.human-question [role="alert"] { margin-top: 8px; color: #b91c1c; }

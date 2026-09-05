@@ -17,6 +17,8 @@ import (
 )
 
 type ChatRepository interface {
+	BeginCompletion(context.Context, string, []byte, bool) error
+	FinishCompletion(context.Context, string) error
 	CreateChatMessages(context.Context, model.Message, model.Message, func(context.Context) error) (model.Message, error)
 }
 
@@ -191,6 +193,10 @@ func (service *ChatService) Complete(ctx context.Context, taskID string, failure
 	if taskID == "" {
 		return ErrInvalid
 	}
+	intent, _ := json.Marshal(failure)
+	if err := service.repo.BeginCompletion(ctx, taskID, intent, failure != nil); err != nil {
+		return err
+	}
 	if err := mapDeliveryError(service.delivery.Complete(ctx, taskID, failure)); err != nil {
 		return err
 	}
@@ -203,6 +209,9 @@ func (service *ChatService) Complete(ctx context.Context, taskID string, failure
 			"error", err,
 		)
 		return fmt.Errorf("%w: delete completed task %q: %v", ErrUnavailable, taskID, err)
+	}
+	if err := service.repo.FinishCompletion(ctx, taskID); err != nil {
+		return err
 	}
 	service.logger.InfoContext(ctx, "chat task retired", "task_id", taskID)
 	return nil
@@ -237,4 +246,12 @@ func emptyContent(content json.RawMessage) (json.RawMessage, error) {
 		Meta    map[string]any    `json:"meta"`
 		Blocks  []json.RawMessage `json:"blocks"`
 	}{Version: source.Version, Biz: source.Biz, Meta: map[string]any{}, Blocks: []json.RawMessage{}})
+}
+
+func (service *ChatService) resumeCompletion(ctx context.Context, taskID string, intent []byte) error {
+	var failure *delivery.Failure
+	if err := json.Unmarshal(intent, &failure); err != nil {
+		return err
+	}
+	return service.Complete(ctx, taskID, failure)
 }

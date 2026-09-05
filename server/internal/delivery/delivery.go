@@ -32,6 +32,8 @@ type Failure struct {
 }
 
 type Event struct {
+	MessageID string
+	Message   *loopd.Message
 	ID        string
 	Data      json.RawMessage
 	Persisted bool
@@ -70,6 +72,12 @@ func (coordinator *Coordinator) Emit(ctx context.Context, taskID string, data js
 	event, err := agentueui.Parse(data)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidEvent, err)
+	}
+	if t, _ := event.Block["type"].(string); t == "ask" || t == "confirm" || t == "human_reply" {
+		return "", fmt.Errorf("%w: Human blocks require typed actions", ErrInvalidEvent)
+	}
+	if _, exists := event.Meta["human"]; exists {
+		return "", fmt.Errorf("%w: reserved Human metadata", ErrInvalidEvent)
 	}
 	if event.Op != agentueui.OpSet && event.Op != agentueui.OpAppend {
 		return "", fmt.Errorf("%w: only set and append events may be emitted", ErrInvalidEvent)
@@ -213,10 +221,103 @@ func (coordinator *Coordinator) Stream(
 	if response.ConversationID != conversationID {
 		return agentuerunner.ErrNotFound
 	}
-	replayer := agentuerunner.Replayer{Bridge: coordinator.events}
-	return replayer.Stream(ctx, taskID, after, func(event agentuerunner.Delivery) error {
-		return deliver(Event{ID: event.Cursor, Data: event.Data, Persisted: event.Cursor != ""})
-	})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	revisions := map[string]uint64{}
+	flush := func() error {
+		rows, err := coordinator.repo.ListRootMessagesByTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if row.Purpose != "human_request" && row.Purpose != "human_reply" {
+				continue
+			}
+			if revisions[row.ID] >= row.Revision {
+				continue
+			}
+			start, err := agentueui.Start(row.Content, row.Revision)
+			if err != nil {
+				return err
+			}
+			data, err := start.Marshal()
+			if err != nil {
+				return err
+			}
+			msg := visibleMessage(row)
+			if err := deliver(Event{Data: data, MessageID: row.ID, Message: &msg}); err != nil {
+				return err
+			}
+			revisions[row.ID] = row.Revision
+		}
+		return nil
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	msg := visibleMessage(response)
+	if response.DeliveryState == "closed" {
+		start, err := agentueui.Start(response.Content, 1)
+		if err != nil {
+			return err
+		}
+		data, _ := start.Marshal()
+		if err := deliver(Event{Data: data, MessageID: response.ID, Message: &msg}); err != nil {
+			return err
+		}
+		end, _ := agentueui.End(2).Marshal()
+		return deliver(Event{Data: end, MessageID: response.ID})
+	}
+	if _, err := coordinator.events.State(ctx, taskID); errors.Is(err, agentuerunner.ErrNotFound) {
+		// Human snapshots and the last persisted main snapshot survive Redis loss.
+		if err := coordinator.Initialize(ctx, taskID, response.Content); err != nil {
+			return err
+		}
+		after = ""
+	} else if err != nil {
+		return err
+	}
+	stream := make(chan agentuerunner.Delivery)
+	done := make(chan error, 1)
+	go func() {
+		replayer := agentuerunner.Replayer{Bridge: coordinator.events}
+		done <- replayer.Stream(ctx, taskID, after, func(event agentuerunner.Delivery) error {
+			select {
+			case stream <- event:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			if err := flush(); err != nil {
+				return err
+			}
+		case event := <-stream:
+			parsed, err := agentueui.Parse(event.Data)
+			if err != nil {
+				return err
+			}
+			// Flush before end; ordinary token delivery must not query the DB.
+			if parsed.Op == agentueui.OpEnd {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			if err := deliver(Event{ID: event.Cursor, Data: event.Data, Persisted: event.Cursor != "", MessageID: response.ID, Message: &msg}); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (coordinator *Coordinator) response(ctx context.Context, taskID string) (model.Message, error) {
@@ -224,26 +325,10 @@ func (coordinator *Coordinator) response(ctx context.Context, taskID string) (mo
 	if err != nil {
 		return model.Message{}, err
 	}
-	var conversationID, responseMessageID string
-	var response model.Message
-	hasUser := false
-	for _, row := range rows {
-		if conversationID != "" && conversationID != row.ConversationID {
-			return model.Message{}, repo.ErrNotFound
-		}
-		conversationID = row.ConversationID
-		if row.Kind == string(loopd.RoleUser) {
-			hasUser = true
-			continue
-		}
-		if responseMessageID != "" {
-			return model.Message{}, repo.ErrNotFound
-		}
-		responseMessageID = row.ID
-		response = row
-	}
-	if !hasUser || conversationID == "" || responseMessageID == "" {
-		return model.Message{}, repo.ErrNotFound
-	}
-	return response, nil
+	_, response, err := repo.TaskPair(rows)
+	return response, err
+}
+
+func visibleMessage(m model.Message) loopd.Message {
+	return loopd.Message{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.Role(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToMessageID: m.ReplyToMessageID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }

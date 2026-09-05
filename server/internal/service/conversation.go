@@ -37,6 +37,9 @@ func (service *ConversationService) CreateConversation(
 		if err != nil {
 			return loopd.Conversation{}, err
 		}
+		if parent.Purpose != "" && parent.Purpose != "response" {
+			return loopd.Conversation{}, ErrInvalid
+		}
 		if parent.Kind != string(loopd.RoleOperator) && parent.Kind != string(loopd.RoleHarness) {
 			return loopd.Conversation{}, ErrInvalid
 		}

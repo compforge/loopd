@@ -10,7 +10,7 @@ loopd 位于 Agent 技术体系的 Orchestrator 层。模型推理、工具循�
 及基础设施提供；loopd 协调参与者、持久聊天、Task 分发和可见结果。
 
 - loop-server 提供 Chat API 和页面协作状态，拥有 Conversation、Message 与 Task 分发。
-- loop-runtime 是 Operator 使用的 Go 库，封装上下文、Harness 调用和结果发布。
+- loop-runtime 是 Operator 的协作开发库，复用 controller-runtime 的资源控制循环，提供公共协作能力。
 - Operator 实现具体编排策略，可按复杂度拥有自己的领域 Resource。
 - Harness 拥有智能执行状态，通过 Adapter 接入，可被 Operator 调用或直接回答 Human。
 
@@ -31,8 +31,11 @@ Operator 依赖 runtime 公共契约，不依赖 server 私有实现；server �
 | Harness Execution | Harness 拥有的智能执行及恢复状态 |
 | Registration | server 保存的 Operator/Harness 在线发现租约 |
 
+Message 记录 Actor 发出的消息，记录顺序不定义 Actor 的执行顺序。同一 Task 可以包含并行工作；
+消息回复只表达回答关系，执行依赖、等待与调度由 Operator 和 Harness 决定。
+
 Activity、Artifact 和流式事件是过程记录或投影，不独立拥有业务执行状态。在线发现也不代替
-任务生命周期：runtime 分别注册 Operator/Harness，server 向 UI 聚合可用 Actor。
+任务生命周期；注册与 Actor 发现是 runtime 的公共能力，记录由 server 保存。
 
 Conversation 是一个对话框，每次提问可以更换目标。详情 Conversation 挂在某条主回答下，
 供页面展开内部工作；最终回答仍由该次问答的目标负责。可见历史属于 server，完整 prompt、
@@ -74,8 +77,8 @@ Human → Conversation / Message → Task
 Operator 的内部输出可以贡献处理详情，主回答由 Operator 显式汇总。图描述协作边界；
 具体 Harness 要成为可直聊目标，还需实现注册、Task 消费和结果发布。
 
-一次问答可以持续几十分钟乃至数天。Harness Call 返回句柄，调用方可观察流式进展、处理其他
-变化或等待结果。同一动作重试必须保持稳定身份；收到事件只表示有进展，不表示成功完成。
+一次问答可以持续几十分钟乃至数天。同一动作重试必须保持稳定身份；收到事件只表示有进展，
+不表示成功完成。调用、等待与恢复契约由 [Runtime](runtime.md) 定义。
 
 ## 状态与交付边界
 
@@ -87,14 +90,13 @@ AgentUE 拥有页面语义模型、Reducer、Redis Bridge 和续接。runtime �
 事件，页面按 task_id 从任意实例观察；server 在完成阶段固化 Message。事件传输标识与语义
 顺序分别负责续接和幂等，不能将事件流当作完整执行历史。
 
-流式观察跨实例并不自动保证跨重启恢复。内存 Redis 的活跃事件可能丢失，进程内 AgentGo
-Call 也不承诺持久恢复；长期执行需要 Harness 的持久状态与相应部署配置。
+流式观察跨实例并不自动保证跨重启恢复。长期执行依赖 Harness 的持久状态与相应存储配置；
+各能力的恢复边界分别见 Runtime 和 Task 交付文档。
 
 ## 领域设计入口
 
-- [Operator 接入](operators.md)：注册、Task 上下文、Call identity 和编排能力。
+- [Runtime](runtime.md)：相对 Operator 的定位、注册发现、上下文、Harness Call 与结果发布。
 - [聊天持久化](../server/docs/persistence.md)：Conversation、Message、详情会话与游标。
 - [Task 交付](../server/docs/task-delivery.md)：创建补偿、流式续接、完成与重试。
-- [在线发现](../server/docs/registry.md)：Operator/Harness 租约与 Actor 聚合视图。
 
 领域流程和局部约束由以上文档维护；本文件只定义共享模型、主流程与 owner 边界。
