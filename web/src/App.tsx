@@ -1,4 +1,4 @@
-import { parseMessageContent, type MessageContent } from "./content";
+import type { MessageContent } from "./content";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   PatchOp,
@@ -14,8 +14,8 @@ import {
   type Message,
 } from "./api";
 import { MessageBody, ReplyReference } from "./MessageBody";
-import { mergeMessage, applyMessageEvent } from "./message";
-import { DetailPanel } from "./DetailPanel";
+import { mergeMessage, applyMessageEvent, messageStatusLabel } from "./message";
+import { DetailPanel, detailOrganizer, type DetailSelection } from "./DetailPanel";
 
 import { readSubscriptions, writeSubscription, type StoredSubscription } from "./streams";
 const selectedActorKey = "loopd.selected-actor";
@@ -38,6 +38,7 @@ export function App() {
   const [selectedConversationID, setSelectedConversationID] = useState<string>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedMessageID, setSelectedMessageID] = useState<string>();
+  const [detailSelection, setDetailSelection] = useState<DetailSelection>();
   const [liveSubscriptions, setLiveSubscriptions] = useState<Record<string, LiveSubscription>>({});
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState("");
@@ -48,7 +49,6 @@ export function App() {
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
-  const selectedMessage = messages.find((message) => message.id === selectedMessageID);
   const subscription = selectedConversationID ? liveSubscriptions[selectedConversationID] : undefined;
 
   useEffect(() => {
@@ -103,8 +103,11 @@ export function App() {
     const controller = new AbortController();
     void refreshMessages(selectedConversationID, controller.signal).then((items) => {
       if (controller.signal.aborted) return;
-      const lastResponse = items.findLast((message) => message.kind !== "user");
-      setSelectedMessageID((current) => current ?? lastResponse?.id);
+      const lastMessage = items.at(-1);
+      setSelectedMessageID((current) => current ?? lastMessage?.id);
+      if (lastMessage) setDetailSelection((current) => current ?? {
+        parentID: selectedConversationID, organizer: detailOrganizer(lastMessage),
+      });
       const stored = readSubscriptions()[selectedConversationID];
       const input = items.findLast((message) => message.purpose === "input" && message.task_id);
       if (!streams.current.has(selectedConversationID) && (stored || input)) {
@@ -146,6 +149,7 @@ export function App() {
     setMessages([]);
     setLiveSubscriptions({});
     setSelectedMessageID(undefined);
+    setDetailSelection(undefined);
     setSelectedConversationID(conversationID);
     setError(undefined);
   }
@@ -157,6 +161,7 @@ export function App() {
     setMessages([]);
     setLiveSubscriptions({});
     setSelectedMessageID(undefined);
+    setDetailSelection(undefined);
     setError(undefined);
   }
 
@@ -184,14 +189,23 @@ export function App() {
       }
     }
 
+    // Observe the recipient immediately, even before it publishes a main answer
+    // or creates a workspace. The composer choice is not the detail selection.
+    setSelectedMessageID(undefined);
+    setDetailSelection({ parentID: conversationID, organizer: detailOrganizer({
+      kind: "user", key: "web-user", target_kind: selectedActor.kind, target_key: selectedActor.key,
+    }) });
     setMessages((current) => [
       ...current,
       {
         id: `local-${Date.now()}`,
+        status: "completed",
         conversation_id: conversationID,
         task_id: "",
         kind: "user",
         key: "web-user",
+        target_kind: selectedActor.kind,
+        target_key: selectedActor.key,
         content: textModel(text),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -247,9 +261,6 @@ export function App() {
                 if (message.conversation_id === conversationID) {
                   const updated = liveMessages.find((item) => item.id === messageID)!;
                   setMessages((current) => mergeMessage(current, updated));
-                  if (message.kind !== "user") {
-                    setSelectedMessageID((current) => current ?? messageID);
-                  }
                 }
                 // A Message's END closes only that Message.
                 update("connected");
@@ -328,20 +339,21 @@ export function App() {
             </div>
           )}
           {renderedMessages.map((message) => {
-            const model = safeModel(message.content);
-            const output = model?.meta.output;
-            const isLive = message.purpose === "output" && output !== null && typeof output === "object" && "ended" in output && output.ended === false;
+            const isLive = message.status === "streaming";
             const active = selectedMessageID === message.id;
             return (
               <article
                 className={`message ${message.kind.startsWith("operator/") ? "operator" : message.kind} ${active ? "selected" : ""}`}
                 key={message.id}
                 id={`message-${message.id}`}
-                onClick={() => setSelectedMessageID(message.id)}
+                onClick={() => {
+                  setSelectedMessageID(message.id);
+                  setDetailSelection({ parentID: message.conversation_id, organizer: detailOrganizer(message) });
+                }}
               >
                 <div className="message-author">
                   <span title={`${message.kind} / ${message.key}`}>{message.kind === "user" ? "YOU" : message.kind.startsWith("operator/") ? message.kind.split("/").at(-1)!.toUpperCase() : message.key.toUpperCase()}</span>
-                  {isLive && <span className="run-badge running">STREAMING</span>}
+                  {message.status !== "completed" && <span className="run-badge">{messageStatusLabel(message.status)}</span>}
                 </div>
                 <div className="bubble">
                   <ReplyReference message={message} />
@@ -420,7 +432,7 @@ export function App() {
           if (result.reply) next = mergeMessage(next, result.reply);
           return next;
         })}
-        message={selectedMessage}
+        selection={detailSelection?.parentID === selectedConversationID ? detailSelection : undefined}
         liveMessages={subscription?.messages}
         running={subscription?.status === "connected"}
       />
@@ -430,14 +442,6 @@ export function App() {
 
 function Typing() {
   return <span className="typing"><i /><i /><i /></span>;
-}
-
-function safeModel(value: unknown): MessageContent | undefined {
-  try {
-    return parseMessageContent(value);
-  } catch {
-    return undefined;
-  }
 }
 
 function textModel(text: string): MessageContent {

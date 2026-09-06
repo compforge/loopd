@@ -3,7 +3,7 @@ import type { Message } from "./api";
 import { groupParallelMessages } from "./parallel";
 
 const message = (id: string, start: number, end: number): Message => ({
-  id, conversation_id: "detail", task_id: "task", kind: "harness", key: id,
+  status: "completed", id, conversation_id: "detail", task_id: "task", kind: "harness", key: id,
   content: { version: "1.0", biz: "chat", meta: {}, blocks: [] },
   created_at: new Date(start).toISOString(), updated_at: new Date(end).toISOString(),
 });

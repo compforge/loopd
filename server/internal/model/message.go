@@ -3,6 +3,7 @@ package model
 import "time"
 
 type Message struct {
+	Status string `gorm:"size:24;not null;default:completed"`
 	// Empty recipient kind and key explicitly address the conversation.
 	TargetKind      string     `gorm:"size:128"`
 	TargetKey       string     `gorm:"size:128"`

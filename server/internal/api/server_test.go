@@ -183,7 +183,7 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 	).Result()
 }
 
-func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
+func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error) {
 	return "", nil
 }
 

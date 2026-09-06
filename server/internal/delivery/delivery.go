@@ -19,7 +19,7 @@ import (
 var ErrInvalidEvent = errors.New("invalid AgentUE event")
 
 type MessageRepository interface {
-	ProjectOutput(context.Context, string, agentueui.Event) error
+	ProjectOutput(context.Context, string, agentueui.Event, ...loopd.MessageStatus) error
 	GetDeliveryInput(context.Context, string) (model.Message, error)
 	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
@@ -61,7 +61,7 @@ func (coordinator *Coordinator) Delete(ctx context.Context, taskID string) error
 }
 
 // +spec=`Message ID 决定输出归属，block ID 与 seq 只在该 Message 内唯一；Human 状态只能经 typed action 写入`
-func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage) (string, error) {
+func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage, statuses ...loopd.MessageStatus) (string, error) {
 	message, err := coordinator.repo.GetMessageState(ctx, messageID)
 	if err != nil {
 		return "", err
@@ -73,8 +73,24 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if err != nil {
 		return "", err
 	}
+	status := loopd.MessageStatus("")
+	if len(statuses) > 1 {
+		return "", fmt.Errorf("%w: at most one message status", ErrInvalidEvent)
+	}
+	if len(statuses) == 1 {
+		status = statuses[0]
+	}
+	if event.Op == agentueui.OpEnd && status == "" {
+		status = loopd.MessageStatusCompleted
+	}
+	if (event.Op == agentueui.OpEnd && !status.Terminal()) || (event.Op != agentueui.OpEnd && status != "") {
+		return "", fmt.Errorf("%w: only End accepts a terminal message status", ErrInvalidEvent)
+	}
 	if message.Ended {
 		if event.Op == agentueui.OpEnd {
+			if status != message.Status {
+				return "", repo.ErrConflict
+			}
 			return "", nil
 		}
 		return "", fmt.Errorf("%w: message has ended", ErrInvalidEvent)
@@ -84,7 +100,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if event.Seq > message.Revision+1 {
 		return "", fmt.Errorf("%w: event skips message revision", ErrInvalidEvent)
 	}
-	if err := coordinator.repo.ProjectOutput(ctx, message.ID, event); err != nil {
+	if err := coordinator.repo.ProjectOutput(ctx, message.ID, event, status); err != nil {
 		return "", err
 	}
 	message, err = coordinator.repo.GetMessageState(ctx, messageID)
@@ -99,7 +115,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 		return "", nil
 	}
 	if event.Op == agentueui.OpEnd {
-		coordinator.logger.InfoContext(ctx, "message output ended", "message_id", messageID, "conversation_id", message.ConversationID)
+		coordinator.logger.InfoContext(ctx, "message output ended", "message_id", messageID, "conversation_id", message.ConversationID, "status", message.Status)
 	}
 	return id, nil
 }
@@ -196,7 +212,7 @@ func transportMessage(input model.Message) model.Message {
 }
 
 func visibleMessage(m model.Message) loopd.Message {
-	return loopd.Message{TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return loopd.Message{Status: loopd.MessageStatus(m.Status), TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 
 func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {

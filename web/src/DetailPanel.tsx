@@ -1,8 +1,9 @@
 import { MessageBody, ReplyReference } from "./MessageBody";
 import type { HumanResult } from "./api";
+import { messageStatusLabel } from "./message";
 import { useEffect, useState, type CSSProperties } from "react";
 import { parseMessageContent, type MessageContent } from "./content";
-import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
+import { findDetailConversation, listMessages, type ActorKind, type Conversation, type Message } from "./api";
 import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
@@ -13,16 +14,21 @@ interface Detail {
   error?: string;
 }
 
-/** @spec 同一父会话/Operator 的消息共享详情；切换参与者不能泄漏上一个查询的结果。 */
-export function DetailPanel({ message, liveMessages, running, onReply }: {
-  message?: Message;
+export interface DetailSelection {
+  parentID: string;
+  organizer?: { kind: "operator"; key: string };
+}
+
+/** @spec 按父会话/Operator 观察工作会话，不等待主回答；切换参与者不能泄漏上一个查询的结果。 */
+export function DetailPanel({ selection, liveMessages, running, onReply }: {
+  selection?: DetailSelection;
   liveMessages?: Message[];
   running: boolean;
   onReply?(result: HumanResult): void;
 }) {
   const [detail, setDetail] = useState<Detail>();
-  const parentID = message?.conversation_id;
-  const organizer = detailOrganizer(message);
+  const parentID = selection?.parentID;
+  const organizer = selection?.organizer;
   const actorKind = organizer?.kind;
   const actorKey = organizer?.key;
   const scope = JSON.stringify([parentID, actorKind, actorKey]);
@@ -65,12 +71,12 @@ export function DetailPanel({ message, liveMessages, running, onReply }: {
     <aside className="detail-panel">
       <header className="detail-header">
         <span className="eyebrow">CONVERSATION DETAIL</span>
-        <h2>处理详情</h2>
+        <h2>处理详情{actorKey ? ` · ${actorKey}` : ""}</h2>
       </header>
-      {!message || !selected?.conversation ? (
+      {!organizer || !selected?.conversation ? (
         <div className="detail-empty">
           <div>◎</div>
-          <p>{selected?.error ?? (!message ? "选择一条消息，查看它的处理详情。" : !selected ? "加载中…" : "这条消息暂无详情会话。")}</p>
+          <p>{selected?.error ?? (!selection ? "发送消息或选择历史消息，查看相关 Operator 的工作会话。" : !organizer ? "这条消息未关联 Operator 工作会话。" : !selected ? `正在查找 ${actorKey} 的工作会话…` : `等待 ${actorKey} 创建工作会话…`)}</p>
         </div>
       ) : (
         <div className="detail-content" data-conversation-id={selected.conversation.id}>
@@ -112,6 +118,7 @@ export function DetailMessage({ message, index, onReply }: { message: Message; i
       <div className="timeline-node">{index + 1}</div>
       <div className="detail-card-head">
         <span className="block-kind" title={`${message.kind} / ${message.key}`}>{actorName.toUpperCase()}</span>
+        {message.status !== "completed" && <span className="quiet">{messageStatusLabel(message.status)}</span>}
       </div>
       <div className="detail-card-title">{title}</div>
       <div className="detail-card-time" title={`${message.created_at} → ${message.updated_at}`}>
@@ -132,10 +139,14 @@ function activityTime(value: string): string {
 
 // Operator role messages share the owning Operator's workspace. Run keys remain
 // author identities and must not create a separate detail conversation.
-export function detailOrganizer(message?: Message) {
- if (!message) return undefined;
- const kind = message.kind === "user" ? message.target_kind : message.kind;
- const key = message.kind === "user" ? message.target_key : message.key;
- if (kind?.startsWith("operator/")) return { kind: "operator" as const, key: kind.split("/")[1] };
- return { kind, key };
+export function detailOrganizer(message?: Pick<Message, "kind" | "key" | "target_kind" | "target_key">): DetailSelection["organizer"] {
+  if (!message) return undefined;
+  // A directed message opens its recipient's workspace; replies to a user and
+  // broadcasts from an Operator open the author's workspace instead.
+  return operatorActor(message.target_kind, message.target_key) ?? operatorActor(message.kind, message.key);
+}
+
+function operatorActor(kind?: ActorKind, key?: string): DetailSelection["organizer"] {
+  if (kind?.startsWith("operator/")) return { kind: "operator", key: kind.split("/")[1] };
+  return kind === "operator" && key ? { kind, key } : undefined;
 }

@@ -99,6 +99,7 @@ func (service *MessageService) ListMessages(
 
 func messageFromModel(value model.Message) loopd.Message {
 	return loopd.Message{
+		Status:     loopd.MessageStatus(value.Status),
 		TargetKind: loopd.ActorKind(value.TargetKind), TargetKey: value.TargetKey,
 		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,

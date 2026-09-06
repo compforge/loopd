@@ -15,12 +15,26 @@ import (
 // ProjectOutput maintains the visible snapshot for conversation-scoped output
 // before attempting page delivery. SQL serializes revisions and remembers the
 // last event fingerprint so an ambiguous response can be retried without appending twice.
-func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Event) error {
+func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Event, statuses ...loopd.MessageStatus) error {
+	status := loopd.MessageStatus("")
+	if len(statuses) > 1 {
+		return ErrConflict
+	}
+	if len(statuses) == 1 {
+		status = statuses[0]
+	}
+	if event.Op == agentueui.OpEnd && status == "" {
+		status = loopd.MessageStatusCompleted
+	}
+	if (event.Op == agentueui.OpEnd && !status.Terminal()) || (event.Op != agentueui.OpEnd && status != "") {
+		return ErrConflict
+	}
 	data, err := event.Marshal()
 	if err != nil {
 		return err
 	}
-	fingerprint := fmt.Sprintf("%x", sha256.Sum256(data))
+	// Status is part of the write identity, outside the AgentUE event payload.
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(append(data, []byte("\x00"+string(status))...)))
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -44,7 +58,7 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if event.Seq != m.Revision+1 {
 			return ErrConflict
 		}
-		if (loopd.Message{Content: m.Content}).Ended() {
+		if (loopd.Message{Status: loopd.MessageStatus(m.Status)}).Ended() {
 			return ErrConflict
 		}
 		if _, ref := event.Block["ref"]; ref {
@@ -66,7 +80,7 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 			meta = map[string]any{}
 			next["meta"] = meta
 		}
-		meta["output"] = map[string]any{"ended": event.Op == agentueui.OpEnd, "last_event": fingerprint}
+		meta["output"] = map[string]any{"last_event": fingerprint}
 		c.snapshot = next
 		content, err := s.packContent(c)
 		if err != nil {
@@ -76,6 +90,9 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 			return err
 		}
 		updates := map[string]any{"content": content, "revision": event.Seq}
+		if event.Op == agentueui.OpEnd {
+			updates["status"] = string(status)
+		}
 		if event.Op == agentueui.OpEnd && m.TargetKind != "user" {
 			updates["dispatch_pending"] = true
 		}

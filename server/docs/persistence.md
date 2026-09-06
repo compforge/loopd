@@ -44,9 +44,10 @@ revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状�
 [页面交付](ue.md#页面交付)。
 
 task_id 仅保存在开启 UI／Redis 交付的真实用户 input 上，其他 Actor 发言不需要关联它。
-不再保存页面关闭意图。普通输出的 meta.output.ended 记录是否说完这条消息，不表示业务完成。
-默认 Speak 原子保存完整正文及 ended=true；流式输出的 End 与 Revision 一起保存。
-受控 meta.output 同时保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
+不再保存页面关闭意图。Message.status 列记录 streaming/completed/failed/cancelled，
+只表示这条消息的发送状态，不表示业务完成。默认 Speak、用户输入和 Human 卡片直接 completed；
+流式输出从 streaming 开始，End 的终态与 Revision 一起保存。
+受控 meta.output 只保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
 ## Message 内容与 Parts
@@ -79,7 +80,7 @@ Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 bl
 允许独占一个更大的 Part，不截断正文，也不改变 AgentUE block 身份。上述大小是装箱预算，
 不是 MySQL JSON 列上限；meta、引用目录以及单个超大 block 仍需受部署的实际容量约束。
 
-流式投影先锁 Message，校验 revision、事件指纹和 ended；按 block ID 只加载目标 Part，
+流式投影先锁 Message，校验 revision、事件指纹和 status；按 block ID 只加载目标 Part，
 应用 AgentUE reducer 后写入变更 Part、引用、meta 和 revision。同一事件在同一事务中全部
 提交或回滚。metadata/End 不需要加载外置正文，幂等重试不再次 append。普通交付只读取消息
 状态，桥初始化或断档修复时才加载完整快照；DB 提交后继续按现有规则尝试 Redis 交付。

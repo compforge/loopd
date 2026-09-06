@@ -61,6 +61,7 @@ type MessageState struct {
 	ConversationID string
 	Purpose        string
 	Revision       uint64
+	Status         loopd.MessageStatus
 	Ended          bool
 }
 
@@ -69,8 +70,8 @@ func (store *Store) GetMessageState(ctx context.Context, id string) (MessageStat
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var m model.Message
-	err := store.db.WithContext(ctx).First(&m, "id = ?", id).Error
-	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Ended: (loopd.Message{Content: m.Content}).Ended()}, mapError(err)
+	err := store.db.WithContext(ctx).Select("id", "conversation_id", "purpose", "revision", "status").First(&m, "id = ?", id).Error
+	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Status: loopd.MessageStatus(m.Status), Ended: (loopd.Message{Status: loopd.MessageStatus(m.Status)}).Ended()}, mapError(err)
 }
 
 func (store *Store) ListMessages(ctx context.Context, conversationID, after string, limit int) ([]model.Message, error) {

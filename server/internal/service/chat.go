@@ -21,7 +21,7 @@ type ChatRepository interface {
 }
 
 type ChatDelivery interface {
-	EmitMessage(context.Context, string, json.RawMessage) (string, error)
+	EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error)
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
@@ -115,7 +115,7 @@ func mapDeliveryError(err error) error {
 	}
 }
 
-func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage) (string, error) {
-	id, err := service.delivery.EmitMessage(ctx, messageID, event)
+func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage, statuses ...loopd.MessageStatus) (string, error) {
+	id, err := service.delivery.EmitMessage(ctx, messageID, event, statuses...)
 	return id, mapDeliveryError(err)
 }

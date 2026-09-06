@@ -286,7 +286,13 @@ func (call *Call) follow(
 	}
 	result, waitErr := providerCall.Wait(ctx)
 	if output != nil && publishErr == nil && ctx.Err() == nil {
-		publishErr = output.End(ctx)
+		status := loopd.MessageStatusCompleted
+		if errors.Is(waitErr, context.Canceled) {
+			status = loopd.MessageStatusCancelled
+		} else if waitErr != nil {
+			status = loopd.MessageStatusFailed
+		}
+		publishErr = output.End(ctx, status)
 	}
 	err := errors.Join(publishErr, waitErr)
 	phase := loopd.CallSucceeded

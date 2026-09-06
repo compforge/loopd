@@ -181,9 +181,9 @@ func textContent(text string) json.RawMessage {
 	return value
 }
 
-func (nopChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
+func (nopChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error) {
 	return "", nil
 }
-func (runner *recordingChatRunner) EmitMessage(context.Context, string, json.RawMessage) (string, error) {
+func (runner *recordingChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error) {
 	return "", nil
 }

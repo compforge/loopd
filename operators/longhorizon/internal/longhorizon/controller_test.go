@@ -216,10 +216,11 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			if len(content) == 0 {
 				content = json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 			}
-			if !in.Stream {
-				content = endContent(content)
+			status := loopd.MessageStatusCompleted
+			if in.Stream {
+				status = loopd.MessageStatusStreaming
 			}
-			f.messages[id] = loopd.Message{ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Purpose: "output", Revision: 1, Content: content}
+			f.messages[id] = loopd.Message{Status: status, ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Purpose: "output", Revision: 1, Content: content}
 		}
 		write(f.messages[id])
 	case strings.HasPrefix(r.URL.Path, "/v1/messages/") && strings.HasSuffix(r.URL.Path, "/events"):
@@ -240,7 +241,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(503)
 				return
 			}
-			m.Content = endContent(m.Content)
+			m.Status = loopd.MessageStatusCompleted
 			m.Revision = in.Event.Seq
 			f.messages[id] = m
 			write(map[string]string{"id": "end"})
@@ -676,22 +677,6 @@ func TestRunDeadlineAndRetention(t *testing.T) {
 	if len(runs.Items) != 0 {
 		t.Fatal("cleanup replayed committed input")
 	}
-}
-
-func endContent(content json.RawMessage) json.RawMessage {
-	var value map[string]any
-	_ = json.Unmarshal(content, &value)
-	if value == nil {
-		value = map[string]any{"version": "1.0", "biz": "chat", "blocks": []any{}}
-	}
-	meta, _ := value["meta"].(map[string]any)
-	if meta == nil {
-		meta = map[string]any{}
-		value["meta"] = meta
-	}
-	meta["output"] = map[string]any{"ended": true}
-	result, _ := json.Marshal(value)
-	return result
 }
 
 // +case=`End failure leaves a durable report; restart retries End without rerunning the Harness.`

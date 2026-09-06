@@ -130,6 +130,19 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				continue
 			}
 			msg := visibleMessage(value.message)
+			patch, err := agentueui.Parse(value.delivery.Data)
+			if err != nil {
+				return err
+			}
+			if msg.ID != "" && patch.Op == agentueui.OpEnd {
+				// AgentUE End carries no business payload. Read the SQL terminal
+				// status rather than infer successful output from transport closure.
+				state, err := coordinator.repo.GetMessageState(ctx, msg.ID)
+				if err != nil {
+					return err
+				}
+				msg.Status = state.Status
+			}
 			event := Event{MessageID: msg.ID, Message: &msg, Data: value.delivery.Data}
 			if msg.ID == control.ID {
 				event.Message = nil
