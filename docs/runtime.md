@@ -146,8 +146,9 @@ Harness steer/followup，也不规定一条消息就是一个新任务。Read �
 Harness.Prompt 返回 Call handle。Operator 提供 prompt、tools、目标、输出 ConversationID 和
 稳定 IdempotencyKey；EffectKey 是业务步骤名。动作身份不能在每次 Reconcile 中随机变化。
 
-同一 runtime 内同身份同参数复用 Call，变化冲突。生产 Adapter 必须把相同身份映射到相同持久
-执行，并在重启后重新观察；agentd 可以承担持久执行，内置 agentgo 只是进程内 demo。
+同一 runtime 内同身份同参数复用 Call，变化冲突。跨进程恢复依赖所选 Adapter 与后端的明确契约，
+不能从统一 Prompt 接口推导出幂等执行保证。远端 Harness 拥有执行与恢复，agentd 是可选实现之一；
+内置 agentgo 只是进程内 demo。
 
 Prompt.Actor 可指定合法非 user 作者，默认仍为 Harness/Call ID；Prompt.Timeout 交给 Adapter
 落实期限。Actor、Timeout 和 ConversationID 等参数参与同一 runtime 的幂等冲突检查。
@@ -166,6 +167,36 @@ Call.Value 读取状态，Stream(ctx) 观察本地 AgentUE 增量（不需要页
 
 Wait 会占用 Reconcile 并发位。不等待时应安排 RequeueAfter 或自己的资源 Watch；Conv Watch
 不自动把 Harness 完成事件映射成调谐。Call 的本地事件缓冲不等于持久订阅。
+
+### Managed Agent Adapter
+
+`pkg/harness/managedagent` 使用官方 `anthropic-sdk-go` 的 Managed Agents API。
+API key、远端 Agent 与 Environment 由部署方提供；BaseURL 留空连接官方服务，也可指向 agentd
+等兼容后端。远端资源管理不进入 loopd 的公共协作模型。
+
+在 Operator 启动时组装并注入 Adapter，业务 Reconcile 继续使用 `Loop.Harness.Prompt`：
+
+```go
+adapter, err := managedagent.New(managedagent.Config{
+    APIKey: apiKey, AgentID: agentID, EnvironmentID: environmentID,
+    BaseURL: baseURL, // 可选的兼容 API 地址
+})
+if err != nil { return err }
+rt, err := loopruntime.New(serverURL, loopruntime.Options{
+    Harnesses: map[string]harness.Adapter{"managed": adapter},
+})
+```
+
+每次 Adapter.Prompt 创建独立 Session，并以 initial user.message 提交 prompt，随后返回 Call。
+历史补读与实时事件共同转换为 AgentUE 输出；`PreviewDeltas` 可请求 token 预览，默认只读取
+持久事件。`end_turn` 表示本次成功结束；需要外部工具结果、确认或其他停止原因不冒充成功。
+Session 沿用远端 Agent 的工具配置；按请求选择工具时用 `ConfigureSession` 将通用工具描述解析为
+SDK Session 参数。未配置解析器的非空 tools 会明确报错，不会静默忽略；客户端 custom tool 执行
+与续接不在此 Adapter 的当前能力内。
+
+本实现不做跨进程重新绑定、断流重连或提交重试，不假定兼容后端支持 `Idempotency-Key`。
+断流返回观察错误，不据此认定远端已经停止；超时或父 context 取消只停止本地观察，不发送
+interrupt 或删除远端 Session。可靠性扩展由 Adapter 与执行后端共同提供，不新增 loopd 执行表或 CRD。
 
 ## Human：Ask 与 Confirm
 
