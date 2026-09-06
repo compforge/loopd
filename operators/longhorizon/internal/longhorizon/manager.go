@@ -395,6 +395,8 @@ func (c *Controller) human(ctx context.Context, run *lh.Run) (ctrl.Result, error
 
 // receive is the safe boundary between rounds. Input arriving while a Harness
 // is running remains pending until the current execution and audit finish.
+// Same-user input in this User conv is treated as continuation, even if its
+// topic changes; this Operator does not infer a new task from message content.
 func (c *Controller) receive(ctx context.Context, run *lh.Run) (ctrl.Result, error) {
 	before := run.DeepCopy()
 	if len(run.Status.InputMessageIDs) < 100 {

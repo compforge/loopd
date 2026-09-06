@@ -28,6 +28,14 @@ Auditor 只有 Read/Ls/Glob/Grep，核对真实工件、原始目标、人工补
 
 ## 消费检查点和补充消息
 
+LongHorizon Operator 当前暂不自动识别“新任务”还是“老任务继续”。同一 User conv 发给
+LongHorizon 的后续输入，在当前 Run 未收尾时视为补充，由 Manager 在业务安全边界接收；
+不会因为消息换了主题就另建 Run。用户希望独立开展工作时，可以新建 User conv。
+
+Run 已成功、停止或失败，并且最终总结持久化、记录 FinishedAt 后，下一条未消费输入可以创建
+新 Run。新 Run 复用 Operator conv 并读取稳定会话历史，但拥有独立的领域状态、期限和工作目录。
+这由 Run 生命周期决定，不是对消息语义的新旧任务分类；已有 Run 的 TTL 回收不阻塞新 Run。
+
 Run 名称取首条输入 Message ID，归属 Conv UID。初始化 status 保存已接受输入引用及 InputThrough，
 下一次 Reconcile 才 Commit；失败时先重试 Commit，再进行任何新步骤。Commit 表示已保存可恢复
 检查点，不表示目标完成。Run 活跃期间不因为 Committed 前进而创建第二个 Run。
@@ -47,11 +55,18 @@ Run 名称取首条输入 Message ID，归属 Conv UID。初始化 status 保存
 右侧按完整 kind/key 区分列，标题显示轮次；主会话的角色消息也定位到这个共享 Workspace。
 消息时间区间可以并行，因果引用依赖 reply_to_id 或 CRD 内精确引用。
 
-步骤身份为 `<runUID>/round/<n>/<role>`，Call 和 report 使用不同后缀。Harness.Prompt 的 Actor
-控制可见过程作者，Timeout 交给 Adapter。角色报告通过 Speak(Stream=true) 建立消息句柄，
-完整 report block 经 handle.Emit 持久化，再 End 后才更新 CRD status。重试 Speak 返回既有快照；
-报告已存在但 End 未确认时，只重试 End，不重新启动 Harness。已结束报告可直接补写 status。
-序号分配、瞬时重试及未确认更新的顺序由句柄负责。主会话最终总结用默认 Speak 一次说完。
+每轮每个角色只发布一条 Message。步骤身份为 `<runUID>/round/<n>/<role>`，展示名称只含轮次和
+角色。Speak(Stream=true) 建立角色消息，Harness.Prompt 通过 Output 绑定同一句柄，流式文字和
+工具调用直接进入这条消息，不另外复制出一张报告卡片；Timeout 仍交给 Adapter。
+
+Call 进入终态后，Operator 用权威结果替换已有的最后一个 text block（没有文字时才新建），
+保留工具等其他 block。最终结果与 `longhorizon_report` 标记在一个 Emit 中持久化；该标记是
+LongHorizon 的业务报告边界，不是 Harness 执行检查点，也不能用“已收到一些 token”代替。
+之后 End 消息，再更新 CRD status；执行失败的报告以 failed 结束。
+
+重试 Speak 返回既有快照。报告已存在但 End 未确认时，只重试 End，不重新启动 Harness；
+已结束报告可直接补写 status。序号分配、瞬时重试及未确认更新的顺序由句柄负责。
+主会话最终总结是另一条面向用户的真实发言，用默认 Speak 一次说完。
 
 
 Manager 消费报告后先持久化推进状态，再删除已消费轮次的 Execution/Audit。长期事实留在 Message，
@@ -84,7 +99,8 @@ go test -race ./operators/longhorizon/... ./runtime/... ./pkg/harness/agentgo/..
 cd web && npm run check
 ```
 
-控制器测试覆盖三角色纠偏、过期审计拒绝 done、报告持久失败和重启补写、补充输入检查点与 Commit
+控制器测试覆盖每次角色调用只发布一条消息、流式输出和工具保留、过期审计拒绝 done、三角色纠偏、
+报告持久失败和重启补写、补充输入检查点与 Commit
 失败、页面流独立、Human 正常兜底、Conv 删除或替换、Run 期限和回收以及有界轮次。测试用 fake
 Kubernetes 和公共 HTTP fixture；API 测试另外验证自定义角色发问、定向回复及独立 Poll/Commit。
 生成 CRD 以 Kubernetes 自身校验器检查 Schema/CEL 成本。上述检查不替代真实集群 Watch、RBAC、GC

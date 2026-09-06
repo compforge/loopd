@@ -164,6 +164,9 @@ func terminal(phase string) bool {
 }
 
 // Ingress owns initial intake. While a Run is active its Manager owns further Polls.
+//
+// +spec=`同一 User conv 的输入在 Run 未收尾时归当前 Run；最终总结持久化并记录 FinishedAt 后，未消费输入才可创建新 Run。`
+// +why=`LongHorizon 当前暂不自动识别新任务还是老任务继续；以业务生命周期划分 Run，而不是按消息主题或页面流划分。`
 func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var conv convapi.Conversation
 	if err := c.Reader.Get(ctx, req.NamespacedName, &conv); err != nil {
@@ -275,7 +278,7 @@ func messageText(m contract.Message) string {
 func reportFrom(m contract.Message) (report, error) {
 	var model struct {
 		Blocks []struct {
-			ID      string `json:"id"`
+			Report  bool   `json:"longhorizon_report"`
 			Content string `json:"content"`
 			Error   string `json:"error"`
 		} `json:"blocks"`
@@ -284,7 +287,7 @@ func reportFrom(m contract.Message) (report, error) {
 		return report{}, err
 	}
 	for _, b := range model.Blocks {
-		if b.ID == "report" {
+		if b.Report {
 			return report{Text: b.Content, Error: b.Error}, nil
 		}
 	}
@@ -301,7 +304,7 @@ func (c *Controller) readReport(ctx context.Context, conversationID, id string) 
 	return reportFrom(m)
 }
 func reportContent(value report, title, role string) json.RawMessage {
-	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": title, "actor_display_name": role}, "blocks": []any{map[string]any{"id": "report", "type": "text", "content": value.Text, "error": value.Error}}})
+	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": title, "actor_display_name": role}, "blocks": []any{map[string]any{"id": "report", "type": "text", "content": value.Text, "error": value.Error, "longhorizon_report": true}}})
 	return content
 }
 
@@ -316,14 +319,14 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	role := strings.TrimPrefix(string(kind), "operator/longhorizon/")
 	key := stepKey(run, round, role)
 	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}, "blocks": []any{}})
-	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, contract.SpeakRequest{Stream: true, Key: key + "/report", Actor: author, Target: recipient(run), Content: content})
+	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, contract.SpeakRequest{Stream: true, Key: key, Actor: author, Target: recipient(run), Content: content})
 	if err != nil {
 		return report{}, "", "", false, err
 	}
 	if value, err := reportFrom(m.Value()); err == nil {
-		return value, m.ID(), "", true, m.End(ctx)
+		return value, m.ID(), "", true, m.End(ctx, reportStatus(value))
 	}
-	call, err := c.Loop.Harness.Prompt(ctx, loopruntime.Prompt{ConversationID: run.Spec.WorkspaceID, IdempotencyKey: key + "/call", EffectKey: key + "/call", Actor: &author, Target: target, Text: prompt, Timeout: timeout})
+	call, err := c.Loop.Harness.Prompt(ctx, loopruntime.Prompt{ConversationID: run.Spec.WorkspaceID, IdempotencyKey: key, EffectKey: fmt.Sprintf("round/%d/%s", round, role), Actor: &author, Target: target, Text: prompt, Timeout: timeout, Output: m})
 	if err != nil {
 		return report{}, "", "", false, err
 	}
@@ -331,16 +334,50 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	if !value.Phase.Terminal() {
 		return report{}, m.ID(), value.ID, false, nil
 	}
-	// The handle owns ordered retries and persists the report before End.
-	err = m.Emit(ctx, agentue.Event{Op: agentue.OpSet, Block: map[string]any{"id": "report", "type": "text", "content": value.Result, "error": value.Error}})
+	// The Harness has stopped writing. Seal the result in its existing answer
+	// block, preserving tool blocks and avoiding a second copy of the answer.
+	result := report{Text: value.Result, Error: value.Error}
+	block, err := reportBlock(m.Value(), result)
 	if err != nil {
 		return report{}, m.ID(), value.ID, false, err
 	}
-	if err := m.End(ctx); err != nil {
+	err = m.Emit(ctx, agentue.Event{Op: agentue.OpSet, Block: block})
+	if err != nil {
 		return report{}, m.ID(), value.ID, false, err
 	}
-	result, err := reportFrom(m.Value())
-	return result, m.ID(), value.ID, true, err
+	if err := m.End(ctx, reportStatus(result)); err != nil {
+		return report{}, m.ID(), value.ID, false, err
+	}
+	return result, m.ID(), value.ID, true, nil
+}
+
+// reportBlock marks only the authoritative final result, never a partial token
+// stream. The marker and result are one event so a restart can retry End without
+// dispatching another Harness. Other blocks (including tools) stay untouched.
+func reportBlock(message contract.Message, result report) (map[string]any, error) {
+	var content struct {
+		Blocks []map[string]any `json:"blocks"`
+	}
+	if err := json.Unmarshal(message.Content, &content); err != nil {
+		return nil, fmt.Errorf("decode role output %s: %w", message.ID, err)
+	}
+	block := map[string]any{"id": "report", "type": "text"}
+	for _, candidate := range content.Blocks {
+		if candidate["type"] == "text" {
+			block = candidate
+		}
+	}
+	block["content"] = result.Text
+	block["error"] = result.Error
+	block["longhorizon_report"] = true
+	return block, nil
+}
+
+func reportStatus(result report) contract.MessageStatus {
+	if result.Error != "" {
+		return contract.MessageStatusFailed
+	}
+	return contract.MessageStatusCompleted
 }
 
 func decode[T any](text string, value *T) error {

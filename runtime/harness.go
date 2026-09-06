@@ -43,6 +43,10 @@ type Prompt struct {
 	Tools          []contract.Tool
 	Actor          *contract.ActorRef
 	Timeout        time.Duration
+	// Output binds visible events to an existing streaming Speak handle instead
+	// of creating another message. While the Call runs, Harness owns its writes;
+	// after the Call is terminal, the caller finalizes and Ends the message.
+	Output *Message `json:"-"`
 }
 
 type HarnessRegistration struct {
@@ -94,6 +98,15 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 		author := *prompt.Actor
 		prompt.Actor = &author
 	}
+	if prompt.Output != nil {
+		output := prompt.Output.Value()
+		if output.ID == "" || output.ConversationID != prompt.ConversationID {
+			return nil, errors.New("Harness output must belong to the prompt conversation")
+		}
+		if prompt.Actor != nil && (output.Kind != prompt.Actor.Kind || output.Key != prompt.Actor.Key) {
+			return nil, errors.New("Harness output author differs from prompt actor")
+		}
+	}
 	adapter := service.state.adapters[prompt.Target]
 	if adapter == nil {
 		return nil, fmt.Errorf("harness target %q is not configured", prompt.Target)
@@ -111,6 +124,10 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 			return nil, fmt.Errorf("%w: conversation %q effect %q", ErrCallConflict, prompt.ConversationID, prompt.EffectKey)
 		}
 		return existing, nil
+	}
+	if prompt.Output != nil && prompt.Output.Value().Status != contract.MessageStatusStreaming {
+		service.state.mu.Unlock()
+		return nil, errors.New("Harness output must be streaming before starting a Call")
 	}
 	callID := uuid.V7()
 	request := provider.Request{
@@ -152,7 +169,16 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 }
 
 func promptFingerprint(prompt Prompt) ([32]byte, error) {
-	encoded, err := json.Marshal(prompt)
+	outputID := ""
+	if prompt.Output != nil {
+		outputID = prompt.Output.ID()
+	}
+	// A handle's revision/content changes while streaming, but its binding is
+	// immutable for this Call. Never fingerprint the mutable handle itself.
+	encoded, err := json.Marshal(struct {
+		Prompt
+		OutputID string
+	}{Prompt: prompt, OutputID: outputID})
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("encode Harness prompt: %w", err)
 	}
@@ -234,7 +260,7 @@ func (call *Call) follow(
 	logger *slog.Logger,
 ) {
 	var publishErr error
-	var output *Message
+	output := prompt.Output
 	for event := range providerCall.Events() {
 		if publishErr != nil {
 			continue
@@ -285,7 +311,7 @@ func (call *Call) follow(
 		call.appendEvent(value)
 	}
 	result, waitErr := providerCall.Wait(ctx)
-	if output != nil && publishErr == nil && ctx.Err() == nil {
+	if output != nil && prompt.Output == nil && publishErr == nil && ctx.Err() == nil {
 		status := contract.MessageStatusCompleted
 		if errors.Is(waitErr, context.Canceled) {
 			status = contract.MessageStatusCancelled
