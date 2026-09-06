@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { parseUIModel, type UIModel } from "@compforge/agentue/ui";
+import { parseMessageContent, type MessageContent } from "./content";
 import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
 import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
@@ -98,8 +98,8 @@ export function DetailPanel({ message, liveMessages, running }: {
 
 export function DetailMessage({ message, index }: { message: Message; index: number }) {
   const style = message.kind !== "user" ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
-  let model: UIModel | undefined;
-  try { model = parseUIModel(message.content); } catch { /* Invalid persisted model is shown below. */ }
+  let model: MessageContent | undefined;
+  try { model = parseMessageContent(message.content); } catch { /* Invalid persisted model is shown below. */ }
   const actorName = typeof model?.meta.actor_display_name === "string" ? model.meta.actor_display_name : message.kind.split("/").at(-1)!;
   const explicitTitle = model?.meta.title;
   const title = typeof explicitTitle === "string" && explicitTitle ? explicitTitle

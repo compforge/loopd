@@ -134,7 +134,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		lines = append(lines, "Confirm：未发起，因为 Ask 未得到选择。")
 	}
 	content, err := json.Marshal(map[string]any{
-		"version": "1.0", "biz": "chat", "meta": map[string]any{},
+		"version": "1.1", "biz": "chat", "meta": map[string]any{},
 		"blocks": []map[string]any{{"id": "answer", "type": "text", "content": strings.Join(lines, "\n\n")}},
 	})
 	if err != nil {

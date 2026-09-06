@@ -68,6 +68,16 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 		t.Fatalf("changed recipient=%d", changed.StatusCode())
 	}
 	speechPath := "/v1/messages/" + spoken.ID + "/events"
+	// +case=`引用是 repo 内部格式；API 拒绝外部引用并保留原消息。`
+	forged := performJSON(t, engine, "POST", speechPath, `{"event":{"op":"set","seq":2,"block":{"id":"text","ref":"foreign-part"}}}`)
+	if forged.StatusCode() != 400 {
+		t.Fatalf("reference event=%d %s", forged.StatusCode(), forged.Body())
+	}
+	forged = performJSON(t, engine, "POST", "/v1/conversations/root/speak", `{"key":"forged","actor":{"kind":"operator","key":"router"},"content":{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","ref":"foreign-part"}]}}`)
+	if forged.StatusCode() != 400 {
+		t.Fatalf("reference snapshot=%d %s", forged.StatusCode(), forged.Body())
+	}
+
 	for i := 0; i < 2; i++ {
 		result := performJSON(t, engine, "POST", speechPath, event)
 		if result.StatusCode() != 202 {

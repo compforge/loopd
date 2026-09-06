@@ -3,22 +3,26 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type config struct {
-	address           string
-	databaseDriver    string
-	databaseDSN       string
-	redisAddress      string
-	redisUsername     string
-	redisPassword     string
-	taskNamespace     string
-	taskClientTimeout time.Duration
-	readTimeout       time.Duration
-	idleTimeout       time.Duration
-	shutdownTimeout   time.Duration
+	messageInlineBlocks int
+	messageInlineBytes  int
+	messagePartBytes    int
+	address             string
+	databaseDriver      string
+	databaseDSN         string
+	redisAddress        string
+	redisUsername       string
+	redisPassword       string
+	taskNamespace       string
+	taskClientTimeout   time.Duration
+	readTimeout         time.Duration
+	idleTimeout         time.Duration
+	shutdownTimeout     time.Duration
 }
 
 func loadConfig() (config, error) {
@@ -78,6 +82,22 @@ func loadConfig() (config, error) {
 			return config{}, err
 		}
 		*item.value = parsed
+	}
+	for _, item := range []struct {
+		name   string
+		target *int
+	}{
+		{"MESSAGE_INLINE_BLOCKS", &value.messageInlineBlocks},
+		{"MESSAGE_INLINE_BYTES", &value.messageInlineBytes},
+		{"MESSAGE_PART_BYTES", &value.messagePartBytes},
+	} {
+		if raw := os.Getenv(item.name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n <= 0 {
+				return config{}, fmt.Errorf("%s must be a positive integer", item.name)
+			}
+			*item.target = n
+		}
 	}
 	return value, nil
 }

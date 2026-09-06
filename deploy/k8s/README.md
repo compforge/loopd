@@ -51,3 +51,11 @@ kubectl -n loopd port-forward service/loopd-loopd-web 8080:80
 可选的 [LongHorizon Operator](../../operators/longhorizon/README.md) 通过 `longhorizon.enabled=true`
 启用。其 Role 只读 Conv，独立管理 Run/Execution/Audit；`longhorizon.runTimeout` 和 `retentionTTL`
 分别控制业务期限和终态资源保留时间，均默认 24h，不影响 server 的 Conv 或页面交付生命周期。
+
+### Message 内容存储
+
+loop-server 支持 `MESSAGE_INLINE_BLOCKS`（默认 32）、`MESSAGE_INLINE_BYTES`（默认 65536）
+和 `MESSAGE_PART_BYTES`（默认 262144）三个正整数环境变量。超过内联预算的 block 保存到
+数据库 `message_parts`，读取时由 server 展开，页面与 Operator 接收完整正文。
+Part 大小为目标值，单个更大的 block 独占一个 Part。详见
+[持久化约定](../../server/docs/persistence.md#message-内容与-parts)。

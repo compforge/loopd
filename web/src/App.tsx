@@ -1,8 +1,7 @@
+import { parseMessageContent, type MessageContent } from "./content";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  parseUIModel,
   PatchOp,
-  type UIModel,
 } from "@compforge/agentue/ui";
 import {
   createConversation,
@@ -430,15 +429,15 @@ function Typing() {
   return <span className="typing"><i /><i /><i /></span>;
 }
 
-function safeModel(value: unknown): UIModel | undefined {
+function safeModel(value: unknown): MessageContent | undefined {
   try {
-    return parseUIModel(value);
+    return parseMessageContent(value);
   } catch {
     return undefined;
   }
 }
 
-function messageText(model: UIModel | undefined): string {
+function messageText(model: MessageContent | undefined): string {
   if (!model) return "";
   const answer = model.blocks.find((block) => block.id === "answer" && block.type === "text");
   if (answer && typeof answer.content === "string") return answer.content;
@@ -448,9 +447,9 @@ function messageText(model: UIModel | undefined): string {
     .join("\n");
 }
 
-function textModel(text: string): UIModel {
+function textModel(text: string): MessageContent {
   return {
-    version: "1.0", biz: "chat", meta: {},
+    version: "1.1", biz: "chat", meta: {},
     blocks: [{ id: "question", type: "text", role: "user", content: text }],
   };
 }

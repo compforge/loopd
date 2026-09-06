@@ -263,7 +263,7 @@ func (call *Call) follow(
 		if output == nil {
 			var message *Message
 			var err error
-			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
+			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
 			author := loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: call.value.ID}
 			if prompt.Actor != nil {
 				author = *prompt.Actor

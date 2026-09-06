@@ -22,7 +22,7 @@ func TestOpenCreatesChatAndActorTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Strings(tables)
-	if want := []string{"conversations", "harnesses", "messages", "operators"}; !reflect.DeepEqual(tables, want) {
+	if want := []string{"conversations", "harnesses", "message_parts", "messages", "operators"}; !reflect.DeepEqual(tables, want) {
 		t.Fatalf("tables = %v, want %v", tables, want)
 	}
 	for _, table := range tables {

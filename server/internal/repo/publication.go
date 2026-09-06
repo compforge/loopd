@@ -24,12 +24,12 @@ func (store *Store) Speak(ctx context.Context, convID string, request loopd.Spea
 			return mapError(err)
 		}
 		key := fmt.Sprintf("publish/%x", sha256.Sum256([]byte(convID+"\x00"+string(request.Actor.Kind)+"\x00"+request.Actor.Key+"\x00"+request.Key)))
-		e := tx.Where("conversation_id = ? AND output_key = ?", convID, key).First(&result).Error
+		e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id = ? AND output_key = ?", convID, key).First(&result).Error
 		if e == nil {
 			if result.TargetKind != string(request.Target.Kind) || result.TargetKey != request.Target.Key || result.ReplyToID != request.ReplyToID {
 				return ErrConflict
 			}
-			return nil
+			return hydrateMessage(tx.Clauses(clause.Locking{Strength: "UPDATE"}), &result)
 		}
 		if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
@@ -58,7 +58,7 @@ func (store *Store) Speak(ctx context.Context, convID string, request loopd.Spea
 			Kind: string(request.Actor.Kind), ActorKey: request.Actor.Key, TargetKind: string(request.Target.Kind), TargetKey: request.Target.Key,
 			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: content,
 			DispatchPending: !request.Stream && request.Target.Kind != loopd.ActorKindUser}
-		return mapError(tx.Create(&result).Error)
+		return mapError(store.saveMessage(tx, &result, true))
 	})
 	return
 }

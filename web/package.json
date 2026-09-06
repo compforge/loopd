@@ -11,7 +11,7 @@
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@compforge/agentue": "0.0.1",
+    "@compforge/agentue": "github:compforge/agentue#b2ac41b1ebfba4f04861af2e166fb7d28dffed53",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

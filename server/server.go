@@ -31,13 +31,16 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	Driver           string
-	DSN              string
-	OperationTimeout time.Duration
-	MaxOpenConns     int
-	MaxIdleConns     int
-	ConnMaxLifetime  time.Duration
-	ConnMaxIdleTime  time.Duration
+	MessageInlineBlocks int
+	MessageInlineBytes  int
+	MessagePartBytes    int
+	Driver              string
+	DSN                 string
+	OperationTimeout    time.Duration
+	MaxOpenConns        int
+	MaxIdleConns        int
+	ConnMaxLifetime     time.Duration
+	ConnMaxIdleTime     time.Duration
 }
 
 type Server struct {
@@ -54,7 +57,10 @@ func New(config Config) (*Server, error) {
 		return nil, errors.New("conversation coordinator is required")
 	}
 	store, err := repo.Open(repo.Config{
-		Driver: config.Database.Driver, DSN: config.Database.DSN,
+		MessageInlineBlocks: config.Database.MessageInlineBlocks,
+		MessageInlineBytes:  config.Database.MessageInlineBytes,
+		MessagePartBytes:    config.Database.MessagePartBytes,
+		Driver:              config.Database.Driver, DSN: config.Database.DSN,
 		OperationTimeout: config.Database.OperationTimeout,
 		MaxOpenConns:     config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
 		ConnMaxLifetime: config.Database.ConnMaxLifetime, ConnMaxIdleTime: config.Database.ConnMaxIdleTime,

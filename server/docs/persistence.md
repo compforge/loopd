@@ -49,6 +49,62 @@ task_id 仅保存在开启 UI／Redis 交付的真实用户 input 上，其他 A
 受控 meta.output 同时保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
+## Message 内容与 Parts
+
+AgentUE 1.1 的 `blocks` 可以混合内联 `{id, type, ...}` 与引用 `{id, ref}`。
+loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.id`，
+解析必须同时匹配所属 `message_id` 和 block ID。引用只有 `id/ref`；type、正文、层级等字段
+只保存在完整 block 中。数组位置决定显示顺序，Part 的创建或更新时间不决定顺序。
+
+`message_parts` 是 Message 的物理存储，不是另一类协作事实，也不进入 CRD：
+
+| 字段 | 含义 |
+| --- | --- |
+| id | UUIDv7 主键，作为不透明引用 key |
+| message_id | 所属 Message，建立索引 |
+| content | `{"blocks": [...]}`，包含一批完整 block，不允许嵌套引用 |
+| size_bytes | content 序列化后的字节数 |
+
+新消息先内联。达到 block 数量或正文总字节预算后，后续 block 使用引用；已有内联 block
+因 append 增长超限也可外置。已经外置的 block 不自动搬回。部署可通过以下正整数参数调整：
+
+| 环境变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| MESSAGE_INLINE_BLOCKS | 32 | 内联前缀的最大 block 数量 |
+| MESSAGE_INLINE_BYTES | 65536 | 内联 block JSON 的累计字节预算 |
+| MESSAGE_PART_BYTES | 262144 | 一个 Part 的目标字节数 |
+
+Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 block 增长导致所在 Part
+超过目标大小时，把该 block 移到独立 Part，并原子更新引用。单个 block 自身超过目标大小时
+允许独占一个更大的 Part，不截断正文，也不改变 AgentUE block 身份。上述大小是装箱预算，
+不是 MySQL JSON 列上限；meta、引用目录以及单个超大 block 仍需受部署的实际容量约束。
+
+流式投影先锁 Message，校验 revision、事件指纹和 ended；按 block ID 只加载目标 Part，
+应用 AgentUE reducer 后写入变更 Part、引用、meta 和 revision。同一事件在同一事务中全部
+提交或回滚。metadata/End 不需要加载外置正文，幂等重试不再次 append。普通交付只读取消息
+状态，桥初始化或断档修复时才加载完整快照；DB 提交后继续按现有规则尝试 Redis 交付。
+
+存储引用不接受客户端或 Harness 自行构造。写入入口接受完整 AgentUE 内容，server 决定
+存储位置。Speak 重试、历史、Poll、Human 与页面快照均在 server 展开引用后返回完整内容；
+读取 Message 与 Parts 使用同一个数据库快照，列表批量加载 Parts。缺失 Part、错误归属、
+错误 block ID 或嵌套引用作为存储错误返回，不能显示为空正文。
+
+已有 1.0 内联数据直接读取，不需要全库回填；后续写入触发外置时升级为 1.1。
+新建的 server/runtime 快照默认使用 1.1。schema 升级只新增 Part 表；旧版 server 不理解
+引用，因此出现外置数据后，回退应用版本前必须先展开这些数据。
+
+整条内容替换时删除不再引用的 Part，并清理保留 Part 中已经移除的 block；
+`DeleteMessage` 在同一事务内删除 Message 与全部 Parts。未来会话清理应调用同样的删除路径，
+不能只删除父行而留下 Parts。领域 CRD 的清理仍不决定聊天历史保留时间。
+
+当前 HTTP/SSE 与 Runtime 继续接收完整模型。分片减少正文更新量，但不等于前端懒加载，
+也不限制完整历史响应的大小；AgentUE 引用解析属于持久化层，本次不引入页面 Part API。
+
+存储边界止于 repo：service、runtime 与页面始终读写完整 Message，不解释 ref 或分配 Part。
+交付层可用 `GetMessageState` 仅查询寻址、revision 与完成状态；该返回类型不含 content。
+需要恢复流快照时通过 `GetMessage` 获取完整内容。输入内容错误由 repo 返回通用内容错误，
+HTTP 层映射为 400；持久数据缺失或损坏仍按存储故障处理。
+
 ## Human 状态
 
 问题与答复继续以 Message 为唯一事实来源，不新增 Interaction 表或 CRD。

@@ -7,6 +7,7 @@ import (
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MessageRepository interface {
@@ -21,80 +22,96 @@ type MessageRepository interface {
 func (store *Store) CreateMessage(ctx context.Context, message model.Message) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-
-	var conversation model.Conversation
-	if err := store.db.WithContext(ctx).First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
-		return model.Message{}, mapError(err)
-	}
-	if err := mapError(store.db.WithContext(ctx).Create(&message).Error); err != nil {
-		return model.Message{}, err
-	}
-	return message, nil
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conversation model.Conversation
+		if err := tx.First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
+			return err
+		}
+		return store.saveMessage(tx, &message, true)
+	})
+	return message, mapError(err)
 }
 
 func (store *Store) ListRootMessagesByTask(ctx context.Context, taskID string) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-
-	var messages []model.Message
-	if err := store.db.WithContext(ctx).
-		Joins("JOIN conversations ON conversations.id = messages.conversation_id").
-		Where("messages.task_id = ? AND conversations.parent_id IS NULL", taskID).
-		Order("messages.id ASC").
-		Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	return messages, nil
+	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Joins("JOIN conversations ON conversations.id = messages.conversation_id").Where("messages.task_id = ? AND conversations.parent_id IS NULL", taskID).Order("messages.id ASC")
+	})
 }
 
 func (store *Store) GetMessage(ctx context.Context, id string) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	var message model.Message
-	if err := store.db.WithContext(ctx).First(&message, "id = ?", id).Error; err != nil {
-		return model.Message{}, mapError(err)
+	rows, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB { return tx.Where("id = ?", id).Limit(1) })
+	if err != nil {
+		return model.Message{}, err
 	}
-	return message, nil
+	if len(rows) == 0 {
+		return model.Message{}, ErrNotFound
+	}
+	return rows[0], nil
+}
+
+// MessageState contains routing and progress without a content snapshot.
+type MessageState struct {
+	ID             string
+	ConversationID string
+	Purpose        string
+	Revision       uint64
+	Ended          bool
+}
+
+// GetMessageState reads progress without loading message bodies.
+func (store *Store) GetMessageState(ctx context.Context, id string) (MessageState, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	var m model.Message
+	err := store.db.WithContext(ctx).First(&m, "id = ?", id).Error
+	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Ended: (loopd.Message{Content: m.Content}).Ended()}, mapError(err)
 }
 
 func (store *Store) ListMessages(ctx context.Context, conversationID, after string, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-
-	query := store.db.WithContext(ctx).Where("conversation_id = ?", conversationID)
-	if after != "" {
-		query = query.Where("id > ?", after)
-	}
-	var messages []model.Message
-	if err := query.Order("id ASC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	return messages, nil
+	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		q := tx.Where("conversation_id = ?", conversationID)
+		if after != "" {
+			q = q.Where("id > ?", after)
+		}
+		return q.Order("id ASC").Limit(limit)
+	})
 }
 
-func (store *Store) UpdateMessageContent(
-	ctx context.Context,
-	conversationID string,
-	id string,
-	content []byte,
-) (model.Message, error) {
+func (store *Store) UpdateMessageContent(ctx context.Context, conversationID, id string, content []byte) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
+	var m model.Message
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "conversation_id = ? AND id = ?", conversationID, id).Error; err != nil {
+			return err
+		}
+		m.Content = content
+		m.Revision++
+		return store.saveMessage(tx, &m, false)
+	})
+	return m, mapError(err)
+}
 
-	result := store.db.WithContext(ctx).Model(&model.Message{}).
-		Where("conversation_id = ? AND id = ?", conversationID, id).
-		Update("content", content)
-	if result.Error != nil {
-		return model.Message{}, mapError(result.Error)
-	}
-	// Repeated completion may write an identical snapshot. MySQL can report
-	// zero changed rows for an existing Message; the lookup decides existence.
-	var message model.Message
-	if err := store.db.WithContext(ctx).
-		First(&message, "conversation_id = ? AND id = ?", conversationID, id).Error; err != nil {
-		return model.Message{}, mapError(err)
-	}
-	return message, nil
+// DeleteMessage removes the message and every physical part in one transaction.
+func (store *Store) DeleteMessage(ctx context.Context, id string) error {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	return mapError(store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var m model.Message
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("message_id = ?", id).Delete(&model.MessagePart{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&m).Error
+	}))
 }
 
 // ObserveMessageActivity only widens the interval. Conditional updates remain
@@ -117,27 +134,21 @@ func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (m
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conversation model.Conversation
 		if err := tx.First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
-			return mapError(err)
+			return err
 		}
 		if conversation.ParentID != nil || conversation.ActorKind != "user" {
 			return ErrConflict
 		}
-		if err := tx.Create(&input).Error; err != nil {
-			return mapError(err)
-		}
-		return nil
+		return store.saveMessage(tx, &input, true)
 	})
-	return input, err
+	return input, mapError(err)
 }
 
 // ListDeliveryMessages observes a user conversation and its direct actor workspaces.
-// TaskID identifies the page connection, not the set of messages actors may publish.
 func (store *Store) ListDeliveryMessages(ctx context.Context, conversationID string) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	var messages []model.Message
-	err := store.db.WithContext(ctx).Joins("JOIN conversations ON conversations.id = messages.conversation_id").
-		Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID).
-		Order("messages.id ASC").Find(&messages).Error
-	return messages, mapError(err)
+	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Joins("JOIN conversations ON conversations.id = messages.conversation_id").Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID).Order("messages.id ASC")
+	})
 }

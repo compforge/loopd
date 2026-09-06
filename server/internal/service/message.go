@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	ui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -34,7 +35,7 @@ func (service *MessageService) Speak(ctx context.Context, convID string, request
 		return loopd.Message{}, ErrInvalid
 	}
 	if len(request.Content) == 0 {
-		request.Content = []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
+		request.Content = []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)
 	}
 	if validateContent(request.Content) != nil {
 		return loopd.Message{}, ErrInvalid
@@ -117,47 +118,26 @@ func pageSize(limit int) int {
 }
 
 func validateContent(content json.RawMessage) error {
-	var model struct {
-		Version string            `json:"version"`
-		Biz     string            `json:"biz"`
-		Meta    json.RawMessage   `json:"meta"`
-		Blocks  []json.RawMessage `json:"blocks"`
-	}
-	if err := json.Unmarshal(content, &model); err != nil {
+	var snapshot map[string]any
+	if err := json.Unmarshal(content, &snapshot); err != nil {
 		return err
 	}
-	if model.Version == "" || model.Biz == "" || len(model.Meta) == 0 || model.Blocks == nil {
-		return ErrInvalid
-	}
-	var meta map[string]json.RawMessage
-	if err := json.Unmarshal(model.Meta, &meta); err != nil {
+	if err := ui.ValidateModel(snapshot); err != nil {
 		return err
 	}
+	meta := snapshot["meta"].(map[string]any)
 	if _, reserved := meta["output"]; reserved {
 		return ErrInvalid
 	}
 	if _, reserved := meta["human"]; reserved {
 		return ErrInvalid
 	}
-	blockIDs := make(map[string]struct{}, len(model.Blocks))
-	for _, rawBlock := range model.Blocks {
-		var block struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(rawBlock, &block); err != nil {
-			return err
-		}
-		if block.Type == "ask" || block.Type == "confirm" || block.Type == "human_reply" {
+	for _, value := range snapshot["blocks"].([]any) {
+		block := value.(map[string]any)
+		switch block["type"] {
+		case "ask", "confirm", "human_reply":
 			return ErrInvalid
 		}
-		if block.ID == "" || block.Type == "" {
-			return ErrInvalid
-		}
-		if _, exists := blockIDs[block.ID]; exists {
-			return ErrInvalid
-		}
-		blockIDs[block.ID] = struct{}{}
 	}
 	return nil
 }

@@ -36,6 +36,9 @@ func (s *Store) withHumanMessage(ctx context.Context, id string, fn func(*gorm.D
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&message, "id = ?", id).Error; err != nil {
 			return err
 		}
+		if err := hydrateMessage(tx.Clauses(clause.Locking{Strength: "UPDATE"}), &message); err != nil {
+			return err
+		}
 		return fn(tx, message)
 	}))
 }
