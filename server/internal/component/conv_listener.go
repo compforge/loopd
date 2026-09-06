@@ -1,17 +1,32 @@
-package delivery
+package component
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
 const discoveryPageSize = 100
+
+type Event struct {
+	MessageID string
+	Message   *contract.Message
+	Data      json.RawMessage
+}
+
+type ConvMessageRepository interface {
+	LatestMessageID(context.Context, string) (string, error)
+	ListStreamMessages(context.Context, string, string, string, int) ([]model.Message, error)
+	GetMessageStates(context.Context, string, []string) ([]repo.MessageState, error)
+	GetMessage(context.Context, string) (model.Message, error)
+}
 
 type messageReader struct {
 	message model.Message
@@ -29,26 +44,23 @@ type watchedMessage struct {
 	retryAt  time.Time
 }
 
-// Stream discovers new messages by ID and checks only active message revisions.
-// +spec=`Ended history is loaded once, in pages. Human interaction is observed independently of output status.`
-func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversationID, after string, deliver func(Event) error) error {
-	var control *watchedMessage
-	watermark := ""
-	if taskID != "" {
-		input, err := coordinator.input(ctx, taskID)
-		if err != nil {
-			return err
-		}
-		if input.ConversationID != conversationID {
-			return agentuerunner.ErrNotFound
-		}
-		control = &watchedMessage{message: transportMessage(input)}
-	} else {
-		var err error
-		watermark, err = coordinator.repo.LatestMessageID(ctx, conversationID)
-		if err != nil {
-			return err
-		}
+// ConvListener belongs to one stream request, never to an actor execution.
+// +spec=`Only this Conv is observed. GC runs independently; terminal messages leave the active set.`
+type ConvListener struct {
+	repo           ConvMessageRepository
+	events         agentuerunner.EventBridge
+	conversationID string
+}
+
+func NewConvListener(events agentuerunner.EventBridge, repository ConvMessageRepository, conversationID string) *ConvListener {
+	return &ConvListener{events: events, repo: repository, conversationID: conversationID}
+}
+
+func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error) error {
+	conversationID := listener.conversationID
+	watermark, err := listener.repo.LatestMessageID(ctx, conversationID)
+	if err != nil {
+		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -60,18 +72,11 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			watch.reader = nil
 		}
 	}
-	start := func(watch *watchedMessage, cursor string) {
-		if watch == nil {
-			return
-		}
+	start := func(watch *watchedMessage) {
 		if watch.reader != nil || time.Now().Before(watch.retryAt) {
 			return
 		}
 		watch.retryAt = time.Now().Add(time.Second)
-		// Bridge outages do not disable SQL discovery or re-run business work.
-		if err := coordinator.ensureStream(ctx, watch.message); err != nil {
-			return
-		}
 		readerCtx, cancelReader := context.WithCancel(ctx)
 		reader := &messageReader{message: watch.message, cancel: cancelReader}
 		watch.reader = reader
@@ -85,7 +90,8 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 					return readerCtx.Err()
 				}
 			}
-			_ = (agentuerunner.Replayer{Bridge: coordinator.events}).Stream(readerCtx, streamKey(reader.message), cursor, func(value agentuerunner.Delivery) error {
+			// Readers never provision Redis keys. Missing streams are repaired from SQL.
+			_ = (agentuerunner.Replayer{Bridge: listener.events}).Stream(readerCtx, "message/"+reader.message.ID, "", func(value agentuerunner.Delivery) error {
 				return send(messageDelivery{reader: reader, delivery: value})
 			})
 			_ = send(messageDelivery{reader: reader, done: true})
@@ -133,7 +139,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 		if !visibleMessage(row).Ended() || row.HumanDueAt != nil {
 			watching[row.ID] = watch
 			if row.Purpose == "output" && !visibleMessage(row).Ended() {
-				start(watch, "")
+				start(watch)
 			}
 		} else {
 			stop(watch)
@@ -145,13 +151,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 	discover := func() (int, error) {
 		// UUIDv7 is an allocation order, not a distributed commit watermark.
 		// This uses the existing conversation cursor assumption, not Kafka's stronger guarantee.
-		var rows []model.Message
-		var err error
-		if control != nil {
-			rows, err = coordinator.repo.ListDeliveryMessages(ctx, conversationID, afterID, discoveryPageSize)
-		} else {
-			rows, err = coordinator.repo.ListStreamMessages(ctx, conversationID, afterID, watermark, discoveryPageSize)
-		}
+		rows, err := listener.repo.ListStreamMessages(ctx, conversationID, afterID, watermark, discoveryPageSize)
 		if err != nil {
 			return 0, err
 		}
@@ -170,7 +170,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 		}
 		for from := 0; from < len(ids); from += discoveryPageSize {
 			batch := ids[from:min(from+discoveryPageSize, len(ids))]
-			states, err := coordinator.repo.GetMessageStates(ctx, "", batch)
+			states, err := listener.repo.GetMessageStates(ctx, conversationID, batch)
 			if err != nil {
 				return err
 			}
@@ -179,7 +179,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 				found[state.ID] = true
 				watch := watching[state.ID]
 				if state.Revision > watch.revision || state.Status != visibleMessage(watch.message).Status {
-					row, err := coordinator.repo.GetMessage(ctx, state.ID)
+					row, err := listener.repo.GetMessage(ctx, state.ID)
 					if errors.Is(err, repo.ErrNotFound) {
 						stop(watch)
 						delete(watching, state.ID)
@@ -195,7 +195,7 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 					stop(watch)
 					delete(watching, state.ID)
 				} else if watch.message.Purpose == "output" {
-					start(watch, "")
+					start(watch)
 				}
 			}
 			for _, id := range batch {
@@ -221,12 +221,6 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 	if afterID < watermark {
 		afterID = watermark
 	}
-	if control != nil {
-		if _, err := coordinator.events.State(ctx, streamKey(control.message)); errors.Is(err, agentuerunner.ErrNotFound) {
-			after = ""
-		}
-	}
-	start(control, after)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	heartbeat := time.NewTicker(15 * time.Second)
@@ -250,13 +244,9 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			if err := refreshActive(); err != nil {
 				return err
 			}
-			start(control, "")
 		case value := <-incoming:
 			id := value.reader.message.ID
 			watch := watching[id]
-			if value.reader.message.Purpose == "transport" {
-				watch = control
-			}
 			// Drop queued events from readers cancelled after a SQL terminal snapshot.
 			if watch == nil || watch.reader != value.reader {
 				continue
@@ -270,37 +260,35 @@ func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversation
 			if err != nil {
 				return err
 			}
-			if watch != control {
-				if patch.Op == agentueui.OpEnd || (patch.Op == agentueui.OpStart && patch.Seq > watch.revision) {
-					// A bridge rebuilt from SQL may already represent a terminal
-					// snapshot. Its AgentUE Start alone cannot carry Message.status.
-					row, err := coordinator.repo.GetMessage(ctx, id)
-					if err != nil {
-						return err
-					}
-					if err := observe(row); err != nil {
-						return err
-					}
-					continue
+
+			if patch.Op == agentueui.OpEnd || (patch.Op == agentueui.OpStart && patch.Seq > watch.revision) {
+				// A bridge rebuilt from SQL may already represent a terminal
+				// snapshot. Its AgentUE Start alone cannot carry Message.status.
+				row, err := listener.repo.GetMessage(ctx, id)
+				if err != nil {
+					return err
 				}
-				if patch.Op == agentueui.OpPing || patch.Seq <= watch.revision {
-					continue
+				if err := observe(row); err != nil {
+					return err
 				}
-				// Live deltas may overlap a newer SQL snapshot, but cannot jump a gap.
-				if patch.Op != agentueui.OpStart && patch.Seq != watch.revision+1 {
-					continue
-				}
-				watch.revision = patch.Seq
+				continue
 			}
+			if patch.Op == agentueui.OpPing || patch.Seq <= watch.revision {
+				continue
+			}
+			// Live deltas may overlap a newer SQL snapshot, but cannot jump a gap.
+			if patch.Op != agentueui.OpStart && patch.Seq != watch.revision+1 {
+				continue
+			}
+			watch.revision = patch.Seq
 			event := Event{MessageID: id, Message: &message, Data: value.delivery.Data}
-			if watch == control {
-				event.Message = nil
-				event.ID = value.delivery.Cursor
-				event.Persisted = event.ID != ""
-			}
 			if err := deliver(event); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func visibleMessage(m model.Message) contract.Message {
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }

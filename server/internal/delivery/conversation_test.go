@@ -5,6 +5,7 @@ import (
 	"errors"
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"testing"
@@ -54,7 +55,7 @@ func TestConversationStreamOnlyChecksActiveMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	counter := &activeQueryCounter{Store: store, t: t, activeID: active.ID}
-	err = New(producer.events, counter, nil).Stream(ctx, "", "root", "", func(Event) error { return nil })
+	err = component.NewConvListener(producer.events, counter, "root").Run(ctx, func(Event) error { return nil })
 	if !errors.Is(err, errStop) || counter.checks != 2 {
 		t.Fatalf("checks=%d err=%v", counter.checks, err)
 	}
@@ -81,7 +82,7 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 	}
 	var next model.Message
 	expired := false
-	err = consumer.Stream(ctx, "", "root", "", func(event Event) error {
+	err = listen(ctx, consumer, "root", func(event Event) error {
 		if event.Message == nil {
 			return nil
 		}
@@ -120,4 +121,10 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 	if !errors.Is(err, errStop) || !expired {
 		t.Fatalf("stream stopped prematurely: %v", err)
 	}
+}
+
+type Event = component.Event
+
+func listen(ctx context.Context, coordinator *Coordinator, convID string, deliver func(Event) error) error {
+	return component.NewConvListener(coordinator.events, coordinator.repo.(component.ConvMessageRepository), convID).Run(ctx, deliver)
 }

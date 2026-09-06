@@ -40,9 +40,6 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 	t.Cleanup(func() { _ = client.Close() })
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
 	producer, consumer := New(bridge, store, nil), New(bridge, store, nil)
-	if err := producer.Initialize(ctx, "task", initial); err != nil {
-		t.Fatal(err)
-	}
 	return store, producer, consumer
 }
 func ptr(value string) *string { return &value }
@@ -85,7 +82,7 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen := map[string]string{}
-	err = consumer.Stream(ctx, "task", "root", "", func(v Event) error {
+	err = listen(ctx, consumer, "work", func(v Event) error {
 		e, err := agentueui.Parse(v.Data)
 		if err != nil {
 			return err
@@ -116,19 +113,19 @@ func TestOutputMessagesOwnIdentityAndReplay(t *testing.T) {
 		}
 	}
 	count := 0
-	if err := consumer.Stream(ctx, "task", "root", "", func(v Event) error {
+	if err := listen(ctx, consumer, "work", func(v Event) error {
 		if v.MessageID != "" {
 			count++
 		}
-		if count == 4 {
+		if count == 3 {
 			return errStop
 		}
 		return nil
 	}); !errors.Is(err, errStop) {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Fatalf("input and three messages=%d", count)
+	if count != 3 {
+		t.Fatalf("three active messages=%d", count)
 	}
 }
 func TestSpeakConcurrentIdentity(t *testing.T) {
@@ -175,12 +172,12 @@ func TestStreamDiscoversOutputDuringDelivery(t *testing.T) {
 	defer cancel()
 	created := ""
 	observed := false
-	err := consumer.Stream(ctx, "task", "root", "", func(v Event) error {
+	err := listen(ctx, consumer, "work", func(v Event) error {
 		e, err := agentueui.Parse(v.Data)
 		if err != nil {
 			return err
 		}
-		if created == "" && v.MessageID == "" && e.Op == agentueui.OpStart {
+		if created == "" && v.MessageID == "" && e.Op == agentueui.OpPing {
 			m, err := store.Speak(ctx, "work", outputRequest("later"))
 			if err != nil {
 				return err

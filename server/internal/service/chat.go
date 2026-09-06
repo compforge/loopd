@@ -22,11 +22,10 @@ type ChatRepository interface {
 
 type ChatDelivery interface {
 	EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error)
-	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
-// ChatService owns one UI chat delivery, not an Operator's business task.
-// An input starts the delivery; answers are created only when actors publish.
+// ChatService accepts user input independently of Conv page listeners.
+// Answers are created only when actors publish.
 type ChatService struct {
 	notifier MessageNotifier
 	repo     ChatRepository
@@ -73,36 +72,6 @@ func (service *ChatService) Create(
 	service.logger.InfoContext(ctx, "chat input committed", "conversation_id", conversationID,
 		"task_id", taskID, "message_id", message.ID, "target_kind", target.Kind, "target_key", target.Key)
 	return messageFromModel(message), nil
-}
-
-func (service *ChatService) Stream(
-	ctx context.Context,
-	conversationID string,
-	taskID string,
-	after string,
-	deliver func(delivery.Event) error,
-) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return ErrInvalid
-	}
-	service.logger.InfoContext(ctx, "chat stream opened",
-		"conversation_id", conversationID,
-		"task_id", taskID,
-		"after", after,
-	)
-	err := mapDeliveryError(service.delivery.Stream(ctx, taskID, conversationID, after, deliver))
-	service.logger.InfoContext(ctx, "chat stream closed",
-		"conversation_id", conversationID,
-		"task_id", taskID,
-		"error", err,
-	)
-	return err
-}
-
-// StreamConversation observes a page, not an actor execution or one user input.
-func (service *ChatService) StreamConversation(ctx context.Context, convID string, deliver func(delivery.Event) error) error {
-	return mapDeliveryError(service.delivery.Stream(ctx, "", convID, "", deliver))
 }
 
 func mapDeliveryError(err error) error {

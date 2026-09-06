@@ -11,10 +11,17 @@ export class MessagePoller {
   constructor(private readonly conversationID: string) {}
 
   poll(signal?: AbortSignal): Promise<Message[]> {
-    // Initial load, timer and submit callbacks may coincide. Share the request
+    // Initial load, reconnect and submit callbacks may coincide. Share the request
     // instead of racing cursor updates or letting a slow network build a queue.
     if (!this.pending) this.pending = this.read(signal).finally(() => { this.pending = undefined; });
     return this.pending;
+  }
+
+  async sync(signal?: AbortSignal): Promise<Message[]> {
+    // Do not reuse a history request started before the stream's watermark.
+    if (this.pending) await this.pending;
+    signal?.throwIfAborted();
+    return this.poll(signal);
   }
 
   private async read(signal?: AbortSignal): Promise<Message[]> {

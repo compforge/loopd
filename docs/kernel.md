@@ -94,8 +94,8 @@ runtime 不把普通发言自动解释成 steer/followup，也不替 Operator �
 用户首次提交只创建真实的 user Message；Operator/Harness 回答、Ask、Confirm 在实际发起时
 各自创建 Message，不预建空回答。一个执行循环可以接收多次发言，也可以多次发布阶段结果或回应。
 
-`task_id` 是 UI/Redis 流的身份：不带它提交新发言，带它 replay。它不对应通用 Task CRD 或 task 表，
-也不决定消息是新业务工作、补充信息还是确认答复。显式卡片回复给 typed Verb 返回值，
+提交返回真实消息及交付标识，页面以 Conv 独立订阅，以 Message 合并流式更新和恢复快照。
+交付标识不对应通用 Task CRD 或 task 表，也不决定消息是新业务工作、补充信息还是确认答复。显式卡片回复给 typed Verb 返回值，
 普通发言交给 Operator 判断，不自动解释为批准。
 
 每条 Message 独立寻址、更新和持久化；Speak 可以一次说完，也可以逐步输出后 End。

@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	serverapi "github.com/compforge/loopd/server/internal/api"
+	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -45,14 +46,13 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
-	messages   *service.MessageService
-	messageTTL time.Duration
-	poll       *service.PollService
-	store      *repo.Store
-	redis      redis.UniversalClient
-	api        *serverapi.Server
-	human      *service.HumanService
-	chat       *service.ChatService
+	messageGC *component.MessageGC
+	poll      *service.PollService
+	store     *repo.Store
+	redis     redis.UniversalClient
+	api       *serverapi.Server
+	human     *service.HumanService
+	chat      *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
@@ -90,13 +90,16 @@ func New(config Config) (*Server, error) {
 	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
 	human := service.NewHumanService(store, config.Logger)
 	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
+	api.Listen = func(ctx context.Context, convID string, deliver func(component.Event) error) error {
+		return component.NewConvListener(events, store, convID).Run(ctx, deliver)
+	}
 	api.Human = human
 	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
-		messages: messages, messageTTL: config.MessageTTL,
-		poll:  poll,
-		human: human, chat: chat,
+		messageGC: component.NewMessageGC(store, config.MessageTTL, time.Second, 100, config.Logger),
+		poll:      poll,
+		human:     human, chat: chat,
 		store: store,
 		redis: redisClient,
 		api:   api,
@@ -108,7 +111,7 @@ func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.poll.Run(ctx) })
-	workers.Go(func() { server.messages.Run(ctx, server.messageTTL) })
+	workers.Go(func() { server.messageGC.Run(ctx) })
 	workers.Wait()
 }
 func (server *Server) Close() error {

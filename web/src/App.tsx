@@ -34,7 +34,7 @@ export function App() {
   const messagePoller = useRef<{ conversationID: string; poller: MessagePoller } | undefined>(undefined);
   useConversationStream(selectedConversationID, (delivery) => {
     if (delivery.messageID) setMessages((current) => applyMessageEvent(current, delivery));
-  });
+  }, (signal) => refreshMessages(selectedConversationID!, signal, true));
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
@@ -101,20 +101,14 @@ export function App() {
     return () => controller.abort();
   }, [selectedConversationID]);
 
-  useEffect(() => {
-    if (!selectedConversationID) return;
-    const controller = new AbortController();
-    // Actors may publish without an active user Chat; discover their snapshots too.
-    const timer = window.setInterval(() => { void refreshMessages(selectedConversationID, controller.signal); }, 2000);
-    return () => { window.clearInterval(timer); controller.abort(); };
-  }, [selectedConversationID]);
 
-  async function refreshMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
+  async function refreshMessages(conversationID: string, signal?: AbortSignal, sync = false): Promise<Message[]> {
     try {
       if (messagePoller.current?.conversationID !== conversationID) {
         messagePoller.current = { conversationID, poller: new MessagePoller(conversationID) };
       }
-      const items = await messagePoller.current.poller.poll(signal);
+      const poller = messagePoller.current.poller;
+      const items = await (sync ? poller.sync(signal) : poller.poll(signal));
       if (signal?.aborted) return [];
       setMessages((current) => {
         // Equal message revisions may carry refreshed reference previews/cards.
@@ -356,8 +350,10 @@ export function App() {
 
       <DetailPanel
         onReply={(result) => setMessages((current) => {
-          let next = mergeMessage(current, result.message);
-          if (result.reply) next = mergeMessage(next, result.reply);
+          let next = current;
+          for (const message of [result.message, result.reply]) {
+            if (message && message.conversation_id === selectedConversationID) next = mergeMessage(next, message);
+          }
           return next;
         })}
         selection={detailSelection?.parentID === selectedConversationID ? detailSelection : undefined}

@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	hertzsse "github.com/cloudwego/hertz/pkg/protocol/sse"
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/server/internal/delivery"
+	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
@@ -67,7 +67,7 @@ func (server *Server) streamConversation(ctx context.Context, request *hertzapp.
 		return err
 	}
 	var writer *hertzsse.Writer
-	err := server.chat.StreamConversation(ctx, convID, func(event delivery.Event) error {
+	err := server.Listen(ctx, convID, func(event component.Event) error {
 		data := event.Data
 		if event.MessageID != "" {
 			var err error

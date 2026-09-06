@@ -97,8 +97,6 @@ export async function messageChanges(conversationID: string, revisions: Map<stri
 
 export interface StreamRequest {
   conversationID: string;
-  taskID?: string;
-  lastEventID?: string;
   text?: string;
   target?: ActorRef;
   signal?: AbortSignal;
@@ -107,19 +105,15 @@ export interface StreamRequest {
 }
 
 export async function streamMessage(request: StreamRequest): Promise<void> {
-  const replay = Boolean(request.taskID);
-  const body = replay
-    ? { task_id: request.taskID }
-    : {
-        user_key: "web-user",
-        target: request.target,
-        content: textModel(request.text ?? ""),
-      };
+  const body = {
+    user_key: "web-user",
+    target: request.target,
+    content: textModel(request.text ?? ""),
+  };
   const headers: Record<string, string> = {
     Accept: "text/event-stream",
     "Content-Type": "application/json",
   };
-  if (request.lastEventID) headers["Last-Event-ID"] = request.lastEventID;
   const response = await fetch(
     `/v1/conversations/${encodeURIComponent(request.conversationID)}/messages`,
     { method: "POST", headers, body: JSON.stringify(body), signal: request.signal },

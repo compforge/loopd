@@ -71,7 +71,8 @@ service 负责批量读取关联并组装富化结果，api 负责 HTTP 交付�
 
 ## 页面交付
 
-task_id 标识一次页面交付及 Redis 流，不是 Operator 的业务任务，server 不建立 tasks 表。
+task_id 是输入提交的交付标识，不是 Operator 的业务任务；server 不建立 tasks 表。
+页面订阅以 Conv 寻址，Redis 事件流以 Message 寻址。
 
 ### 提交与观察
 
@@ -105,7 +106,7 @@ Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批�
 
 ### 聚合流与恢复
 
-页面先分页读取历史，Conv stream 聚合当前运行态消息的独立 Redis 流；每个事件仍用
+页面先分页读取历史，每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流；每个事件仍用
 message_id、message、event 寻址，客户端按消息 ID/revision 合并。AgentUE seq 和 Redis cursor
 只在单条消息内有意义，不充当共享 Conv 游标。连接的 ping 不创建消息气泡。
 
@@ -114,8 +115,10 @@ server 按 ID 定期增量发现该 Conv 的新消息。新的一次性发言直
 Ask/Confirm 已发送的卡片仍可能待答，因此其交互状态独立观察。
 
 一条 Message 的 end 移除自身监听，不关闭 Conv 连接。切换会话或离开页面主动取消连接；
-断线退避重连，从 SQL 恢复运行态快照再接 Redis。页面以有界的活跃消息 revision 查询及
-新增消息查询补偿断线期间的变化，避免刚结束的消息被遗漏。
+断线退避重连，从 SQL 恢复运行态快照再接 Redis。每次连接建立后，页面做一次有界的活跃消息
+revision 查询及新增消息查询，补偿首次加载的时间差和断线期间的变化，避免刚结束的消息被遗漏。
+连接期间的增量发现和状态校验由 Listener 承担；浏览器不另开常驻消息轮询。
+Listener 随请求取消，不放入全局注册表，也不负责消息 GC。
 
 任一 server 实例都可观察同一 Conv。Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
 但不会重新生成每个中间增量；AgentUE Bridge 负责事件协议和续接，server 负责消息寻址与快照。
@@ -143,7 +146,8 @@ Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自�
 ### 失活与 TTL
 
 `MESSAGE_TTL` 统一配置输出失活期限与 Redis 事件保留期限，默认 24h。
-server 按 DB 的 `updated_at + TTL` 定期将 streaming 消息标记为 expired，并递增 revision；
+Message GC 随 server 启停，即使没有页面连接也独立执行有界清理。
+它按 DB 的 `updated_at + TTL` 定期将 streaming 消息标记为 expired，并递增 revision；
 无需 expires_at 列。保留最后正文与最后活动时间，页面展示“已过期”，迟到写入不能恢复该消息。
 
 Redis 按自己的写入时间续期，DB 按 server 实际接受输出的时间续期；读取、心跳和重复事件
