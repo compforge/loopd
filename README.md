@@ -2,69 +2,63 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-`loopd` is a platform where Actors collaborate through persistent messages.
-Users, Operators, and Harnesses can contribute independently, without a fixed question–answer turn.
+`loopd` is a server-side runtime for Agent orchestration. Build Kubernetes
+Operators that bring people, Agent execution services (Harnesses), and business
+systems together—from routing a question to running a long-term task.
 
-Its guiding idea is:
+## Philosophy
+
+An Agent can execute work. A business still needs to define its goals, coordinate
+participants, and decide when the result is good enough. loopd gives developers
+a shared runtime for expressing those decisions in ordinary code:
 
 ```text
 Loop = Resource(spec + status) + Reconcile
 ```
 
-Messages wake their selected Actor through a persistent Conversation CRD.
-Operators receive new input through the Poll verb; a complex
-Operator may create domain CRDs for its own state and completion semantics.
-`loopd` keeps visible collaboration in conversations and messages. A Harness
-owns its execution state, while AgentLedger records the complete execution
-history.
+Resources hold goals and observed state; Reconcile decides the next step.
+
+loopd provides a runtime for building orchestration, rather than a predefined
+workflow. Each Operator defines its own process, collaboration model, and
+completion criteria.
+
+## What makes it useful
+
+- **Develop your own orchestration.** Combine Agent judgment with deterministic
+  code and business APIs. The Go loop-runtime toolkit provides shared capabilities
+  for calling Harnesses, asking people, and publishing progress.
+- **Collaborate while work continues.** People, Operators, and Harnesses exchange
+  persistent messages. Users can add context during execution, and Operators can
+  share partial results or request confirmation as needed.
+- **Keep long-running work observable.** Conversations show shared progress and
+  results; domain resources retain business state. Operators can coordinate
+  planning, execution, and verification over time.
 
 ![loopd orchestration architecture](docs/arch_v1.svg)
 
-## Components
+## See it in action
 
-- **loop-server** owns page-visible conversations and messages. It signals the selected
-  participant through a Conversation CRD and delivers message streams independently
-  of the browser connection.
-- **loop-runtime** is a Go toolkit for building Operators. It combines
-  controller-runtime resource reconciliation with loopd collaboration capabilities.
-  See the [runtime design](docs/runtime.md) for the Operator development contract.
-- **Harness adapters** let an Operator invoke agentd or another intelligent
-  execution service through loop-runtime without leaking provider vocabulary
-  into the public model. The bundled AgentGo adapter is an in-process demo;
-  production durability belongs to agentd.
+The bundled Router plans a request, runs independent Harness calls in parallel,
+and synthesizes an answer. Here it introduces Liu Bei, Guan Yu, and Zhang Fei;
+the detail panel shows the planning, execution, and synthesis alongside the answer.
 
-AgentUE supplies the page-visible event model and Redis bridge. AgentLedger
-records complete prompts, model events, tool calls, retries, and costs; it is
-not the chat database. Hostel provides the agent-native sandbox for file,
-tool, and compute execution.
+![Router demo: an answer alongside planning, parallel execution, and synthesis](docs/router_demo.jpeg)
 
-The public conversation roles are always:
+For longer tasks, the [LongHorizon Operator](operators/longhorizon/README.md)
+combines a Manager, Executor, and Auditor to plan CLI work, execute it, check
+artifacts, and decide what to do next.
 
-```text
-user | harness | operator
-```
+## Get started
 
-## Runtime stack
+Follow the [Kubernetes Quick Start](deploy/k8s/README.md) to install the server,
+Router, and Web UI. Configure an OpenAI-compatible model endpoint and credentials,
+open the UI, select Router, and submit a question.
 
-This component view shows the ownership and runtime boundaries behind that
-collaboration model. loop-runtime is embedded in an Operator, while
-AgentLedger preserves execution facts across orchestration and Agent
-execution.
+The Quick Start uses temporary storage and an in-process AgentGo demo. Recovery
+across restarts requires persistent storage, Operator progress, and a durable
+Harness adapter; see the [recovery contract](docs/runtime.md#harness-执行与恢复).
 
-![loopd component stack](docs/stack_v1.svg)
-
-## Long-running execution
-
-A question may run for minutes or days. Users can disconnect and return to the
-same conversation to follow its progress and read the answer. The selected
-Operator or Harness owns the work behind that answer, and an Operator can call
-multiple Harnesses before publishing its result.
-
-Recovery depends on the execution and storage configuration. The bundled
-AgentGo demo runs in process; durable execution across Operator restarts requires
-both persistent Operator progress and a persistent Harness adapter. See the [runtime design](docs/runtime.md) for the
-calling and recovery contract, and [Kubernetes deployment](deploy/k8s/README.md)
-for the storage and Quick Start limits.
-
-长期 CLI 工作的使用示例见 [LongHorizon Operator](operators/longhorizon/README.md)：三个角色通过
-持久消息协作，以 Run、Execution、Audit 保存领域控制状态，并在轮次边界接收补充输入。
+To build an Operator, start with the [Router source](operators/router/internal/router/router.go)
+and [runtime guide](docs/runtime.md). Explore the [kernel](docs/kernel.md),
+[component stack](docs/stack_v1.svg), or [image build guide](deploy/docker/README.md)
+for more detail.

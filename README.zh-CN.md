@@ -2,55 +2,52 @@
 
 [English](README.md) | **简体中文**
 
-`loopd` 是 Actor 通过持久消息协作的平台。User、Operator 与 Harness 可以独立参与，
-无需遵循固定的一问一答回合。
+`loopd` 是一个 Agent 编排的服务端运行时。开发者通过 Kubernetes Operator，
+将人、Agent 执行服务（Harness）与业务系统组织在一起，从问题路由到长期任务都可以按需编排。
 
-它的核心理念是：
+## 理念
+
+Agent 负责执行工作，业务仍需要定义目标、组织参与者，并判断结果是否达标。
+loopd 提供一套公共运行时，让开发者用普通代码表达这些判断：
 
 ```text
 Loop = Resource(spec + status) + Reconcile
 ```
 
-消息通过持久 Conversation CRD 唤醒选定的 Actor，Operator 用 Poll Verb 接收输入。
-复杂的 Operator 可以创建自己的领域
-CRD，保存领域状态和完成条件。loopd 通过 Conversation 和 Message 保存页面可见的
-协作内容；Harness 持有自身执行状态，AgentLedger 记录完整执行历史。
+Resource 保存目标与观测状态，Reconcile 决定下一步。
+
+loopd 不预设固定的工作流，而是提供开发和运行编排的公共能力。
+业务通过 Operator 定义自己的流程、协作方式与完成条件。
+
+## 特色
+
+- **用代码开发自己的编排。** 将 Agent 判断与确定性代码、业务 API 组合起来。
+  Go 开发库 loop-runtime 提供调用 Harness、向人提问、发布进展等公共能力。
+- **工作进行中持续协作。** 人、Operator 与 Harness 通过持久消息交流。
+  用户可以随时补充信息，Operator 按需发布阶段结果或请求确认。
+- **长期工作有状态、可观察。** Conversation 呈现共享进展与结果，领域 Resource 保存业务状态，
+  Operator 可以跨时间组织规划、执行与验证。
 
 ![loopd 编排架构](docs/arch_v1.svg)
 
-## 组件
+## 演示
 
-- **loop-server** 拥有页面可见的 Conversation 和 Message。它通过 Conv CRD
-  通知选定参与者，流式交付不依赖某次浏览器连接。
-- **loop-runtime** 是嵌入 Operator 的 Go 协作开发库，将 controller-runtime 的资源控制
-  循环与 loopd 协作能力组合起来。Operator 开发契约统一见 [Runtime](docs/runtime.md)。
-- **Harness Adapter** 让 Operator 可以通过 loop-runtime 调用 agentd 或其他智能执行
-  服务，而不会把 provider 术语泄漏到公共模型中。内置的 AgentGo Adapter 是进程内
-  Demo；生产级的持久执行由 agentd 提供。
+内置 Router 为问题制定计划，并行调用 Harness，再汇总回答。
+下图中，它分别介绍刘备、关羽、张飞，右侧处理详情展示回答背后的规划、执行与汇总过程。
 
-AgentUE 提供页面可见的事件模型和 Redis Bridge。AgentLedger 记录完整的 prompt、
-模型事件、工具调用、重试和成本，但不充当聊天数据库。Hostel 是 agent-native
-sandbox，提供文件、工具和计算环境。
+![Router 演示：回答与规划、并行执行、汇总过程](docs/router_demo.jpeg)
 
-公开 Conversation 中的角色固定为：
+[LongHorizon Operator](operators/longhorizon/README.md) 展示更长的闭环：
+Manager 规划 CLI 工作，Executor 执行，Auditor 检查工件，再决定下一步。
 
-```text
-user | harness | operator
-```
+## 快速开始
 
-## 运行时栈
+按照 [Kubernetes Quick Start](deploy/k8s/README.md) 安装 server、Router 与 Web UI，
+配置 OpenAI-compatible 模型地址和凭据，打开页面后选择 Router 并提交问题。
 
-下面的组件图展示了这套协作模型背后的职责和运行边界。loop-runtime 嵌入
-Operator，AgentLedger 则横跨编排与 Agent 执行，保存完整执行事实。
+Quick Start 使用临时存储与进程内 AgentGo Demo。跨重启恢复需要持久存储、Operator
+领域进度与持久 Harness Adapter，具体见 [恢复契约](docs/runtime.md#harness-执行与恢复)。
 
-![loopd 组件栈](docs/stack_v1.svg)
-
-## 长时间运行的执行
-
-一次问题处理可能持续几分钟，也可能持续数天。用户可以断开页面，之后回到同一个
-Conversation 查看进展和回答。选中的 Operator 或 Harness 负责推进工作；Operator 可以
-调用多个 Harness，再汇总为自己的回答。
-
-恢复能力取决于执行与存储配置。内置 AgentGo Demo 在进程内运行，跨 Operator 重启的
-执行恢复需要 Operator 持久化领域进度，并使用持久 Harness Adapter。调用与恢复契约见 [Runtime](docs/runtime.md)，
-存储配置与 Quick Start 限制见 [Kubernetes 部署](deploy/k8s/README.md)。
+开发 Operator 可从 [Router 源码](operators/router/internal/router/router.go) 和
+[Runtime 指南](docs/runtime.md) 开始；更多设计见 [Kernel](docs/kernel.md)、
+[组件栈](docs/stack_v1.svg) 与 [镜像构建](deploy/docker/README.md)。
