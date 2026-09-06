@@ -85,50 +85,67 @@ func (message *Message) Emit(ctx context.Context, event ui.Event) error {
 }
 
 // End finishes only this message (effect: write), not the Conv or UI subscription.
-// Repeating End, including after restoring the handle with Speak, is safe.
-func (message *Message) End(ctx context.Context) error {
+// The optional terminal status defaults to completed. Repeating the same End,
+// including after restoring the handle with Speak, is safe.
+func (message *Message) End(ctx context.Context, statuses ...loopd.MessageStatus) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
+	status := loopd.MessageStatusCompleted
+	if len(statuses) > 1 {
+		return errors.New("End accepts at most one status")
+	}
+	if len(statuses) == 1 {
+		status = statuses[0]
+	}
+	if !status.Terminal() {
+		return errors.New("End requires a terminal message status")
+	}
 	if message.ended {
+		if message.value.Status != status {
+			return errors.New("message already ended with a different status")
+		}
 		return nil
 	}
-	if err := message.emit(ctx, ui.End(0)); err != nil {
+	if err := message.emit(ctx, ui.End(0), status); err != nil {
 		return err
 	}
 	message.ended = true
 	return nil
 }
 
-func (message *Message) emit(ctx context.Context, event ui.Event) error {
+func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...loopd.MessageStatus) error {
 	event.Seq = message.next
 	data, err := event.Marshal()
+	if err != nil {
+		return err
+	}
+	request := struct {
+		Event  json.RawMessage     `json:"event"`
+		Status loopd.MessageStatus `json:"status,omitempty"`
+	}{Event: data}
+	if len(statuses) != 0 {
+		request.Status = statuses[0]
+	}
+	data, err = json.Marshal(request)
 	if err != nil {
 		return err
 	}
 	if len(message.pending) > 0 && !bytes.Equal(message.pending, data) {
 		return errors.New("previous message update is unresolved; retry it before sending another update")
 	}
-	if err := message.client.write(ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events",
-		struct {
-			Event json.RawMessage `json:"event"`
-		}{data}, nil); err != nil {
+	if err := message.client.write(ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events", json.RawMessage(data), nil); err != nil {
 		message.pending = data
 		return err
 	}
 	message.pending = nil
 	if event.Seq >= message.next {
 		message.next = event.Seq + 1
+		if event.Op == ui.OpEnd {
+			message.value.Status = request.Status
+		}
 		var snapshot map[string]any
 		if json.Unmarshal(message.value.Content, &snapshot) == nil {
 			if next, err := ui.Apply(snapshot, event); err == nil {
-				if event.Op == ui.OpEnd {
-					meta, _ := next["meta"].(map[string]any)
-					if meta == nil {
-						meta = map[string]any{}
-						next["meta"] = meta
-					}
-					meta["output"] = map[string]any{"ended": true}
-				}
 				message.value.Content, _ = ui.MarshalSnapshot(next)
 			}
 		}

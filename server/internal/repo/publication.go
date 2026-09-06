@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	loopd "github.com/compforge/loopd"
@@ -40,23 +39,13 @@ func (store *Store) Speak(ctx context.Context, convID string, request loopd.Spea
 				return mapError(err)
 			}
 		}
-		var snapshot map[string]any
-		if err := json.Unmarshal(request.Content, &snapshot); err != nil {
-			return err
-		}
-		meta, _ := snapshot["meta"].(map[string]any)
-		if meta == nil {
-			meta = map[string]any{}
-			snapshot["meta"] = meta
-		}
-		meta["output"] = map[string]any{"ended": !request.Stream}
-		content, err := json.Marshal(snapshot)
-		if err != nil {
-			return err
+		status := loopd.MessageStatusCompleted
+		if request.Stream {
+			status = loopd.MessageStatusStreaming
 		}
 		result = model.Message{ID: uuid.V7(), ConversationID: convID,
 			Kind: string(request.Actor.Kind), ActorKey: request.Actor.Key, TargetKind: string(request.Target.Kind), TargetKey: request.Target.Key,
-			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: content,
+			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: request.Content, Status: string(status),
 			DispatchPending: !request.Stream && request.Target.Kind != loopd.ActorKindUser}
 		return mapError(store.saveMessage(tx, &result, true))
 	})

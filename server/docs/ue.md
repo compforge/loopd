@@ -10,7 +10,14 @@ DB、CRD 与 Redis 的整体责任分层见 [Kernel](../../docs/kernel.md)。
 ## 页面布局
 
 页面按左、中、右组织：左侧列出 User conv，中间展示选中会话的消息与发送框，右侧展示
-选中消息对应 Actor 的内部会话。发送目标跟随发送框，每次发言可以选择不同参与者。
+当前 User conv 与相关 Operator 共同确定的内部会话。发送目标跟随发送框，每次发言可以选择不同参与者。
+
+用户发送后，右侧立即按接收 Operator 查找工作会话，不等待它先在主会话回答；尚未创建时显示
+该 Operator 的等待提示并持续查找。点击历史消息时优先使用其目标 Operator；回答、Ask/Confirm
+等发给用户的消息则使用发送方 Operator，自定义角色归属到其 owning Operator。
+重新打开会话默认选择最新消息，因此只有用户输入、尚无回答时也能观察工作过程。
+仅改变发送框中的目标不切换正在查看的详情；切换 User conv 时清除上一会话的详情。
+没有关联 Operator 的消息不猜测归属。页面连接在线或等待工作会话不代表 Operator 已消费消息。
 
 > 待补充：面板切换、尺寸与响应式布局、空态，以及选中状态的恢复规则。
 
@@ -110,13 +117,17 @@ Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批�
 ### 消息结束与重试
 
 默认 Speak 在创建事务中保存完整正文与结束状态。流式 End 与内容事件使用同一顺序和重试契约：
-先原子推进 SQL Revision 与受控 meta.output.ended=true，再尽力更新消息桥并标记终态。
+先原子推进 SQL Revision 与 Message.status，再尽力更新消息桥并标记终态。
 SQL 失败由句柄重试原事件，不另分配 seq；重复 End 幂等。
-普通 Speak 的内容和 Emit 不能伪造受控 meta.output；客户端收到 End 也将同一消息标为已结束。
+普通 Speak 的内容和 Emit 不能更改消息终态；只有 End 可以结束流式消息。
 
-AgentUE 原生 reducer 的 End 不改变 model，因此 loopd 将消息结束状态额外保存在可见快照的 meta
-中，不新增生命周期表。Redis 丢失后已固化的结束状态仍可恢复，不会把结束消息重新视为正在输出。
-页面只对仍开放的 output 显示 STREAMING，不把“连接在线”误标为“Operator 正在执行”。
+Message.status 表达单条消息的发送生命周期，独立于 AgentUE 内容：streaming 表示仍在输出，
+completed 表示发送完成，failed 表示输出失败，cancelled 表示输出被取消。
+End 默认 completed，也可显式传入 failed/cancelled；不同终态不能互相覆盖。
+更新请求将 status 与 AgentUE event 并列传入，AgentUE End 本身不携带状态；页面事件的 Message
+外层与历史 API 都返回持久化 status。Redis 丢失后也不会把已结束消息重新视为正在输出。
+主对话和详情只对 streaming 消息显示“生成中”，不把“连接在线”误标为“Operator 正在执行”。
+Ask/Confirm 卡片发送完成即 completed，但交互仍可等待答复；两种生命周期互不替代。
 
 没有 Delivery.Complete、输入关闭意图或通用页面收尾维护循环。页面拥有订阅生命周期；
 Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自动 Commit、不终止待答问题，

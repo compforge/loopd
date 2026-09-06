@@ -29,7 +29,8 @@ type MessageCard struct {
 }
 
 type MessageEventRequest struct {
-	Event json.RawMessage `json:"event"`
+	Event  json.RawMessage     `json:"event"`
+	Status loopd.MessageStatus `json:"status,omitempty"`
 }
 type MessageEventResponse struct {
 	ID string `json:"id"`

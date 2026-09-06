@@ -104,12 +104,15 @@ Speak 默认一次说完：Content 随消息原子保存并标记结束，不需
 AgentUE set/append，最后 `stream.End`。两种模式返回同一 Go 句柄类型，ID/Value 可读取身份与快照。
 模式只在首次创建时生效，同 Key 重试不能把已结束消息重新打开。
 
-End 可重复调用，结束后不再接受 Emit；重新 Speak 同 Key 可取回结束状态与 Revision。
+`stream.End(ctx)` 默认将 Message.status 从 streaming 改为 completed；输出异常或明确取消时，
+可传 `stream.End(ctx, loopd.MessageStatusFailed)` 或 `loopd.MessageStatusCancelled`。
+相同终态的 End 可重复调用，不同终态冲突，结束后不再接受 Emit；重新 Speak 同 Key 可取回状态与 Revision。
 句柄只属于一条消息，不关闭 Conv、不 Commit，也不结束其他 Actor 的工作或页面订阅。
 
 Speak 不依赖某次 user input 或页面连接。Target 可以是 User、其他 Operator，或留空向会话发言；
 reply_to_id 表达回应哪条消息，Target 表达说给谁听，两者不能互相替代。
-页面实时观察流式内容；其他 Operator 的 Poll 在 End 后收到完整消息，不消费半条流式输出。
+页面实时观察流式内容；其他 Operator 的 Poll 在 End 后收到已结束消息及其状态，
+不消费仍在追加的消息。failed/cancelled 可保留已输出的部分内容，不能当作完整成功结果。
 
 Conv.Workspace 按 User conv + Actor 懒创建并复用内部会话。Operator 决定哪些信息面向用户，
 哪些属于内部协作；Toolkit 承担工作会话的分配细节。归属见

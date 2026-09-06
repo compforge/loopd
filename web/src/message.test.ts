@@ -3,7 +3,7 @@ import { decodeMessageFrame, type Message } from "./api";
 import { applyMessageEvent } from "./message";
 
 const message = (id: string): Message => ({
- id, task_id:"task", conversation_id:"work",kind:"harness",key:"same-actor",purpose:"output",
+ status:"streaming", id, task_id:"task", conversation_id:"work",kind:"harness",key:"same-actor",purpose:"output",
  created_at:"",updated_at:"",revision:1,
  content:{version:"1.0",biz:"chat",meta:{},blocks:[]},
 });
@@ -29,15 +29,29 @@ describe("message-addressed delivery",()=>{
 
 it("ending one message leaves other messages live and accepts later actors", () => {
  const a=message("a"), b=message("b");
- a.content.meta.output={ended:false}; b.content.meta.output={ended:false};
+ a.status="streaming"; b.status="streaming";
  let messages:Message[]=[];
  for(const m of [a,b]) messages=applyMessageEvent(messages,frame(m,{op:"start",seq:1,model:m.content}));
- messages=applyMessageEvent(messages,frame(a,{op:"end",seq:2}));
+ messages=applyMessageEvent(messages,frame({...a,status:"completed"},{op:"end",seq:2}));
  messages=applyMessageEvent(messages,frame(b,{op:"set",seq:2,block:{id:"text",type:"text",content:"still speaking"}}));
- expect(messages[0].content.meta.output).toEqual({ended:true});
- expect(messages[1].content.meta.output).toEqual({ended:false});
- const c=message("c"); c.task_id=""; c.content.meta.output={ended:true};
+ expect(messages[0].status).toBe("completed");
+ expect(messages[1].status).toBe("streaming");
+ const c=message("c"); c.task_id=""; c.status="completed";
  messages=applyMessageEvent(messages,frame(c,{op:"start",seq:1,model:c.content}));
  expect(messages).toHaveLength(3);
  expect(applyMessageEvent(messages,frame(a,{op:"start",seq:1,model:a.content}))).toBe(messages);
+});
+
+it("preserves failed and cancelled states on End and history replay", () => {
+ for (const status of ["failed", "cancelled"] as const) {
+  const current = message("terminal");
+  const terminal = {...current, status, revision: 2};
+  let messages = applyMessageEvent([current], frame(terminal, {op: "end", seq: 2}));
+  expect(messages[0].status).toBe(status);
+  expect(messages[0].content.meta.output).toBeUndefined();
+  messages = applyMessageEvent(messages, frame(current, {op: "start", seq: 1, model: current.content}));
+  expect(messages[0].status).toBe(status);
+  const restored = applyMessageEvent([], frame(terminal, {op: "start", seq: 2, model: terminal.content}));
+  expect(restored[0].status).toBe(status);
+ }
 });

@@ -2,6 +2,10 @@ import { parseMessageContent } from "./content";
 import { applyPatch } from "@compforge/agentue/ui";
 import type { Message, MessageEvent } from "./api";
 
+export function messageStatusLabel(status: Message["status"]): string {
+  return { streaming: "生成中", completed: "已发送", failed: "输出失败", cancelled: "已取消" }[status];
+}
+
 // +spec=`Message ID owns the snapshot; equal block IDs in parallel questions never collide`
 export function mergeMessage(messages: Message[], incoming: Message): Message[] {
   const existing = messages.find((m) => m.id === incoming.id);
@@ -15,6 +19,5 @@ export function applyMessageEvent(messages: Message[], delivery: MessageEvent): 
   if (existing && ((existing.revision ?? 0) > event.seq || (event.op !== "start" && (existing.revision ?? 0) === event.seq))) return messages;
   const snapshot = applyPatch(structuredClone(existing?.content ?? {}), event);
   const model = parseMessageContent(snapshot);
-  if (event.op === "end") model.meta.output = { ended: true };
   return mergeMessage(messages, { ...message, revision: event.seq, content: model });
 }

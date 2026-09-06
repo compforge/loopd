@@ -53,6 +53,9 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	if ask.Message.Key != "operator" || ask.Message.ReplyToID != "input" {
 		t.Fatalf("message=%+v", ask.Message)
 	}
+	if ask.Message.Status != loopd.MessageStatusCompleted || ask.Status != loopd.HumanPending || confirm.Message.Status != loopd.MessageStatusCompleted {
+		t.Fatal("card publication status must be independent of its pending interaction")
+	}
 	for _, test := range []struct {
 		conv, actor, id, value string
 		want                   error

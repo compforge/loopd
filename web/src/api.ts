@@ -25,6 +25,7 @@ export interface Conversation {
 export interface Message {
   card?: MessageCard;
   reply_to?: { id: string; kind: ActorKind; key: string; preview: string };
+  status: "streaming" | "completed" | "failed" | "cancelled";
   id: string;
   target_kind?: ActorKind;
   target_key?: string;

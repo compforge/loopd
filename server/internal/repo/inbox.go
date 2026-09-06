@@ -24,7 +24,7 @@ func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, af
 	// Do not let a consumer commit past an unfinished earlier speech. The UI
 	// may display its partial snapshot, but Poll delivers complete messages.
 	for i, message := range messages {
-		if message.Purpose == "output" && !(loopd.Message{Content: message.Content}).Ended() {
+		if message.Purpose == "output" && !(loopd.Message{Status: loopd.MessageStatus(message.Status)}).Ended() {
 			return messages[:i], nil
 		}
 	}

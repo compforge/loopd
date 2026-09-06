@@ -6,7 +6,7 @@ import { MessageBody } from "./MessageBody";
 import type { HumanCard } from "./card";
 
 function message(id: string, type = "ask"): Message {
- return { id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", purpose: "human_request", revision: 1, reply_to_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
+ return { status: "completed", id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", purpose: "human_request", revision: 1, reply_to_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
 }
 describe("Human messages", () => {
  it("routes equal block IDs to different Messages and ignores a stale snapshot", () => {

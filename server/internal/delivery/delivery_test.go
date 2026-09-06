@@ -48,7 +48,7 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	if err := producer.Initialize(ctx, "task-1", initial); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateMessage(ctx, model.Message{ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
+	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
 	set := marshalEvent(t, agentueui.Event{

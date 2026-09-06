@@ -25,7 +25,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 
 		if request.URL.Path == "/v1/conversations/root/speak" {
-			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)})
+			_ = json.NewEncoder(response).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			return
 		}
 		if request.URL.Path == "/v1/conversations/workspace/speak" {
@@ -36,7 +36,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 			if input.Key != "input/route" || input.Actor.Kind != loopd.ActorKindHarness || !input.Stream {
 				t.Errorf("output=%+v", input)
 			}
-			_ = json.NewEncoder(response).Encode(loopd.Message{ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)})
+			_ = json.NewEncoder(response).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			return
 		}
 		if request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/events") {
@@ -186,7 +186,7 @@ func TestCustomPromptIdentityAndTimeout(t *testing.T) {
 			var in loopd.SpeakRequest
 			_ = json.NewDecoder(r.Body).Decode(&in)
 			author = in.Actor
-			_ = json.NewEncoder(w).Encode(loopd.Message{ID: "output", Revision: 1, Content: in.Content})
+			_ = json.NewEncoder(w).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output", Revision: 1, Content: in.Content})
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":"event"}`))

@@ -14,7 +14,21 @@ type Conversation struct {
 	Timestamped
 }
 
+type MessageStatus string
+
+const (
+	MessageStatusStreaming MessageStatus = "streaming"
+	MessageStatusCompleted MessageStatus = "completed"
+	MessageStatusFailed    MessageStatus = "failed"
+	MessageStatusCancelled MessageStatus = "cancelled"
+)
+
+func (status MessageStatus) Terminal() bool {
+	return status == MessageStatusCompleted || status == MessageStatusFailed || status == MessageStatusCancelled
+}
+
 type Message struct {
+	Status         MessageStatus   `json:"status"`
 	TargetKind     ActorKind       `json:"target_kind,omitempty"`
 	TargetKey      string          `json:"target_key,omitempty"`
 	ReplyToID      string          `json:"reply_to_id,omitempty"`
@@ -44,12 +58,5 @@ type SpeakRequest struct {
 // Ended reports whether the message writer has finished sending. It says nothing
 // about the conversation, the consumer position, or any business execution.
 func (message Message) Ended() bool {
-	var value struct {
-		Meta struct {
-			Output struct {
-				Ended bool `json:"ended"`
-			} `json:"output"`
-		} `json:"meta"`
-	}
-	return json.Unmarshal(message.Content, &value) == nil && value.Meta.Output.Ended
+	return message.Status.Terminal()
 }

@@ -16,8 +16,8 @@ import (
 // +case=`Speak defaults to an already-ended message; streaming handles restore revision, retry the same seq, and End idempotently.`
 func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	ctx := context.Background()
-	snapshot := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)
-	value := loopd.Message{ID: "output", Revision: 7, Content: snapshot}
+	snapshot := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
+	value := loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output", Revision: 7, Content: snapshot}
 	var seqs []uint64
 	fail := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +26,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 			var input loopd.SpeakRequest
 			_ = json.NewDecoder(r.Body).Decode(&input)
 			if !input.Stream {
-				_ = json.NewEncoder(w).Encode(loopd.Message{ID: "once", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":true}},"blocks":[]}`)})
+				_ = json.NewEncoder(w).Encode(loopd.Message{Status: loopd.MessageStatusCompleted, ID: "once", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			} else {
 				_ = json.NewEncoder(w).Encode(value)
 			}
@@ -41,7 +41,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 			}
 			value.Revision = input.Event.Seq
 			if input.Event.Op == ui.OpEnd {
-				value.Content = json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":true}},"blocks":[]}`)
+				value.Status = loopd.MessageStatusCompleted
 			}
 			fmt.Fprint(w, `{"id":"cursor"}`)
 		default:
@@ -106,7 +106,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 // +case=`An exhausted ambiguous update cannot be skipped by another Emit, End, or Speak refresh.`
 func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 	ctx := context.Background()
-	value := loopd.Message{ID: "stream", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{"output":{"ended":false}},"blocks":[]}`)}
+	value := loopd.Message{Status: loopd.MessageStatusStreaming, ID: "stream", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 	attempts, fail := 0, true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/conversations/conv/speak" {
@@ -151,5 +151,62 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 	fail = false
 	if err := stream.Emit(ctx, update); err != nil || attempts != 4 {
 		t.Fatalf("retry pending: attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestMessageEndStatus(t *testing.T) {
+	for _, status := range []loopd.MessageStatus{loopd.MessageStatusFailed, loopd.MessageStatusCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			value := loopd.Message{ID: "stream", Status: loopd.MessageStatusStreaming, Revision: 1, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
+			writes := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/conversations/conv/speak" {
+					_ = json.NewEncoder(w).Encode(value)
+					return
+				}
+				var input struct {
+					Event  json.RawMessage
+					Status loopd.MessageStatus
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Error(err)
+				}
+				event, err := ui.Parse(input.Event)
+				if err != nil || event.Op != ui.OpEnd || input.Status != status {
+					t.Errorf("invalid End: %+v %v", input, err)
+				}
+				value.Status, value.Revision = input.Status, event.Seq
+				writes++
+				w.WriteHeader(202)
+			}))
+			defer server.Close()
+			rt, err := New(server.URL, Options{HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			ctx := context.Background()
+			stream, err := rt.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Key: "step", Stream: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := stream.End(ctx, loopd.MessageStatusStreaming); err == nil {
+				t.Fatal("accepted nonterminal End")
+			}
+			for i := 0; i < 2; i++ {
+				if err := stream.End(ctx, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if writes != 1 || stream.Value().Status != status {
+				t.Fatalf("writes=%d status=%s", writes, stream.Value().Status)
+			}
+			if err := stream.End(ctx); err == nil {
+				t.Fatal("replaced failure/cancellation with success")
+			}
+			if string(stream.Value().Content) != `{"biz":"chat","blocks":[],"meta":{},"version":"1.1"}` {
+				t.Fatalf("status leaked into content: %s", stream.Value().Content)
+			}
+		})
 	}
 }

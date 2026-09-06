@@ -41,6 +41,64 @@ func TestOneShotSpeakNeedsNoMessageStream(t *testing.T) {
 	}
 }
 
+// Terminal delivery status survives bridge loss and cannot be changed by a retry.
+func TestMessageTerminalStatuses(t *testing.T) {
+	for _, status := range []loopd.MessageStatus{loopd.MessageStatusCompleted, loopd.MessageStatusFailed, loopd.MessageStatusCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			store, writer, _ := outputFixture(t)
+			ctx := context.Background()
+			message, err := store.Speak(ctx, "root", outputRequest("terminal"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if message.Status != "streaming" {
+				t.Fatalf("initial status=%s", message.Status)
+			}
+			if _, err := writer.EmitMessage(ctx, message.ID, outputText(t, 2, "partial"), status); !errors.Is(err, ErrInvalidEvent) {
+				t.Fatalf("non-End accepted status: %v", err)
+			}
+			end := marshalEvent(t, ui.End(2))
+			for i := 0; i < 2; i++ {
+				if _, err := writer.EmitMessage(ctx, message.ID, end, status); err != nil {
+					t.Fatal(err)
+				}
+			}
+			saved, err := store.GetMessage(ctx, message.ID)
+			if err != nil || saved.Status != string(status) || !visibleMessage(saved).Ended() || strings.Contains(string(saved.Content), `"ended"`) {
+				t.Fatalf("saved=%+v err=%v", saved, err)
+			}
+			if _, err := writer.EmitMessage(ctx, message.ID, end, loopd.MessageStatusStreaming); !errors.Is(err, ErrInvalidEvent) {
+				t.Fatalf("invalid terminal: %v", err)
+			}
+			other := loopd.MessageStatusFailed
+			if status == other {
+				other = loopd.MessageStatusCompleted
+			}
+			if _, err := writer.EmitMessage(ctx, message.ID, end, other); !errors.Is(err, repo.ErrConflict) {
+				t.Fatalf("terminal changed: %v", err)
+			}
+			if err := writer.events.Delete(ctx, "message/"+message.ID); err != nil {
+				t.Fatal(err)
+			}
+			stop := errors.New("observed terminal snapshot")
+			observeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			err = writer.Stream(observeCtx, "task", "root", "", func(event Event) error {
+				if event.MessageID == message.ID {
+					if event.Message.Status != status {
+						t.Fatalf("replay status=%s", event.Message.Status)
+					}
+					return stop
+				}
+				return nil
+			})
+			if !errors.Is(err, stop) {
+				t.Fatalf("restore terminal snapshot: %v", err)
+			}
+		})
+	}
+}
+
 type interruptedBridge struct {
 	runner.EventBridge
 	fail bool
@@ -117,12 +175,12 @@ type failingProjection struct {
 	fail bool
 }
 
-func (store *failingProjection) ProjectOutput(ctx context.Context, id string, event ui.Event) error {
+func (store *failingProjection) ProjectOutput(ctx context.Context, id string, event ui.Event, statuses ...loopd.MessageStatus) error {
 	if store.fail {
 		store.fail = false
 		return errors.New("projection temporarily unavailable")
 	}
-	return store.Store.ProjectOutput(ctx, id, event)
+	return store.Store.ProjectOutput(ctx, id, event, statuses...)
 }
 
 // +case=`End follows the same seq/retry contract as content; persisted End survives Redis loss and forbids further output.`
@@ -239,7 +297,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 }
 
 func TestOutputMetadataCannotBeForged(t *testing.T) {
-	for _, mask := range []string{"meta.output.ended", "meta.human.status"} {
+	for _, mask := range []string{"meta.output.last_event", "meta.human.status"} {
 		data := marshalEvent(t, ui.Event{Op: ui.OpSet, Seq: 2, Mask: mask, Meta: map[string]any{"ended": true, "status": "success"}})
 		if _, err := parseOutputEvent(data); !errors.Is(err, ErrInvalidEvent) {
 			t.Fatalf("mask %s accepted: %v", mask, err)
