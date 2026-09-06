@@ -12,7 +12,7 @@ rbac:
 
 server:
   # Inactivity timeout for streaming messages and Redis event retention.
-  messageTTL: 720h
+  messageTTL: 24h
   # v1 keeps one server replica even when an external MySQL is configured.
   replicaCount: 1
   image:

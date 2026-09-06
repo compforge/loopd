@@ -4,4 +4,4 @@ import "time"
 
 // DefaultMessageTTL bounds inactive output and Redis event retention. Each store
 // renews independently; Redis eviction never determines a message's SQL status.
-const DefaultMessageTTL = 30 * 24 * time.Hour
+const DefaultMessageTTL = 24 * time.Hour

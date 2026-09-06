@@ -142,7 +142,7 @@ Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自�
 
 ### 失活与 TTL
 
-`MESSAGE_TTL` 统一配置输出失活期限与 Redis 事件保留期限，默认 720h。
+`MESSAGE_TTL` 统一配置输出失活期限与 Redis 事件保留期限，默认 24h。
 server 按 DB 的 `updated_at + TTL` 定期将 streaming 消息标记为 expired，并递增 revision；
 无需 expires_at 列。保留最后正文与最后活动时间，页面展示“已过期”，迟到写入不能恢复该消息。
 

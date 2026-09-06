@@ -15,6 +15,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if config.address != ":8080" || config.databaseDriver != "sqlite" || config.databaseDSN != "loopd.db" {
 		t.Fatalf("config = %#v", config)
 	}
+	if config.messageTTL != 24*time.Hour {
+		t.Fatalf("default message TTL = %s, want 24h", config.messageTTL)
+	}
 	if config.redisAddress != "127.0.0.1:6379" || config.taskNamespace != "default" || config.taskClientTimeout != 10*time.Second {
 		t.Fatalf("task config = %#v", config)
 	}
