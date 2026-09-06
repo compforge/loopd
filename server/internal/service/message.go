@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/qiankunli/go-stdx/uuid"
@@ -29,16 +29,16 @@ func NewMessageService(repository repo.MessageRepository, logger *slog.Logger) *
 
 // Speak is independent of user input and transport completion. Notification
 // retries are carried by the message's existing dispatch marker.
-func (service *MessageService) Speak(ctx context.Context, convID string, request loopd.SpeakRequest) (loopd.Message, error) {
+func (service *MessageService) Speak(ctx context.Context, convID string, request contract.SpeakRequest) (contract.Message, error) {
 	if !request.Actor.ValidTarget() || strings.TrimSpace(request.Key) == "" ||
-		(request.Target != (loopd.ActorRef{}) && (!request.Target.Kind.Valid() || request.Target.Key == "")) {
-		return loopd.Message{}, ErrInvalid
+		(request.Target != (contract.ActorRef{}) && (!request.Target.Kind.Valid() || request.Target.Key == "")) {
+		return contract.Message{}, ErrInvalid
 	}
 	if len(request.Content) == 0 {
 		request.Content = []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)
 	}
 	if validateContent(request.Content) != nil {
-		return loopd.Message{}, ErrInvalid
+		return contract.Message{}, ErrInvalid
 	}
 	message, err := service.repo.Speak(ctx, convID, request)
 	if err == nil {
@@ -52,18 +52,18 @@ func (service *MessageService) CreateMessage(
 	ctx context.Context,
 	conversationID string,
 	taskID string,
-	kind loopd.ActorKind,
+	kind contract.ActorKind,
 	key string,
 	content json.RawMessage,
-) (loopd.Message, error) {
+) (contract.Message, error) {
 	if strings.TrimSpace(taskID) == "" || !kind.Valid() || strings.TrimSpace(key) == "" || validateContent(content) != nil {
-		return loopd.Message{}, ErrInvalid
+		return contract.Message{}, ErrInvalid
 	}
 	message, err := service.repo.CreateMessage(ctx, model.Message{
 		ID:             uuid.V7(),
 		ConversationID: conversationID,
 		TaskID:         strings.TrimSpace(taskID),
-		Kind:           string(kind),
+		Kind:           kind,
 		ActorKey:       strings.TrimSpace(key),
 		Content:        content,
 	})
@@ -84,27 +84,27 @@ func (service *MessageService) ListMessages(
 	conversationID string,
 	after string,
 	limit int,
-) ([]loopd.Message, error) {
+) ([]contract.Message, error) {
 	limit = pageSize(limit)
 	rows, err := service.repo.ListMessages(ctx, conversationID, after, limit)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]loopd.Message, 0, len(rows))
+	messages := make([]contract.Message, 0, len(rows))
 	for _, row := range rows {
 		messages = append(messages, messageFromModel(row))
 	}
 	return messages, nil
 }
 
-func messageFromModel(value model.Message) loopd.Message {
-	return loopd.Message{
-		Status:     loopd.MessageStatus(value.Status),
-		TargetKind: loopd.ActorKind(value.TargetKind), TargetKey: value.TargetKey,
+func messageFromModel(value model.Message) contract.Message {
+	return contract.Message{
+		Status:     contract.MessageStatus(value.Status),
+		TargetKind: value.TargetKind, TargetKey: value.TargetKey,
 		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
-		Kind: loopd.ActorKind(value.Kind), Key: value.ActorKey, Content: json.RawMessage(value.Content),
-		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
+		Kind: value.Kind, Key: value.ActorKey, Content: json.RawMessage(value.Content),
+		Timestamped: contract.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 }
 

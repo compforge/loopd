@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +14,7 @@ import (
 	"time"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/harness"
 )
 
 func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
@@ -25,18 +25,18 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 
 		if request.URL.Path == "/v1/conversations/root/speak" {
-			_ = json.NewEncoder(response).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
+			_ = json.NewEncoder(response).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			return
 		}
 		if request.URL.Path == "/v1/conversations/workspace/speak" {
-			var input loopd.SpeakRequest
+			var input contract.SpeakRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input.Key != "input/route" || input.Actor.Kind != loopd.ActorKindHarness || !input.Stream {
+			if input.Key != "input/route" || input.Actor.Kind != contract.ActorKindHarness || !input.Stream {
 				t.Errorf("output=%+v", input)
 			}
-			_ = json.NewEncoder(response).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
+			_ = json.NewEncoder(response).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			return
 		}
 		if request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/events") {
@@ -72,7 +72,7 @@ func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
-	stream, err := runtime.Loop.Conv.Speak(context.Background(), "root", loopd.SpeakRequest{Stream: true, Key: "status"})
+	stream, err := runtime.Loop.Conv.Speak(context.Background(), "root", contract.SpeakRequest{Stream: true, Key: "status"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,13 +180,13 @@ func (call fakeHarnessCall) Wait(context.Context) (harness.Result, error) {
 
 // +case=`Custom output identity and execution timeout are part of Call idempotency, independent of UI delivery.`
 func TestCustomPromptIdentityAndTimeout(t *testing.T) {
-	var author loopd.ActorRef
+	var author contract.ActorRef
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/speak") {
-			var in loopd.SpeakRequest
+			var in contract.SpeakRequest
 			_ = json.NewDecoder(r.Body).Decode(&in)
 			author = in.Actor
-			_ = json.NewEncoder(w).Encode(loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output", Revision: 1, Content: in.Content})
+			_ = json.NewEncoder(w).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "output", Revision: 1, Content: in.Content})
 			return
 		}
 		_, _ = w.Write([]byte(`{"id":"event"}`))
@@ -198,7 +198,7 @@ func TestCustomPromptIdentityAndTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	role := loopd.ActorRef{Kind: "operator/longhorizon/executor", Key: "run-uid"}
+	role := contract.ActorRef{Kind: "operator/longhorizon/executor", Key: "run-uid"}
 	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "run/round/1/executor", EffectKey: "execute", Target: "demo", Text: "work", Actor: &role, Timeout: time.Minute}
 	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
 	if err != nil {
@@ -210,7 +210,7 @@ func TestCustomPromptIdentityAndTimeout(t *testing.T) {
 	if author != role {
 		t.Fatalf("author=%+v", author)
 	}
-	for _, change := range []func(*Prompt){func(p *Prompt) { p.Timeout = time.Second }, func(p *Prompt) { p.ConversationID = "other" }, func(p *Prompt) { p.Actor = &loopd.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"} }} {
+	for _, change := range []func(*Prompt){func(p *Prompt) { p.Timeout = time.Second }, func(p *Prompt) { p.ConversationID = "other" }, func(p *Prompt) { p.Actor = &contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"} }} {
 		changed := prompt
 		change(&changed)
 		if _, err := runtime.Loop.Harness.Prompt(context.Background(), changed); !errors.Is(err, ErrCallConflict) {

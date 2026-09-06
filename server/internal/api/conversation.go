@@ -5,7 +5,7 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
@@ -37,11 +37,11 @@ func (server *Server) getConversation(ctx context.Context, request *hertzapp.Req
 
 func (server *Server) listConversations(ctx context.Context, request *hertzapp.RequestContext) error {
 	if parentID := request.Query("parent_id"); parentID != "" {
-		values, err := server.conversations.FindActorConversation(ctx, parentID, request.Query("actor_kind"), request.Query("actor_key"))
+		values, err := server.conversations.FindActorConversation(ctx, parentID, contract.ActorKind(request.Query("actor_kind")), request.Query("actor_key"))
 		if err != nil {
 			return err
 		}
-		request.JSON(consts.StatusOK, view.Page[loopd.Conversation]{Data: values})
+		request.JSON(consts.StatusOK, view.Page[contract.Conversation]{Data: values})
 		return nil
 	}
 
@@ -53,6 +53,6 @@ func (server *Server) listConversations(ctx context.Context, request *hertzapp.R
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, view.Page[loopd.Conversation]{Data: conversations})
+	request.JSON(consts.StatusOK, view.Page[contract.Conversation]{Data: conversations})
 	return nil
 }

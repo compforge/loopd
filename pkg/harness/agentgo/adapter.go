@@ -10,7 +10,7 @@ import (
 
 	agent "github.com/compforge/agentgo"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/harness"
 )
 
 // Factory builds one process-local Agent for a Call. It resolves the requested

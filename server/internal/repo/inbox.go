@@ -2,13 +2,14 @@ package repo
 
 import (
 	"context"
-	loopd "github.com/compforge/loopd"
+
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 )
 
 // ListInbox queries SQL, not the CRD wake signal, for the next addressed batch.
-func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, after string, limit int) ([]model.Message, error) {
+func (store *Store) ListInbox(ctx context.Context, conversationID string, kind contract.ActorKind, key, after string, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	messages, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
@@ -24,7 +25,7 @@ func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, af
 	// Do not let a consumer commit past an unfinished earlier speech. The UI
 	// may display its partial snapshot, but Poll delivers complete messages.
 	for i, message := range messages {
-		if message.Purpose == "output" && !(loopd.Message{Status: loopd.MessageStatus(message.Status)}).Ended() {
+		if message.Purpose == "output" && !(contract.Message{Status: contract.MessageStatus(message.Status)}).Ended() {
 			return messages[:i], nil
 		}
 	}

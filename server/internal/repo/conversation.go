@@ -3,17 +3,18 @@ package repo
 import (
 	"context"
 
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 )
 
 type ConversationRepository interface {
-	FindActorConversation(context.Context, string, string, string) (model.Conversation, error)
+	FindActorConversation(context.Context, string, contract.ActorKind, string) (model.Conversation, error)
 	CreateConversation(context.Context, model.Conversation) (model.Conversation, error)
 	GetConversation(context.Context, string) (model.Conversation, error)
 	ListConversations(context.Context, string, int) ([]model.Conversation, error)
 }
 
-func (store *Store) FindActorConversation(ctx context.Context, parentID, kind, key string) (model.Conversation, error) {
+func (store *Store) FindActorConversation(ctx context.Context, parentID string, kind contract.ActorKind, key string) (model.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var value model.Conversation
@@ -27,7 +28,7 @@ func (store *Store) FindActorConversation(ctx context.Context, parentID, kind, k
 func (store *Store) ListConversations(ctx context.Context, before string, limit int) ([]model.Conversation, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	query := store.db.WithContext(ctx).Where("parent_id IS NULL AND actor_kind = ?", "user")
+	query := store.db.WithContext(ctx).Where("parent_id IS NULL AND actor_kind = ?", contract.ActorKindUser)
 	if before != "" {
 		query = query.Where("id < ?", before)
 	}

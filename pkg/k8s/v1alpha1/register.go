@@ -1,5 +1,3 @@
-// Package v1alpha1 defines the Kubernetes API used by loopd to wake a selected
-// Operator or Harness for one chat task.
 package v1alpha1
 
 import (

@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -38,7 +38,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = chat.Create(ctx, "root", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
+	_, err = chat.Create(ctx, "root", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if speech.StatusCode() != 200 {
 		t.Fatalf("speak=%d %s", speech.StatusCode(), speech.Body())
 	}
-	var spoken loopd.Message
+	var spoken contract.Message
 	if err := json.Unmarshal(speech.Body(), &spoken); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	}
 	retry := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
 		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
-	var same loopd.Message
+	var same contract.Message
 	if err := json.Unmarshal(retry.Body(), &same); err != nil || same.ID != spoken.ID {
 		t.Fatalf("speech retry=%s %v", retry.Body(), err)
 	}
@@ -94,7 +94,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	}
 	view := performJSON(t, engine, "GET", "/v1/conversations/root/messages", "")
 	var history struct {
-		Data []loopd.Message `json:"data"`
+		Data []contract.Message `json:"data"`
 	}
 	if err := json.Unmarshal(view.Body(), &history); err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	}
 	once := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
 		`{"key":"once","actor":{"kind":"operator","key":"router"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"done"}]}}`)
-	var final loopd.Message
+	var final contract.Message
 	if err := json.Unmarshal(once.Body(), &final); err != nil || once.StatusCode() != 200 || !final.Ended() {
 		t.Fatalf("one-shot=%s %v", once.Body(), err)
 	}

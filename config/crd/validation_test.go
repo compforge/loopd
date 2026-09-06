@@ -9,6 +9,8 @@ import (
 	api "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/validation"
+	resourcevalidation "k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/yaml"
 )
 
@@ -37,6 +39,28 @@ func TestGeneratedCRDAdmission(t *testing.T) {
 			for _, version := range internal.Spec.Versions {
 				if version.Storage {
 					internal.Status.StoredVersions = []string{version.Name}
+				}
+				if internal.Spec.Names.Kind == "Conversation" {
+					schema := version.Schema
+					if schema == nil {
+						schema = internal.Spec.Validation
+					}
+					if schema == nil {
+						t.Fatal("Conversation schema is missing")
+					}
+					validator, _, err := resourcevalidation.NewSchemaValidator(schema.OpenAPIV3Schema)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, kind := range []string{"operator/planner", "operator/longhorizon/manager/delegate", "harness/local", "user/customer", "future-kind"} {
+						object := map[string]any{
+							"spec":   map[string]any{"participants": []any{map[string]any{"kind": kind, "key": "same"}}},
+							"status": map[string]any{"consumers": []any{map[string]any{"kind": kind, "key": "same"}}},
+						}
+						if errs := resourcevalidation.ValidateCustomResource(field.NewPath("conversation"), object, validator); len(errs) > 0 {
+							t.Fatalf("open kind %q rejected: %v", kind, errs)
+						}
+					}
 				}
 			}
 			if errs := validation.ValidateCustomResourceDefinition(context.Background(), &internal); len(errs) > 0 {

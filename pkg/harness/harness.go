@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 type Request struct {
@@ -14,7 +14,7 @@ type Request struct {
 	CallID         string
 	IdempotencyKey string
 	Prompt         string
-	Tools          []loopd.Tool
+	Tools          []contract.Tool
 }
 
 type Event struct {

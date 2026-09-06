@@ -1,13 +1,13 @@
-// Package loopd defines the stable collaboration model shared by loop-server,
+// Package contract defines the stable collaboration model shared by loop-server,
 // Operator runtimes, and Harness adapters.
-package loopd
+package contract
 
 import (
-	"regexp"
 	"strings"
 	"time"
 )
 
+// ActorKind is an open string enum. The constants name built-in participants.
 type ActorKind string
 
 const (
@@ -16,13 +16,11 @@ const (
 	ActorKindOperator ActorKind = "operator"
 )
 
-func (role ActorKind) Valid() bool {
-	switch role {
-	case ActorKindUser, ActorKindHarness, ActorKindOperator:
-		return true
-	default:
-		return len(role) <= 128 && customActorKind.MatchString(string(role))
-	}
+// Valid checks identity shape, not membership in the built-in constants.
+// ActorKind is open; namespace-prefix policy is not enforced here.
+func (kind ActorKind) Valid() bool {
+	value := string(kind)
+	return value != "" && len(value) <= 128 && strings.TrimSpace(value) == value
 }
 
 type ActorRef struct {
@@ -38,6 +36,8 @@ func (ref ActorRef) ValidTarget() bool {
 	return ref.Valid() && ref.Kind != ActorKindUser
 }
 
+// Actor describes any participant, including a user or an Operator-owned role.
+// Registry discovery currently returns only online Operators and Harnesses.
 type Actor struct {
 	ActorRef
 	DisplayName string `json:"display_name,omitempty"`
@@ -48,9 +48,6 @@ type Timestamped struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-
-// Custom actor kinds identify Operator-owned participants; they do not register a service.
-var customActorKind = regexp.MustCompile(`^operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`)
 
 func (kind ActorKind) IsOperator() bool {
 	return kind == ActorKindOperator || (kind.Valid() && strings.HasPrefix(string(kind), "operator/"))

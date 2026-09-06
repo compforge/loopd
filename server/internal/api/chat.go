@@ -8,7 +8,7 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	hertzsse "github.com/cloudwego/hertz/pkg/protocol/sse"
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/view"
 )
@@ -22,7 +22,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	}
 	conversationID := request.Param("conversation_id")
 	taskID := input.TaskID
-	var accepted *loopd.Message
+	var accepted *contract.Message
 	if taskID == "" {
 		if server.Human != nil {
 			identity, err := server.identity(ctx, request)
@@ -99,10 +99,10 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 }
 
 // Historical snapshots, live snapshots and acknowledgements use the same projection.
-func (s *Server) messageEventData(ctx context.Context, id string, message *loopd.Message, event json.RawMessage) ([]byte, error) {
+func (s *Server) messageEventData(ctx context.Context, id string, message *contract.Message, event json.RawMessage) ([]byte, error) {
 	var projected *view.Message
 	if message != nil {
-		values, err := s.messages.EnrichMessages(ctx, []loopd.Message{*message})
+		values, err := s.messages.EnrichMessages(ctx, []contract.Message{*message})
 		if err != nil {
 			return nil, err
 		}

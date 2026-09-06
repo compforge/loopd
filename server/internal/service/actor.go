@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/qiankunli/go-stdx/uuid"
 )
@@ -38,19 +38,19 @@ func (service *ActorService) RegisterOperator(
 	displayName string,
 	description string,
 	lease time.Duration,
-) (loopd.Actor, error) {
+) (contract.Actor, error) {
 	key, displayName, description, expiresAt, err := registration(key, displayName, description, lease)
 	if err != nil {
-		return loopd.Actor{}, err
+		return contract.Actor{}, err
 	}
 	registered, err := service.repo.RegisterOperator(ctx, model.Operator{
 		ID: uuid.V7(), OperatorKey: key, DisplayName: displayName,
 		Description: description, ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return loopd.Actor{}, err
+		return contract.Actor{}, err
 	}
-	service.logRenewal(ctx, loopd.ActorKindOperator, registered.OperatorKey, expiresAt)
+	service.logRenewal(ctx, contract.ActorKindOperator, registered.OperatorKey, expiresAt)
 	return operatorFromModel(registered), nil
 }
 
@@ -60,23 +60,23 @@ func (service *ActorService) RegisterHarness(
 	displayName string,
 	description string,
 	lease time.Duration,
-) (loopd.Actor, error) {
+) (contract.Actor, error) {
 	key, displayName, description, expiresAt, err := registration(key, displayName, description, lease)
 	if err != nil {
-		return loopd.Actor{}, err
+		return contract.Actor{}, err
 	}
 	registered, err := service.repo.RegisterHarness(ctx, model.Harness{
 		ID: uuid.V7(), HarnessKey: key, DisplayName: displayName,
 		Description: description, ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return loopd.Actor{}, err
+		return contract.Actor{}, err
 	}
-	service.logRenewal(ctx, loopd.ActorKindHarness, registered.HarnessKey, expiresAt)
+	service.logRenewal(ctx, contract.ActorKindHarness, registered.HarnessKey, expiresAt)
 	return harnessFromModel(registered), nil
 }
 
-func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
+func (service *ActorService) List(ctx context.Context) ([]contract.Actor, error) {
 	now := time.Now().UTC()
 	operators, err := service.repo.ListOperators(ctx, now)
 	if err != nil {
@@ -86,7 +86,7 @@ func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
 	if err != nil {
 		return nil, err
 	}
-	actors := make([]loopd.Actor, 0, len(operators)+len(harnesses))
+	actors := make([]contract.Actor, 0, len(operators)+len(harnesses))
 	for _, operator := range operators {
 		actors = append(actors, operatorFromModel(operator))
 	}
@@ -96,7 +96,7 @@ func (service *ActorService) List(ctx context.Context) ([]loopd.Actor, error) {
 	return actors, nil
 }
 
-func (service *ActorService) logRenewal(ctx context.Context, kind loopd.ActorKind, key string, expiresAt time.Time) {
+func (service *ActorService) logRenewal(ctx context.Context, kind contract.ActorKind, key string, expiresAt time.Time) {
 	service.logger.DebugContext(ctx, "registry lease renewed", "kind", kind, "key", key, "expires_at", expiresAt)
 }
 
@@ -111,17 +111,17 @@ func registration(key, displayName, description string, lease time.Duration) (st
 	return key, strings.TrimSpace(displayName), strings.TrimSpace(description), time.Now().UTC().Add(lease), nil
 }
 
-func operatorFromModel(value model.Operator) loopd.Actor {
-	return loopd.Actor{
-		ActorRef:    loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: value.OperatorKey},
+func operatorFromModel(value model.Operator) contract.Actor {
+	return contract.Actor{
+		ActorRef:    contract.ActorRef{Kind: contract.ActorKindOperator, Key: value.OperatorKey},
 		DisplayName: value.DisplayName,
 		Description: value.Description,
 	}
 }
 
-func harnessFromModel(value model.Harness) loopd.Actor {
-	return loopd.Actor{
-		ActorRef:    loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: value.HarnessKey},
+func harnessFromModel(value model.Harness) contract.Actor {
+	return contract.Actor{
+		ActorRef:    contract.ActorRef{Kind: contract.ActorKindHarness, Key: value.HarnessKey},
 		DisplayName: value.DisplayName,
 		Description: value.Description,
 	}

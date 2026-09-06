@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"time"
 
-	loopd "github.com/compforge/loopd"
 	lh "github.com/compforge/loopd/operators/longhorizon/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
 	loopruntime "github.com/compforge/loopd/runtime"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -49,7 +49,7 @@ func (c *Controller) Manager(ctx context.Context, req ctrl.Request) (ctrl.Result
 	}
 	// Persisted input checkpoint precedes Commit; retry it before any new work.
 	if run.Status.InputThrough != "" {
-		if err := c.Loop.Conv.Commit(ctx, run.Spec.Conversation.Name, loopd.CommitRequest{Actor: consumer(), Through: run.Status.InputThrough}); err != nil {
+		if err := c.Loop.Conv.Commit(ctx, run.Spec.Conversation.Name, contract.CommitRequest{Actor: consumer(), Through: run.Status.InputThrough}); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -151,9 +151,9 @@ Current facts:
 		run.Status.LastAudit = nil
 		run.Status.Phase = "Executing"
 	case "ask", "blocked":
-		request := loopd.HumanRequest{ConversationID: run.Spec.Conversation.Name, Actor: actor(&run, ActorManager), Target: recipient(&run), ReplyToID: run.Spec.InputMessageID, EffectKey: "validate", Type: "ask", Title: "LongHorizon", Prompt: decision.Question, Timeout: c.Config.HumanTimeout, AllowOther: decision.AllowOther}
+		request := contract.HumanRequest{ConversationID: run.Spec.Conversation.Name, Actor: actor(&run, ActorManager), Target: recipient(&run), ReplyToID: run.Spec.InputMessageID, EffectKey: "validate", Type: "ask", Title: "LongHorizon", Prompt: decision.Question, Timeout: c.Config.HumanTimeout, AllowOther: decision.AllowOther}
 		for _, choice := range decision.Choices {
-			request.Choices = append(request.Choices, loopd.HumanChoice{Value: choice.Value, Label: choice.Label})
+			request.Choices = append(request.Choices, contract.HumanChoice{Value: choice.Value, Label: choice.Label})
 		}
 		if err := request.Validate(); err != nil {
 			return c.failure(ctx, before, &run, "Invalid human question: "+err.Error())
@@ -321,7 +321,7 @@ func (c *Controller) human(ctx context.Context, run *lh.Run) (ctrl.Result, error
 			}
 			request := loopruntime.AskRequest{ConversationID: run.Spec.Conversation.Name, Actor: author, Target: recipient(run), ReplyToID: run.Spec.InputMessageID, EffectKey: key, Title: "LongHorizon needs your input", Prompt: d.Question, Timeout: c.Config.HumanTimeout, AllowOther: d.AllowOther}
 			for _, choice := range d.Choices {
-				request.Choices = append(request.Choices, loopd.HumanChoice{Value: choice.Value, Label: choice.Label})
+				request.Choices = append(request.Choices, contract.HumanChoice{Value: choice.Value, Label: choice.Label})
 			}
 			handle, err = c.Loop.Human.Ask(ctx, request)
 		} else {
@@ -341,10 +341,10 @@ func (c *Controller) human(ctx context.Context, run *lh.Run) (ctrl.Result, error
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if result.Status == loopd.HumanPending {
+	if result.Status == contract.HumanPending {
 		return waiting()
 	}
-	accepted := result.Status == loopd.HumanSuccess && (run.Status.HumanReason == "ask" || result.Value == "accepted")
+	accepted := result.Status == contract.HumanSuccess && (run.Status.HumanReason == "ask" || result.Value == "accepted")
 	if !accepted {
 		appendRound(run, "human", "Human interaction ended: "+string(result.Status)+" "+result.Value, []string{run.Status.HumanMessageID})
 		run.Status.Phase = "Stopped"
@@ -398,12 +398,12 @@ func (c *Controller) human(ctx context.Context, run *lh.Run) (ctrl.Result, error
 func (c *Controller) receive(ctx context.Context, run *lh.Run) (ctrl.Result, error) {
 	before := run.DeepCopy()
 	if len(run.Status.InputMessageIDs) < 100 {
-		polled, err := c.Loop.Conv.Poll(ctx, run.Spec.Conversation.Name, loopd.PollRequest{Actor: consumer(), After: run.Status.InputThrough, Limit: 32})
+		polled, err := c.Loop.Conv.Poll(ctx, run.Spec.Conversation.Name, contract.PollRequest{Actor: consumer(), After: run.Status.InputThrough, Limit: 32})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		for _, m := range polled.Messages {
-			if m.Kind == loopd.ActorKindUser && m.Purpose == "input" {
+			if m.Kind == contract.ActorKindUser && m.Purpose == "input" {
 				text := messageText(m)
 				if m.Key != run.Spec.UserKey || len(run.Status.InputMessageIDs) >= 100 || len(run.Status.Guidance)+len(text)+len(m.ID)+8 > 16000 {
 					break
@@ -430,7 +430,7 @@ func (c *Controller) finish(ctx context.Context, run *lh.Run) (ctrl.Result, erro
 		return ctrl.Result{}, client.IgnoreNotFound(c.Client.Delete(ctx, run, client.Preconditions{UID: &run.UID}, client.PropagationPolicy(metav1.DeletePropagationBackground)))
 	}
 	if run.Status.FinalMessageID == "" {
-		m, err := c.Loop.Conv.Speak(ctx, run.Spec.Conversation.Name, loopd.SpeakRequest{Key: string(run.UID) + "/final", Actor: actor(run, ActorManager), Target: recipient(run), ReplyToID: run.Spec.InputMessageID, Content: reportContent(report{Text: run.Status.Summary}, "LongHorizon · "+run.Status.Phase, "manager")})
+		m, err := c.Loop.Conv.Speak(ctx, run.Spec.Conversation.Name, contract.SpeakRequest{Key: string(run.UID) + "/final", Actor: actor(run, ActorManager), Target: recipient(run), ReplyToID: run.Spec.InputMessageID, Content: reportContent(report{Text: run.Status.Summary}, "LongHorizon · "+run.Status.Phase, "manager")})
 		if err != nil {
 			return ctrl.Result{}, err
 		}

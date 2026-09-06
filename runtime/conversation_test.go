@@ -7,13 +7,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	loopd "github.com/compforge/loopd"
-	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestConversationWatchOnlyWakesAddressedActor(t *testing.T) {
-	predicate := ConversationPredicate(loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"})
+	predicate := ConversationPredicate(contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"})
 	original := &conversationv1.Conversation{
 		Spec: conversationv1.ConversationSpec{Participants: []conversationv1.ConversationParticipant{
 			{Kind: "operator", Key: "a", EndOffset: "001"},
@@ -57,17 +57,17 @@ func TestConversationReadAndPollUseDifferentVerbs(t *testing.T) {
 			if r.URL.Query().Get("after") != "001" {
 				t.Error("Read omitted caller's history position")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": []loopd.Message{{ID: "002"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []contract.Message{{ID: "002"}}})
 		case "POST /v1/conversations/conv/poll":
 			poll++
-			var request loopd.PollRequest
+			var request contract.PollRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				t.Error(err)
 			}
 			if request.Actor.Key != "a" || request.Limit != 10 {
 				t.Errorf("Poll request = %+v", request)
 			}
-			_ = json.NewEncoder(w).Encode(loopd.PollResult{Messages: []loopd.Message{{ID: "003"}}, Position: "003"})
+			_ = json.NewEncoder(w).Encode(contract.PollResult{Messages: []contract.Message{{ID: "003"}}, Position: "003"})
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
@@ -83,8 +83,8 @@ func TestConversationReadAndPollUseDifferentVerbs(t *testing.T) {
 	if err != nil || len(messages) != 1 || messages[0].ID != "002" {
 		t.Fatalf("Read = %+v, %v", messages, err)
 	}
-	result, err := runtime.Loop.Conv.Poll(context.Background(), "conv", loopd.PollRequest{
-		Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}, Limit: 10,
+	result, err := runtime.Loop.Conv.Poll(context.Background(), "conv", contract.PollRequest{
+		Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"}, Limit: 10,
 	})
 	if err != nil || result.Position != "003" {
 		t.Fatalf("Poll = %+v, %v", result, err)

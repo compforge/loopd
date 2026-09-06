@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -41,7 +41,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 	}
 	lookup := &countedMessageLookup{Store: store}
 	service := NewMessageService(lookup, nil)
-	r := loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: "operator", Key: "interaction"}, Target: loopd.ActorRef{Kind: "user", Key: "alice"}, Type: "ask", EffectKey: "scope", Title: "Choose scope", Prompt: "Pick one", Choices: []loopd.HumanChoice{{Value: "brief", Label: "简要说明"}, {Value: "full", Label: "完整说明"}}, Timeout: time.Minute}
+	r := contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: "operator", Key: "interaction"}, Target: contract.ActorRef{Kind: "user", Key: "alice"}, Type: "ask", EffectKey: "scope", Title: "Choose scope", Prompt: "Pick one", Choices: []contract.HumanChoice{{Value: "brief", Label: "简要说明"}, {Value: "full", Label: "完整说明"}}, Timeout: time.Minute}
 	question, err := store.CreateHuman(ctx, r)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	answered, err := store.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: question.Message.ID, Outcome: loopd.HumanSuccess, Value: "brief"})
+	answered, err := store.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: question.Message.ID, Outcome: contract.HumanSuccess, Value: "brief"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 	// Supplying both in an acknowledgement needs no database lookups.
 	lookup.lookups = nil
 	lookup.answerLookups = 0
-	views, err = service.EnrichMessages(ctx, []loopd.Message{answered.Message, *answered.Reply})
+	views, err = service.EnrichMessages(ctx, []contract.Message{answered.Message, *answered.Reply})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 		if convID == "conv" {
 			copy.ReplyToID = "missing"
 		}
-		views, err = service.EnrichMessages(ctx, []loopd.Message{copy})
+		views, err = service.EnrichMessages(ctx, []contract.Message{copy})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +119,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 	// Only typed user answers inherit question cards.
 	ordinary := *answered.Reply
 	ordinary.Purpose = "output"
-	views, err = service.EnrichMessages(ctx, []loopd.Message{ordinary})
+	views, err = service.EnrichMessages(ctx, []contract.Message{ordinary})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestEnrichmentBatchesReferencesWithoutFollowingChains(t *testing.T) {
 	}
 	lookup := &countedMessageLookup{Store: store}
 	service := NewMessageService(lookup, nil)
-	messages := []loopd.Message{{ID: "one", ConversationID: "conv", ReplyToID: "parent", Content: textContent("one")}, {ID: "two", ConversationID: "conv", ReplyToID: "parent", Content: textContent("two")}}
+	messages := []contract.Message{{ID: "one", ConversationID: "conv", ReplyToID: "parent", Content: textContent("one")}, {ID: "two", ConversationID: "conv", ReplyToID: "parent", Content: textContent("two")}}
 	views, err := service.EnrichMessages(ctx, messages)
 	if err != nil {
 		t.Fatal(err)

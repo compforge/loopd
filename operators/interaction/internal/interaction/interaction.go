@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
+	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	rt "github.com/compforge/loopd/runtime"
-	convapi "github.com/compforge/loopd/runtime/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -20,7 +20,7 @@ import (
 
 const OperatorKey = "interaction"
 
-var actor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: OperatorKey}
+var actor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: OperatorKey}
 
 type Reconciler struct{ loop rt.Loop }
 
@@ -41,7 +41,7 @@ func (d *Reconciler) SetupWithManager(mgr manager.Manager) error {
 func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	// Keep the input uncommitted while waiting. Re-reading it restores the
 	// same question identities without process-local workflow state.
-	inbox, err := d.loop.Conv.Poll(ctx, request.Name, loopd.PollRequest{Actor: actor, Limit: 1})
+	inbox, err := d.loop.Conv.Poll(ctx, request.Name, contract.PollRequest{Actor: actor, Limit: 1})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -49,7 +49,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind == loopd.ActorKindUser && message.Purpose != "human_reply" {
+	if message.Kind == contract.ActorKindUser && message.Purpose != "human_reply" {
 		pending, err := d.interact(ctx, request.Name, message)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -62,7 +62,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	}
 	// Card replies are already observed through Human handles. Consuming them
 	// must not create another Ask and prompt the user indefinitely.
-	if err := d.loop.Conv.Commit(ctx, request.Name, loopd.CommitRequest{Actor: actor, Through: inbox.Position}); err != nil {
+	if err := d.loop.Conv.Commit(ctx, request.Name, contract.CommitRequest{Actor: actor, Through: inbox.Position}); err != nil {
 		return ctrl.Result{}, err
 	}
 	slog.InfoContext(ctx, "interaction input committed", "conversation_id", request.Name,
@@ -70,7 +70,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 }
 
-func (d *Reconciler) interact(ctx context.Context, conversationID string, message loopd.Message) (bool, error) {
+func (d *Reconciler) interact(ctx context.Context, conversationID string, message contract.Message) (bool, error) {
 	var input struct {
 		Blocks []struct {
 			Type    string `json:"type"`
@@ -87,7 +87,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		}
 	}
 	query := strings.Join(parts, "\n")
-	target := loopd.ActorRef{Kind: loopd.ActorKindUser, Key: message.Key}
+	target := contract.ActorRef{Kind: contract.ActorKindUser, Key: message.Key}
 	askPrompt := fmt.Sprintf("关于你的问题：%s\n你希望以哪种方式处理？", query)
 	// Inputs stay identical across retries. The server owns the original
 	// deadline and immutable result, so restarting never resets the 10s wait.
@@ -95,7 +95,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		ConversationID: conversationID, Actor: actor, Target: target, ReplyToID: message.ID,
 		EffectKey: message.ID + "/answer-style", Timeout: 10 * time.Second,
 		Title: "选择处理方式", Prompt: askPrompt,
-		Choices: []loopd.HumanChoice{
+		Choices: []contract.HumanChoice{
 			{Value: "brief", Label: "简要说明"},
 			{Value: "steps", Label: "分步骤说明"},
 			{Value: "examples", Label: "举例说明"},
@@ -112,7 +112,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		return true, nil
 	}
 	lines := []string{"交互结果", "原始问题：" + query, "Ask：" + askPrompt, "你的选择：" + outcome(choice)}
-	if choice.Status == loopd.HumanSuccess {
+	if choice.Status == contract.HumanSuccess {
 		prompt := "你选择了「" + outcome(choice) + "」。是否确认按这个方式处理？（本例只汇总交互，不调用模型或执行外部操作。）"
 		confirm, err := d.loop.Human.Confirm(ctx, rt.ConfirmRequest{
 			ConversationID: conversationID, Actor: actor, Target: target, ReplyToID: message.ID,
@@ -141,7 +141,7 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 		return false, err
 	}
 	// Stable message identity lets delivery or Commit retry without another answer.
-	if _, err := d.loop.Conv.Speak(ctx, conversationID, loopd.SpeakRequest{
+	if _, err := d.loop.Conv.Speak(ctx, conversationID, contract.SpeakRequest{
 		Key: message.ID + "/summary", Actor: actor, Target: target, ReplyToID: message.ID,
 		Content: content,
 	}); err != nil {
@@ -150,15 +150,15 @@ func (d *Reconciler) interact(ctx context.Context, conversationID string, messag
 	return false, nil
 }
 
-func outcome(result loopd.HumanResult) string {
+func outcome(result contract.HumanResult) string {
 	switch result.Status {
-	case loopd.HumanDismissed:
+	case contract.HumanDismissed:
 		return "已取消"
-	case loopd.HumanTimeout:
+	case contract.HumanTimeout:
 		return "已超时（未在 10 秒内操作）"
-	case loopd.HumanFailure:
+	case contract.HumanFailure:
 		return "交互失败：" + result.Reason
-	case loopd.HumanSuccess:
+	case contract.HumanSuccess:
 		switch result.Value {
 		case "brief":
 			return "简要说明"

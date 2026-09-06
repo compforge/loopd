@@ -14,11 +14,11 @@ import (
 	"time"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
-	"github.com/compforge/loopd/harness"
 	lh "github.com/compforge/loopd/operators/longhorizon/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/pkg/harness"
+	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	lr "github.com/compforge/loopd/runtime"
-	convapi "github.com/compforge/loopd/runtime/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,30 +36,30 @@ type fixture struct {
 	runtime      *lr.Runtime
 	server       *httptest.Server
 	mu           sync.Mutex
-	messages     map[string]loopd.Message
+	messages     map[string]contract.Message
 	outputs      map[string]string
 	scripts      map[string][]string
 	calls        map[string]int
 	prompts      map[string][]string
-	human        loopd.HumanResult
-	humanRequest loopd.HumanRequest
+	human        contract.HumanResult
+	humanRequest contract.HumanRequest
 	failEnd      bool
 	failSeal     bool
 	commitError  bool
 	committed    string
-	pending      []loopd.Message
-	history      []loopd.Message
+	pending      []contract.Message
+	history      []contract.Message
 }
 
-func newFixture(t *testing.T, history ...loopd.Message) *fixture {
+func newFixture(t *testing.T, history ...contract.Message) *fixture {
 	t.Helper()
-	f := &fixture{t: t, messages: map[string]loopd.Message{}, outputs: map[string]string{}, scripts: map[string][]string{}, calls: map[string]int{}, prompts: map[string][]string{}}
+	f := &fixture{t: t, messages: map[string]contract.Message{}, outputs: map[string]string{}, scripts: map[string][]string{}, calls: map[string]int{}, prompts: map[string][]string{}}
 	f.history = history
 	for _, m := range history {
 		f.messages[m.ID] = m
 	}
-	f.messages["input"] = loopd.Message{ID: "input", ConversationID: "conv", TaskID: "delivery", Kind: loopd.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Create a correct artifact."}]}`)}
-	f.pending = []loopd.Message{f.messages["input"]}
+	f.messages["input"] = contract.Message{ID: "input", ConversationID: "conv", TaskID: "delivery", Kind: contract.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Create a correct artifact."}]}`)}
+	f.pending = []contract.Message{f.messages["input"]}
 	scheme := runtime.NewScheme()
 	if err := lh.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -146,13 +146,13 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/poll"):
-		var in loopd.PollRequest
+		var in contract.PollRequest
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		after := in.After
 		if after == "" {
 			after = f.committed
 		}
-		var messages []loopd.Message
+		var messages []contract.Message
 		for _, m := range f.pending {
 			if m.ID > after {
 				messages = append(messages, m)
@@ -165,25 +165,25 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		if len(messages) > 0 {
 			position = messages[len(messages)-1].ID
 		}
-		write(loopd.PollResult{Messages: messages, Position: position, Committed: f.committed})
+		write(contract.PollResult{Messages: messages, Position: position, Committed: f.committed})
 	case strings.HasSuffix(r.URL.Path, "/commit"):
 		if f.commitError {
 			w.WriteHeader(503)
 			return
 		}
-		var in loopd.CommitRequest
+		var in contract.CommitRequest
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		if in.Through > f.committed {
 			f.committed = in.Through
 		}
 		w.WriteHeader(204)
 	case strings.HasSuffix(r.URL.Path, "/actors"):
-		write(loopd.Conversation{ID: "workspace"})
+		write(contract.Conversation{ID: "workspace"})
 	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/messages"):
 		convID := strings.Split(r.URL.Path, "/")[3]
 		after := r.URL.Query().Get("after")
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		var messages []loopd.Message
+		var messages []contract.Message
 		for _, m := range f.messages {
 			include := m.ConversationID == convID
 			if convID == "conv" {
@@ -203,7 +203,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		write(map[string]any{"data": messages})
 	case strings.HasSuffix(r.URL.Path, "/speak"):
-		var in loopd.SpeakRequest
+		var in contract.SpeakRequest
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			f.t.Error(err)
 		}
@@ -216,11 +216,11 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			if len(content) == 0 {
 				content = json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 			}
-			status := loopd.MessageStatusCompleted
+			status := contract.MessageStatusCompleted
 			if in.Stream {
-				status = loopd.MessageStatusStreaming
+				status = contract.MessageStatusStreaming
 			}
-			f.messages[id] = loopd.Message{Status: status, ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Purpose: "output", Revision: 1, Content: content}
+			f.messages[id] = contract.Message{Status: status, ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Purpose: "output", Revision: 1, Content: content}
 		}
 		write(f.messages[id])
 	case strings.HasPrefix(r.URL.Path, "/v1/messages/") && strings.HasSuffix(r.URL.Path, "/events"):
@@ -241,7 +241,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(503)
 				return
 			}
-			m.Status = loopd.MessageStatusCompleted
+			m.Status = contract.MessageStatusCompleted
 			m.Revision = in.Event.Seq
 			f.messages[id] = m
 			write(map[string]string{"id": "end"})
@@ -273,7 +273,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error(err)
 		}
 		f.human.Message.ID = "question"
-		f.human.Status = loopd.HumanPending
+		f.human.Status = contract.HumanPending
 		write(f.human)
 	case r.URL.Path == "/v1/human/question":
 		write(f.human)
@@ -424,11 +424,11 @@ func TestReportCheckpointAndPersistFailure(t *testing.T) {
 func TestHumanFallbackAndBudget(t *testing.T) {
 	for _, outcome := range []struct {
 		name   string
-		status loopd.HumanStatus
+		status contract.HumanStatus
 		value  string
 		budget int32
 		phase  string
-	}{{"timeout", loopd.HumanTimeout, "", 25, "Stopped"}, {"dismiss", loopd.HumanDismissed, "", 25, "Stopped"}, {"decline", loopd.HumanSuccess, "declined", 25, "Stopped"}, {"accept", loopd.HumanSuccess, "accepted", 50, "Receiving"}} {
+	}{{"timeout", contract.HumanTimeout, "", 25, "Stopped"}, {"dismiss", contract.HumanDismissed, "", 25, "Stopped"}, {"decline", contract.HumanSuccess, "declined", 25, "Stopped"}, {"accept", contract.HumanSuccess, "accepted", 50, "Receiving"}} {
 		t.Run(outcome.name, func(t *testing.T) {
 			f := newFixture(t)
 			r := f.run()
@@ -510,10 +510,10 @@ func TestCompletionRequiresCurrentCleanAudit(t *testing.T) {
 }
 
 func TestNewRunReferencesOnlyImmutablePriorContext(t *testing.T) {
-	prior := loopd.Message{ID: "earlier", ConversationID: "previous", Kind: loopd.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Artifact must include a license."}]}`)}
+	prior := contract.Message{ID: "earlier", ConversationID: "previous", Kind: contract.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Artifact must include a license."}]}`)}
 	active := prior
 	active.ID = "still-running"
-	active.Kind = loopd.ActorKindOperator
+	active.Kind = contract.ActorKindOperator
 	active.Purpose = "response"
 	f := newFixture(t, prior, active)
 	run := f.run()
@@ -534,7 +534,7 @@ func TestHumanGuidanceAccumulatesAndInvalidatesAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.mu.Lock()
-	f.human = loopd.HumanResult{Status: loopd.HumanSuccess, Value: "Also add tests."}
+	f.human = contract.HumanResult{Status: contract.HumanSuccess, Value: "Also add tests."}
 	f.mu.Unlock()
 	if _, err := f.c.Manager(context.Background(), request("input")); err != nil {
 		t.Fatal(err)
@@ -546,8 +546,8 @@ func TestHumanGuidanceAccumulatesAndInvalidatesAudit(t *testing.T) {
 }
 
 func TestHistoricalHumanReplyUsesExplicitQuestion(t *testing.T) {
-	question := loopd.Message{ID: "a-question", ConversationID: "previous", Kind: ActorManager, Purpose: "human_request", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}]}`)}
-	reply := loopd.Message{ID: "a-reply", ConversationID: "previous", Kind: loopd.ActorKindUser, Purpose: "human_reply", ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a"}]}`)}
+	question := contract.Message{ID: "a-question", ConversationID: "previous", Kind: ActorManager, Purpose: "human_request", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}]}`)}
+	reply := contract.Message{ID: "a-reply", ConversationID: "previous", Kind: contract.ActorKindUser, Purpose: "human_reply", ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a"}]}`)}
 	f := newFixture(t, question, reply)
 	history, err := f.c.history(context.Background(), f.run())
 	if err != nil || !strings.Contains(history, "Which language?") || !strings.Contains(history, "a: Go") || !strings.Contains(history, "success a") {
@@ -570,12 +570,12 @@ func TestContinuousInputCheckpointAndMessageEndIndependence(t *testing.T) {
 	if err := f.c.Client.Status().Update(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	extra := loopd.Message{ID: "more-input", ConversationID: "conv", Kind: loopd.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Also include a license."}]}`)}
+	extra := contract.Message{ID: "more-input", ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice", Purpose: "input", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Also include a license."}]}`)}
 	f.mu.Lock()
 	f.pending = append(f.pending, extra)
 	f.messages[extra.ID] = extra
 	f.mu.Unlock()
-	observation, err := f.c.Loop.Conv.Speak(context.Background(), "workspace", loopd.SpeakRequest{Key: "independent-observation", Actor: actor(run, ActorManager), Stream: true})
+	observation, err := f.c.Loop.Conv.Speak(context.Background(), "workspace", contract.SpeakRequest{Key: "independent-observation", Actor: actor(run, ActorManager), Stream: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -720,11 +720,11 @@ func TestReportEndRecovery(t *testing.T) {
 
 // +case=`Read selects the stable pre-input tail across pages without consuming later messages.`
 func TestHistoryPaginationBoundaries(t *testing.T) {
-	var history []loopd.Message
+	var history []contract.Message
 	for i := 0; i < 225; i++ {
-		history = append(history, loopd.Message{ID: fmt.Sprintf("a%03d", i), ConversationID: "conv", Kind: loopd.ActorKindUser, Key: "alice", Purpose: "input"})
+		history = append(history, contract.Message{ID: fmt.Sprintf("a%03d", i), ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice", Purpose: "input"})
 	}
-	history = append(history, loopd.Message{ID: "z-later", ConversationID: "conv", Kind: loopd.ActorKindUser, Key: "alice", Purpose: "input"})
+	history = append(history, contract.Message{ID: "z-later", ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice", Purpose: "input"})
 	f := newFixture(t, history...)
 	refs := f.run().Spec.ContextMessages
 	if len(refs) != 20 || refs[0].MessageID != "a205" || refs[19].MessageID != "a224" {

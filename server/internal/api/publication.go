@@ -4,13 +4,13 @@ import (
 	"context"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
 func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext) error {
-	var input loopd.SpeakRequest
+	var input contract.SpeakRequest
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
@@ -18,7 +18,7 @@ func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext)
 	if err != nil {
 		return err
 	}
-	views, err := s.messages.EnrichMessages(ctx, []loopd.Message{message})
+	views, err := s.messages.EnrichMessages(ctx, []contract.Message{message})
 	if err != nil {
 		return err
 	}
@@ -26,7 +26,7 @@ func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext)
 	return nil
 }
 func (s *Server) actorConversation(ctx context.Context, r *hertzapp.RequestContext) error {
-	var actor loopd.ActorRef
+	var actor contract.ActorRef
 	if err := decodeBody(r, &actor); err != nil {
 		return err
 	}

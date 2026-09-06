@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/domain"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/qiankunli/go-stdx/uuid"
@@ -30,13 +30,13 @@ type humanContent struct {
 			Fingerprint string        `json:"fingerprint"`
 		} `json:"human"`
 	} `json:"meta"`
-	Blocks []loopd.HumanBlock `json:"blocks"`
+	Blocks []contract.HumanBlock `json:"blocks"`
 }
 type replyBlock struct {
-	ID      string            `json:"id"`
-	Type    string            `json:"type"`
-	Outcome loopd.HumanStatus `json:"outcome"`
-	Value   string            `json:"value,omitempty"`
+	ID      string               `json:"id"`
+	Type    string               `json:"type"`
+	Outcome contract.HumanStatus `json:"outcome"`
+	Value   string               `json:"value,omitempty"`
 }
 
 func decodeHuman(m model.Message) (humanContent, error) {
@@ -53,10 +53,10 @@ func decodeHuman(m model.Message) (humanContent, error) {
 	return c, nil
 }
 
-func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResult, error) {
+func humanResult(tx *gorm.DB, m model.Message, c humanContent) (contract.HumanResult, error) {
 	b := c.Blocks[0]
-	result := loopd.HumanResult{Message: publicMessage(m), Status: b.Status, Deadline: b.Deadline, Reason: b.Reason}
-	if b.Status == loopd.HumanSuccess || b.Status == loopd.HumanDismissed {
+	result := contract.HumanResult{Message: publicMessage(m), Status: b.Status, Deadline: b.Deadline, Reason: b.Reason}
+	if b.Status == contract.HumanSuccess || b.Status == contract.HumanDismissed {
 		var reply model.Message
 		if err := tx.First(&reply, "reply_to_id = ? AND purpose = ?", m.ID, "human_reply").Error; err != nil {
 			return result, err
@@ -79,8 +79,8 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 	}
 	return result, nil
 }
-func publicMessage(m model.Message) loopd.Message {
-	return loopd.Message{Status: loopd.MessageStatus(m.Status), TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+func publicMessage(m model.Message) contract.Message {
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func (store *Store) saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -103,7 +103,7 @@ func (store *Store) expireHuman(tx *gorm.DB, m *model.Message, c *humanContent, 
 }
 
 // +spec=`同 conv/actor/effect_key 同输入复用 Message 和 deadline；并行问题在同一事务锁下独立收口`
-func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (result loopd.HumanResult, err error) {
+func (store *Store) CreateHuman(ctx context.Context, r contract.HumanRequest) (result contract.HumanResult, err error) {
 	if e := r.Validate(); e != nil {
 		return result, fmt.Errorf("%w: %v", ErrInvalidHuman, e)
 	}
@@ -140,7 +140,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 		now := time.Now().UTC()
 		question := domain.NewHumanQuestion(r, now)
 		deadline := question.Deadline
-		c := humanContent{Version: "1.1", Biz: "chat", Blocks: []loopd.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: question.Status, Deadline: deadline}}}
+		c := humanContent{Version: "1.1", Biz: "chat", Blocks: []contract.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: question.Status, Deadline: deadline}}}
 		c.Meta.Human.EffectKey = r.EffectKey
 		c.Meta.Human.Timeout = r.Timeout
 		c.Meta.Human.Fingerprint = fingerprint
@@ -148,7 +148,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: string(r.Actor.Kind), ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: r.Actor.Kind, ActorKey: r.Actor.Key, TargetKind: r.Target.Kind, TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := store.saveMessage(tx, &m, true); err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 	return
 }
 
-func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.HumanResult, err error) {
+func (store *Store) GetHuman(ctx context.Context, id string) (result contract.HumanResult, err error) {
 	err = store.withHumanMessage(ctx, id, func(tx *gorm.DB, locked model.Message) error {
 		m := locked
 		c, err := decodeHuman(m)
@@ -175,13 +175,13 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 }
 
 // +spec=`答复只依 reply_to_id；deadline 与答复竞争时只有一个终态`
-func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string, r loopd.HumanReply) (result loopd.HumanResult, err error) {
+func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string, r contract.HumanReply) (result contract.HumanResult, err error) {
 	rejected := false
 	err = store.withHumanMessage(ctx, r.ReplyToID, func(tx *gorm.DB, m model.Message) error {
 		if m.ConversationID != conversationID {
 			return ErrNotFound
 		}
-		if actor == "" || m.TargetKind != "user" || actor != m.TargetKey {
+		if actor == "" || m.TargetKind != contract.ActorKindUser || actor != m.TargetKey {
 			return ErrForbidden
 		}
 		c, err := decodeHuman(m)
@@ -221,7 +221,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Meta    map[string]any `json:"meta"`
 			Blocks  []replyBlock   `json:"blocks"`
 		}{"1.1", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
 		if err := store.saveMessage(tx, &reply, true); err != nil {
 			return err
 		}
@@ -251,9 +251,9 @@ func (store *Store) AcknowledgeHumanWake(ctx context.Context, id string, revisio
 	return store.db.WithContext(ctx).Model(&model.Message{}).Where("id = ? AND revision = ?", id, revision).Update("wake_pending", false).Error
 }
 
-func humanRequest(m model.Message, c humanContent) loopd.HumanRequest {
+func humanRequest(m model.Message, c humanContent) contract.HumanRequest {
 	b := c.Blocks[0]
-	return loopd.HumanRequest{EffectKey: c.Meta.Human.EffectKey, Timeout: c.Meta.Human.Timeout, Type: b.Type, Title: b.Title, Prompt: b.Prompt, Choices: b.Choices, AllowOther: b.AllowOther, ConfirmLabel: b.ConfirmLabel, DeclineLabel: b.DeclineLabel}
+	return contract.HumanRequest{EffectKey: c.Meta.Human.EffectKey, Timeout: c.Meta.Human.Timeout, Type: b.Type, Title: b.Title, Prompt: b.Prompt, Choices: b.Choices, AllowOther: b.AllowOther, ConfirmLabel: b.ConfirmLabel, DeclineLabel: b.DeclineLabel}
 }
 
 func humanQuestion(m model.Message, c humanContent) domain.HumanQuestion {

@@ -1,9 +1,12 @@
-package loopd
+package contract
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestActorIdentityAndRouting(t *testing.T) {
-	for _, kind := range []ActorKind{ActorKindUser, ActorKindOperator, ActorKindHarness, "operator/longhorizon/manager"} {
+	for _, kind := range []ActorKind{ActorKindUser, ActorKindOperator, ActorKindHarness, "operator/longhorizon/manager", "operator/planner", "operator/longhorizon/manager/delegate", "harness/local", "user/customer", "future-kind"} {
 		if !kind.Valid() {
 			t.Fatalf("invalid kind %q", kind)
 		}
@@ -12,7 +15,7 @@ func TestActorIdentityAndRouting(t *testing.T) {
 	if !custom.ValidTarget() || !custom.Kind.IsOperator() {
 		t.Fatal("custom role must be a participating actor")
 	}
-	for _, kind := range []ActorKind{"", "manager", "operator//manager", "operator/longhorizon/", "operator/longhorizon/manager/extra"} {
+	for _, kind := range []ActorKind{"", " ", " operator", "harness ", ActorKind(strings.Repeat("x", 129))} {
 		if kind.Valid() {
 			t.Fatalf("accepted invalid kind %q", kind)
 		}

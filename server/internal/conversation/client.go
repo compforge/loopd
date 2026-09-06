@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	loopd "github.com/compforge/loopd"
-	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -34,9 +34,9 @@ func NewClient(kube client.Client, namespace string, timeout time.Duration) *Cli
 
 // Signal records a committed message's recipient. An empty target is an
 // explicit broadcast to existing participants; it never registers all Operators.
-func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target loopd.ActorRef, revision uint64) error {
+func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target contract.ActorRef, revision uint64) error {
 	if conversationID == "" || messageID == "" ||
-		(target != (loopd.ActorRef{}) && !target.ValidTarget()) {
+		(target != (contract.ActorRef{}) && !target.ValidTarget()) {
 		return errors.New("conversation, message and a valid target or broadcast are required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -59,7 +59,7 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 		if value.Annotations == nil {
 			value.Annotations = map[string]string{}
 		}
-		wake := func(kind, key string) {
+		wake := func(kind contract.ActorKind, key string) {
 			annotation := conversationv1.WakeAnnotation(kind, key)
 			stamp := fmt.Sprintf("%s/%d", messageID, revision)
 			if value.Annotations[annotation] != stamp {
@@ -69,7 +69,7 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 		}
 		for i := range value.Spec.Participants {
 			participant := &value.Spec.Participants[i]
-			if target == (loopd.ActorRef{}) || (participant.Kind == string(target.Kind) && participant.Key == target.Key) {
+			if target == (contract.ActorRef{}) || (participant.Kind == target.Kind && participant.Key == target.Key) {
 				found = true
 				wake(participant.Kind, participant.Key)
 				if participant.EndOffset < messageID {
@@ -77,10 +77,10 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 				}
 			}
 		}
-		if !found && target != (loopd.ActorRef{}) {
-			wake(string(target.Kind), target.Key)
+		if !found && target != (contract.ActorRef{}) {
+			wake(target.Kind, target.Key)
 			value.Spec.Participants = append(value.Spec.Participants, conversationv1.ConversationParticipant{
-				Kind: string(target.Kind), Key: target.Key, EndOffset: messageID,
+				Kind: target.Kind, Key: target.Key, EndOffset: messageID,
 			})
 			changed = true
 		}
@@ -97,27 +97,27 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 // ReadMessages queries SQL for messages addressed to actor (or broadcasts)
 // after the receipt cursor, ordered by UUIDv7 ID, with a bounded batch size.
 // The CRD wake signal is not a query bound or a substitute for this read.
-type ReadMessages = func(ctx context.Context, after string) ([]loopd.Message, error)
+type ReadMessages = func(ctx context.Context, after string) ([]contract.Message, error)
 
 // Poll records receipt, not commitment. Repeating a request after a lost response
 // reads the same uncommitted range; only Commit changes the recovery position.
 // +spec=`Poll 不自动提交；失败或重启可从已提交位置重新接收`
-func (c *Client) Poll(ctx context.Context, conversationID string, actor loopd.ActorRef, afterID string, read ReadMessages) (loopd.PollResult, error) {
+func (c *Client) Poll(ctx context.Context, conversationID string, actor contract.ActorRef, afterID string, read ReadMessages) (contract.PollResult, error) {
 	if conversationID == "" || !actor.ValidTarget() || read == nil {
-		return loopd.PollResult{}, errors.New("conversation, actor and message reader are required")
+		return contract.PollResult{}, errors.New("conversation, actor and message reader are required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	var result loopd.PollResult
+	var result contract.PollResult
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		result = loopd.PollResult{Messages: []loopd.Message{}}
+		result = contract.PollResult{Messages: []contract.Message{}}
 		value := &conversationv1.Conversation{}
 		if err := c.kube.Get(ctx, client.ObjectKey{Name: conversationID, Namespace: c.namespace}, value); err != nil {
 			return err
 		}
 		participant := false
 		for _, entry := range value.Spec.Participants {
-			if entry.Kind == string(actor.Kind) && entry.Key == actor.Key {
+			if entry.Kind == actor.Kind && entry.Key == actor.Key {
 				participant = true
 				break
 			}
@@ -125,9 +125,9 @@ func (c *Client) Poll(ctx context.Context, conversationID string, actor loopd.Ac
 		if !participant {
 			return ErrNotParticipant
 		}
-		after := value.Committed(string(actor.Kind), actor.Key)
+		after := value.Committed(actor.Kind, actor.Key)
 		result.Committed = after
-		result.EndOffset = value.EndOffset(string(actor.Kind), actor.Key)
+		result.EndOffset = value.EndOffset(actor.Kind, actor.Key)
 		if afterID > after {
 			after = afterID
 		}
@@ -150,7 +150,7 @@ func (c *Client) Poll(ctx context.Context, conversationID string, actor loopd.Ac
 		found := false
 		for i := range value.Status.Consumers {
 			consumer := &value.Status.Consumers[i]
-			if consumer.Kind == string(actor.Kind) && consumer.Key == actor.Key {
+			if consumer.Kind == actor.Kind && consumer.Key == actor.Key {
 				if consumer.Position < next {
 					consumer.Position = next
 				}
@@ -160,7 +160,7 @@ func (c *Client) Poll(ctx context.Context, conversationID string, actor loopd.Ac
 		}
 		if !found {
 			value.Status.Consumers = append(value.Status.Consumers, conversationv1.ConversationConsumer{
-				Kind: string(actor.Kind), Key: actor.Key, Position: next,
+				Kind: actor.Kind, Key: actor.Key, Position: next,
 			})
 		}
 		if err := c.kube.Status().Update(ctx, value); err != nil {
@@ -172,7 +172,7 @@ func (c *Client) Poll(ctx context.Context, conversationID string, actor loopd.Ac
 	return result, err
 }
 
-func addressedTo(message loopd.Message, actor loopd.ActorRef) bool {
+func addressedTo(message contract.Message, actor contract.ActorRef) bool {
 	return (message.TargetKind == "" && message.TargetKey == "") ||
 		(message.TargetKind == actor.Kind && message.TargetKey == actor.Key)
 }
@@ -182,7 +182,7 @@ var ErrInvalidCommit = errors.New("commit exceeds received position or has no me
 // Commit monotonically stores the safe recovery boundary. Callers must only
 // acknowledge a contiguous processed prefix, never a later parallel result
 // while an earlier input has not been handled or durably adopted.
-func (c *Client) Commit(ctx context.Context, conversationID string, request loopd.CommitRequest) error {
+func (c *Client) Commit(ctx context.Context, conversationID string, request contract.CommitRequest) error {
 	if !request.Actor.ValidTarget() || request.Through == "" {
 		return ErrInvalidCommit
 	}
@@ -195,7 +195,7 @@ func (c *Client) Commit(ctx context.Context, conversationID string, request loop
 		}
 		for i := range value.Status.Consumers {
 			consumer := &value.Status.Consumers[i]
-			if consumer.Kind != string(request.Actor.Kind) || consumer.Key != request.Actor.Key {
+			if consumer.Kind != request.Actor.Kind || consumer.Key != request.Actor.Key {
 				continue
 			}
 			if request.Through <= consumer.Committed {

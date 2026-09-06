@@ -1,9 +1,9 @@
 package view
 
-import loopd "github.com/compforge/loopd"
+import "github.com/compforge/loopd/pkg/contract"
 
 type HumanResult struct {
-	loopd.HumanResult
+	contract.HumanResult
 	Message Message  `json:"message"`
 	Reply   *Message `json:"reply,omitempty"`
 }

@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
@@ -47,7 +47,7 @@ func (s *Server) createHuman(ctx context.Context, r *hertzapp.RequestContext) er
 	if s.Human == nil {
 		return service.ErrUnavailable
 	}
-	var input loopd.HumanRequest
+	var input contract.HumanRequest
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	if actor == "" {
 		return repo.ErrForbidden
 	}
-	var input loopd.HumanReply
+	var input contract.HumanReply
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
@@ -112,8 +112,8 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	return nil
 }
 
-func (s *Server) humanView(ctx context.Context, result loopd.HumanResult) (view.HumanResult, error) {
-	messages := []loopd.Message{result.Message}
+func (s *Server) humanView(ctx context.Context, result contract.HumanResult) (view.HumanResult, error) {
+	messages := []contract.Message{result.Message}
 	if result.Reply != nil {
 		messages = append(messages, *result.Reply)
 	}

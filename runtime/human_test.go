@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 func TestHumanHandleWaitAndRequestContract(t *testing.T) {
 	var mu sync.Mutex
-	state := loopd.HumanPending
-	var request loopd.HumanRequest
+	state := contract.HumanPending
+	var request contract.HumanRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -26,7 +26,7 @@ func TestHumanHandleWaitAndRequestContract(t *testing.T) {
 				return
 			}
 		}
-		_ = json.NewEncoder(w).Encode(loopd.HumanResult{Message: loopd.Message{ID: "question"}, Status: state, Deadline: time.Now().Add(time.Minute)})
+		_ = json.NewEncoder(w).Encode(contract.HumanResult{Message: contract.Message{ID: "question"}, Status: state, Deadline: time.Now().Add(time.Minute)})
 	}))
 	defer server.Close()
 	runtime, err := New(server.URL, Options{})
@@ -34,7 +34,7 @@ func TestHumanHandleWaitAndRequestContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	h, err := runtime.Loop.Human.Ask(context.Background(), AskRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true})
+	h, err := runtime.Loop.Human.Ask(context.Background(), AskRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true})
 	mu.Lock()
 	captured := request
 	mu.Unlock()
@@ -48,10 +48,10 @@ func TestHumanHandleWaitAndRequestContract(t *testing.T) {
 	}
 	// Context cancellation only stopped observation. The server still owns state.
 	result, err := h.Get(context.Background())
-	if err != nil || result.Status != loopd.HumanPending {
+	if err != nil || result.Status != contract.HumanPending {
 		t.Fatalf("cancel changed request=%+v %v", result, err)
 	}
-	for _, status := range []loopd.HumanStatus{loopd.HumanDismissed, loopd.HumanTimeout} {
+	for _, status := range []contract.HumanStatus{contract.HumanDismissed, contract.HumanTimeout} {
 		mu.Lock()
 		state = status
 		mu.Unlock()

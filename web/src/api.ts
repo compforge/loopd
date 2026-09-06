@@ -1,16 +1,10 @@
+import type { ActorKind, Actor, ActorRef } from "./actor";
 import type { MessageCard } from "./card";
 import type { MessageContent } from "./content";
 import { decodeSse, type SseMessage } from "@compforge/agentue/ui";
 
-export type ActorKind = "user" | "operator" | "harness" | `operator/${string}/${string}`;
-export type TargetActorKind = "operator" | "harness";
-
-export interface Actor {
-  kind: TargetActorKind;
-  key: string;
-  display_name?: string;
-  description?: string;
-}
+export { ActorKind } from "./actor";
+export type { Actor, ActorRef } from "./actor";
 
 export interface Conversation {
   id: string;
@@ -94,7 +88,7 @@ export interface StreamRequest {
   taskID?: string;
   lastEventID?: string;
   text?: string;
-  target?: Pick<Actor, "kind" | "key">;
+  target?: ActorRef;
   signal?: AbortSignal;
   onTaskID(taskID: string): void;
   onEvent(message: MessageEvent): void;

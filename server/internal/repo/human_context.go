@@ -2,7 +2,7 @@ package repo
 
 import (
 	"context"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -10,7 +10,7 @@ import (
 
 // Question identity is serialized on its conversation; replies/timeouts on the
 // question row. Neither lock depends on an open user Chat.
-func (s *Store) withHumanContext(ctx context.Context, r loopd.HumanRequest, fn func(*gorm.DB) error) error {
+func (s *Store) withHumanContext(ctx context.Context, r contract.HumanRequest, fn func(*gorm.DB) error) error {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	return mapError(s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

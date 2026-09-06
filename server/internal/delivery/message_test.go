@@ -10,7 +10,7 @@ import (
 
 	runner "github.com/compforge/agentue/sdks/go/runner"
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
@@ -43,7 +43,7 @@ func TestOneShotSpeakNeedsNoMessageStream(t *testing.T) {
 
 // Terminal delivery status survives bridge loss and cannot be changed by a retry.
 func TestMessageTerminalStatuses(t *testing.T) {
-	for _, status := range []loopd.MessageStatus{loopd.MessageStatusCompleted, loopd.MessageStatusFailed, loopd.MessageStatusCancelled} {
+	for _, status := range []contract.MessageStatus{contract.MessageStatusCompleted, contract.MessageStatusFailed, contract.MessageStatusCancelled} {
 		t.Run(string(status), func(t *testing.T) {
 			store, writer, _ := outputFixture(t)
 			ctx := context.Background()
@@ -67,12 +67,12 @@ func TestMessageTerminalStatuses(t *testing.T) {
 			if err != nil || saved.Status != string(status) || !visibleMessage(saved).Ended() || strings.Contains(string(saved.Content), `"ended"`) {
 				t.Fatalf("saved=%+v err=%v", saved, err)
 			}
-			if _, err := writer.EmitMessage(ctx, message.ID, end, loopd.MessageStatusStreaming); !errors.Is(err, ErrInvalidEvent) {
+			if _, err := writer.EmitMessage(ctx, message.ID, end, contract.MessageStatusStreaming); !errors.Is(err, ErrInvalidEvent) {
 				t.Fatalf("invalid terminal: %v", err)
 			}
-			other := loopd.MessageStatusFailed
+			other := contract.MessageStatusFailed
 			if status == other {
-				other = loopd.MessageStatusCompleted
+				other = contract.MessageStatusCompleted
 			}
 			if _, err := writer.EmitMessage(ctx, message.ID, end, other); !errors.Is(err, repo.ErrConflict) {
 				t.Fatalf("terminal changed: %v", err)
@@ -175,7 +175,7 @@ type failingProjection struct {
 	fail bool
 }
 
-func (store *failingProjection) ProjectOutput(ctx context.Context, id string, event ui.Event, statuses ...loopd.MessageStatus) error {
+func (store *failingProjection) ProjectOutput(ctx context.Context, id string, event ui.Event, statuses ...contract.MessageStatus) error {
 	if store.fail {
 		store.fail = false
 		return errors.New("projection temporarily unavailable")
@@ -276,7 +276,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 			later = message.ID
 			request = outputRequest("unsolicited")
 			request.Stream = false
-			request.Actor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "another"}
+			request.Actor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: "another"}
 			message, err = store.Speak(ctx, "root", request)
 			if err != nil {
 				return err

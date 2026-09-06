@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -13,7 +13,7 @@ import (
 type MessageRepository interface {
 	GetMessages(context.Context, string, []string) ([]model.Message, error)
 	ListHumanReplies(context.Context, string, []string) ([]model.Message, error)
-	Speak(context.Context, string, loopd.SpeakRequest) (model.Message, error)
+	Speak(context.Context, string, contract.SpeakRequest) (model.Message, error)
 	CreateMessage(context.Context, model.Message) (model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	ListMessages(context.Context, string, string, int) ([]model.Message, error)
@@ -61,7 +61,7 @@ type MessageState struct {
 	ConversationID string
 	Purpose        string
 	Revision       uint64
-	Status         loopd.MessageStatus
+	Status         contract.MessageStatus
 	Ended          bool
 }
 
@@ -71,7 +71,7 @@ func (store *Store) GetMessageState(ctx context.Context, id string) (MessageStat
 	defer cancel()
 	var m model.Message
 	err := store.db.WithContext(ctx).Select("id", "conversation_id", "purpose", "revision", "status").First(&m, "id = ?", id).Error
-	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Status: loopd.MessageStatus(m.Status), Ended: (loopd.Message{Status: loopd.MessageStatus(m.Status)}).Ended()}, mapError(err)
+	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Status: contract.MessageStatus(m.Status), Ended: (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended()}, mapError(err)
 }
 
 func (store *Store) ListMessages(ctx context.Context, conversationID, after string, limit int) ([]model.Message, error) {
@@ -139,7 +139,7 @@ func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (m
 		if err := tx.First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
 			return err
 		}
-		if conversation.ParentID != nil || conversation.ActorKind != "user" {
+		if conversation.ParentID != nil || conversation.ActorKind != contract.ActorKindUser {
 			return ErrConflict
 		}
 		return store.saveMessage(tx, &input, true)

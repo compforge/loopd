@@ -12,8 +12,8 @@ import (
 	"time"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/pkg/harness"
 	loopruntime "github.com/compforge/loopd/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -137,7 +137,7 @@ type loopServer struct {
 	completed    bool
 	failure      *testFailure
 	polls        int
-	inbox        [][]loopd.Message
+	inbox        [][]contract.Message
 	completedIDs []string
 }
 
@@ -147,7 +147,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 	value.Server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch {
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/commit"):
-			var input loopd.CommitRequest
+			var input contract.CommitRequest
 			_ = json.NewDecoder(request.Body).Decode(&input)
 			value.mu.Lock()
 			value.completed = true
@@ -155,7 +155,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			value.mu.Unlock()
 			response.WriteHeader(http.StatusNoContent)
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/speak"):
-			var input loopd.SpeakRequest
+			var input contract.SpeakRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
@@ -181,12 +181,12 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 					value.mu.Unlock()
 				}
 			}
-			_ = json.NewEncoder(response).Encode(loopd.Message{ID: input.Key, Content: input.Content})
+			_ = json.NewEncoder(response).Encode(contract.Message{ID: input.Key, Content: input.Content})
 		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/poll":
 			value.mu.Lock()
-			var messages []loopd.Message
+			var messages []contract.Message
 			if value.polls == 0 {
-				messages = []loopd.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: loopd.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")}}
+				messages = []contract.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: contract.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")}}
 			} else if len(value.inbox) > 0 {
 				messages = value.inbox[0]
 				value.inbox = value.inbox[1:]
@@ -197,15 +197,15 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			if len(messages) > 0 {
 				position = messages[len(messages)-1].ID
 			}
-			_ = json.NewEncoder(response).Encode(loopd.PollResult{Messages: messages, Position: position})
+			_ = json.NewEncoder(response).Encode(contract.PollResult{Messages: messages, Position: position})
 		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/actors":
-			_ = json.NewEncoder(response).Encode(loopd.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: loopd.ActorKindOperator, ActorKey: "router"})
+			_ = json.NewEncoder(response).Encode(contract.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: contract.ActorKindOperator, ActorKey: "router"})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
 			response.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(response).Encode(map[string]any{
-				"data": []loopd.Message{
-					{ID: "message-1", Kind: loopd.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")},
-					{ID: "message-2", Kind: loopd.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")},
+				"data": []contract.Message{
+					{ID: "message-1", Kind: contract.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")},
+					{ID: "message-2", Kind: contract.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")},
 				},
 			})
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):
