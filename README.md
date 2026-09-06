@@ -17,7 +17,10 @@ Loop = Resource(spec + status) + Reconcile
 ```
 
 Resources hold goals and observed state; Reconcile decides the next step.
-Each Operator defines its own workflow, roles, and completion criteria.
+
+loopd provides a runtime for building orchestration, rather than a predefined
+workflow. Each Operator defines its own process, collaboration model, and
+completion criteria.
 
 ## What makes it useful
 

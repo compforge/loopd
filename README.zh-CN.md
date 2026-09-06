@@ -15,7 +15,9 @@ Loop = Resource(spec + status) + Reconcile
 ```
 
 Resource 保存目标与观测状态，Reconcile 决定下一步。
-每个 Operator 自行定义工作流、角色与完成条件。
+
+loopd 不预设固定的工作流，而是提供开发和运行编排的公共能力。
+业务通过 Operator 定义自己的流程、协作方式与完成条件。
 
 ## 特色
 
