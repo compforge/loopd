@@ -24,7 +24,7 @@ loopd/
 ├── operators/router/       # 首个业务 Operator；按复杂度临时编排一个或多个 Harness
 ├── operators/interaction/  # 串行 Ask → Confirm 交互示例，含取消、超时与结果汇总
 ├── pkg/contract/           # 跨 server、runtime 和 harness 的公共协作契约
-├── pkg/harness/            # Harness Adapter 契约；agentgo 为进程内 demo
+├── pkg/harness/            # Harness Adapter 契约；agentgo 为进程内 demo，managedagent 接入远端 SDK API
 ├── pkg/k8s/v1alpha1/        # server 与 runtime 共享的 Conv CRD 契约
 ├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
 ├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
