@@ -14,9 +14,14 @@ import (
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/pkg/harness"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestReconcileRoutesSimpleAndComplexTasks(t *testing.T) {
@@ -68,6 +73,9 @@ func TestReconcileRoutesSimpleAndComplexTasks(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = runtime.Close() })
 			reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary", MaxSubtasks: 4})
+			if reconciler != nil {
+				reconciler.reader = routerReader(t)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,6 +112,9 @@ func TestReconcileCompletesInvalidPlanAsFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
 	reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+	if reconciler != nil {
+		reconciler.reader = routerReader(t)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +170,9 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
+			if input.Actor.Kind == contract.ActorKindHarness && request.URL.Path != "/v1/conversations/workspace-1/speak" {
+				t.Errorf("Harness output did not use projected conversation: %s", request.URL.Path)
+			}
 			var content struct {
 				Meta   struct{ Error *testFailure }
 				Blocks []struct {
@@ -198,8 +212,6 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 				position = messages[len(messages)-1].ID
 			}
 			_ = json.NewEncoder(response).Encode(contract.PollResult{Messages: messages, Position: position})
-		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/actors":
-			_ = json.NewEncoder(response).Encode(contract.Conversation{ID: "workspace-1", ParentID: "conversation-1", ActorKind: contract.ActorKindOperator, ActorKey: "router"})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
 			response.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(response).Encode(map[string]any{
@@ -324,4 +336,46 @@ func semanticModel(text string) json.RawMessage {
 
 func objectKey(name string) types.NamespacedName {
 	return types.NamespacedName{Name: name}
+}
+
+func routerReader(t *testing.T) client.Reader {
+	t.Helper()
+	scheme := kuberuntime.NewScheme()
+	if err := conversationv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(&conversationv1.Conversation{
+		ObjectMeta: metav1.ObjectMeta{Name: "conversation-1"},
+		Spec:       conversationv1.ConversationSpec{Participants: []conversationv1.ConversationParticipant{{Kind: routerActor.Kind, Key: routerActor.Key, ConversationID: "workspace-1"}}},
+	}).Build()
+}
+
+func TestReconcileWaitsForProjectedDetail(t *testing.T) {
+	server := newLoopServer(t, "task")
+	runtime, err := loopruntime.New(server.URL, loopruntime.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube := routerReader(t).(client.Client)
+	var conv conversationv1.Conversation
+	key := types.NamespacedName{Name: "conversation-1"}
+	if err := kube.Get(context.Background(), key, &conv); err != nil {
+		t.Fatal(err)
+	}
+	conv.Spec.Participants[0].ConversationID = ""
+	if err := kube.Update(context.Background(), &conv); err != nil {
+		t.Fatal(err)
+	}
+	reconciler.reader = kube
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
+		t.Fatal("missing binding must retry")
+	}
+	if server.polls != 0 || server.completed {
+		t.Fatal("missing binding consumed input")
+	}
 }

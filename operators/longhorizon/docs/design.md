@@ -51,7 +51,8 @@ Run 名称取首条输入 Message ID，归属 Conv UID。初始化 status 保存
 ## 可见消息和恢复
 
 三种作者为 `operator/longhorizon/manager`、`operator/longhorizon/executor`、
-`operator/longhorizon/auditor`，key 均为 Run UID。角色共享 `operator / longhorizon` 的 Workspace，
+`operator/longhorizon/auditor`，key 均为 Run UID。角色共享 `operator / longhorizon` 的过程会话，Ingress 从主 Conv 的参与者
+`conversationID` 读取 server 已分配的 ID，并持久化为 Run.Spec.WorkspaceID；不调用创建会话的 Verb。
 右侧按完整 kind/key 区分列，标题显示轮次；主会话的角色消息也定位到这个共享 Workspace。
 消息时间区间可以并行，因果引用依赖 reply_to_id 或 CRD 内精确引用。
 

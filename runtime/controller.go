@@ -28,7 +28,9 @@ func ConversationPredicate(actor contract.ActorRef) predicate.Funcs {
 			}
 			// Changes to B's signal/status do not wake A. Advancing A's cursor
 			// with unread input remaining does wake A to drain the next batch.
-			return old.Wake(actor.Kind, actor.Key) != next.Wake(actor.Kind, actor.Key) ||
+			previous, _ := Participant(old, actor)
+			current, _ := Participant(next, actor)
+			return previous.ConversationID != current.ConversationID || old.Wake(actor.Kind, actor.Key) != next.Wake(actor.Kind, actor.Key) ||
 				old.EndOffset(actor.Kind, actor.Key) != next.EndOffset(actor.Kind, actor.Key) ||
 				old.Committed(actor.Kind, actor.Key) != next.Committed(actor.Kind, actor.Key)
 		},
@@ -38,4 +40,36 @@ func ConversationPredicate(actor contract.ActorRef) predicate.Funcs {
 		},
 		DeleteFunc: func(event.DeleteEvent) bool { return false },
 	}
+}
+
+// ParticipantState joins a participant's server projection and consumption
+// status without changing the CRD's spec/status ownership or making a request.
+type ParticipantState struct {
+	Actor          contract.ActorRef
+	ConversationID string
+	EndOffset      string
+	Position       string
+	Committed      string
+}
+
+// Participant reads one actor's local Conv snapshot. ActorKind is open; both
+// kind and key identify the participant. A status-only entry is not a member.
+func Participant(conv *conversationv1.Conversation, actor contract.ActorRef) (ParticipantState, bool) {
+	if conv == nil {
+		return ParticipantState{}, false
+	}
+	for _, p := range conv.Spec.Participants {
+		if p.Kind != actor.Kind || p.Key != actor.Key {
+			continue
+		}
+		state := ParticipantState{Actor: actor, ConversationID: p.ConversationID, EndOffset: p.EndOffset}
+		for _, c := range conv.Status.Consumers {
+			if c.Kind == actor.Kind && c.Key == actor.Key {
+				state.Position, state.Committed = c.Position, c.Committed
+				break
+			}
+		}
+		return state, true
+	}
+	return ParticipantState{}, false
 }

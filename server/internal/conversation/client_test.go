@@ -96,7 +96,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	}{
 		{"001", a}, {"002", b}, {"000", a},
 	} {
-		if err := c.Signal(ctx, "conv", signal.id, signal.actor, 1); err != nil {
+		if err := c.Signal(ctx, "conv", signal.id, signal.actor, 1, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,7 +108,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if value.EndOffset("operator", "a") != "001" || value.EndOffset("operator", "b") != "002" {
 		t.Fatalf("signals = %+v", value.Spec)
 	}
-	if err := c.Signal(ctx, "conv", "003", contract.ActorRef{}, 1); err != nil {
+	if err := c.Signal(ctx, "conv", "003", contract.ActorRef{}, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := kube.Get(ctx, key, value); err != nil {
@@ -117,5 +117,61 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if len(value.Spec.Participants) != 2 || value.EndOffset("operator", "a") != "003" ||
 		value.EndOffset("operator", "b") != "003" {
 		t.Fatalf("broadcast = %+v", value.Spec)
+	}
+}
+
+func TestSignalsMergeDetailBindingsWithoutChangingCursors(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := conversationv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	a := contract.ActorRef{Kind: "operator/custom", Key: "same"}
+	b := contract.ActorRef{Kind: "harness", Key: "same"}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
+	c := NewClient(kube, "test", 0)
+	for _, s := range []struct {
+		actor      contract.ActorRef
+		id, detail string
+	}{{a, "003", "a-detail"}, {b, "004", "b-detail"}} {
+		if err := c.Signal(ctx, "conv", s.id, s.actor, 1, s.detail); err != nil {
+			t.Fatal(err)
+		}
+	}
+	value := &conversationv1.Conversation{}
+	key := client.ObjectKey{Name: "conv", Namespace: "test"}
+	if err := kube.Get(ctx, key, value); err != nil {
+		t.Fatal(err)
+	}
+	value.Status.Consumers = []conversationv1.ConversationConsumer{{Kind: a.Kind, Key: a.Key, Position: "003", Committed: "002"}}
+	if err := kube.Status().Update(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	// A notification without a binding and a broadcast must preserve both links.
+	if err := c.Signal(ctx, "conv", "001", a, 2, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Signal(ctx, "conv", "005", contract.ActorRef{}, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(ctx, key, value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Spec.Participants) != 2 || value.Spec.Participants[0].ConversationID != "a-detail" || value.Spec.Participants[1].ConversationID != "b-detail" || value.Committed(a.Kind, a.Key) != "002" || value.Status.Consumers[0].Position != "003" {
+		t.Fatalf("lost association/cursor: %+v", value)
+	}
+	// Retry the binding projection even when the wake offset does not advance.
+	value.Spec.Participants[0].ConversationID = ""
+	if err := kube.Update(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Signal(ctx, "conv", "001", a, 2, "a-detail"); err != nil {
+		t.Fatal(err)
+	}
+	if err := kube.Get(ctx, key, value); err != nil {
+		t.Fatal(err)
+	}
+	if value.Spec.Participants[0].ConversationID != "a-detail" || value.EndOffset(a.Kind, a.Key) != "005" {
+		t.Fatalf("repair: %+v", value.Spec)
 	}
 }

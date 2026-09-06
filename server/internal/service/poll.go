@@ -14,12 +14,13 @@ import (
 )
 
 type ConversationCoordinator interface {
-	Signal(context.Context, string, string, contract.ActorRef, uint64) error
+	Signal(context.Context, string, string, contract.ActorRef, uint64, string) error
 	Poll(context.Context, string, contract.ActorRef, string, conversationclient.ReadMessages) (contract.PollResult, error)
 	Commit(context.Context, string, contract.CommitRequest) error
 }
 
 type InboxRepository interface {
+	ParticipantConversation(context.Context, string, contract.ActorRef) (string, error)
 	GetConversation(context.Context, string) (model.Conversation, error)
 	ListInbox(context.Context, string, contract.ActorKind, string, string, int) ([]model.Message, error)
 	PendingDispatches(context.Context, int) ([]model.Message, error)
@@ -94,8 +95,12 @@ func (s *PollService) Commit(ctx context.Context, conversationID string, request
 // Notify runs only after SQL commit. Failure leaves the Message pending so any
 // server replica can retry without creating a second user message.
 func (s *PollService) Notify(ctx context.Context, message model.Message) error {
-	if err := s.conversations.Signal(ctx, message.ConversationID, message.ID,
-		contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, message.Revision); err != nil {
+	actor := contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}
+	detailID, err := s.repo.ParticipantConversation(ctx, message.ConversationID, actor)
+	if err != nil {
+		return err
+	}
+	if err := s.conversations.Signal(ctx, message.ConversationID, message.ID, actor, message.Revision, detailID); err != nil {
 		return err
 	}
 	if err := s.repo.AcknowledgeDispatch(ctx, message.ID); err != nil {

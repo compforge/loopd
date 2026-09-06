@@ -14,7 +14,7 @@ import (
 // run keeps execution within the conversation reconciliation, without a Work
 // resource. This demo has no durable business checkpoint: Poll acknowledges
 // receipt, not completion. Harness recovery remains the adapter's responsibility.
-func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, messages []contract.Message) (runErr error) {
+func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, messages []contract.Message, workspaceID string) (runErr error) {
 	position := input.ID
 	// UI streams are delivery identities, not business task boundaries.
 	// Several published messages may contribute to the same input range.
@@ -43,10 +43,6 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 		runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, input.ConversationID,
 			contract.CommitRequest{Actor: routerActor, Through: position}))
 	}()
-	workspace, err := reconciler.loop.Conv.Workspace(ctx, input.ConversationID, routerActor)
-	if err != nil {
-		return err
-	}
 	query, err := modelText(input.Content)
 	if err != nil {
 		return fmt.Errorf("read user query: %w", err)
@@ -63,7 +59,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 		if round > 0 {
 			planKey = fmt.Sprintf("plan/%d", round)
 		}
-		raw, err := reconciler.call(ctx, input, workspace.ID, planKey, prompt)
+		raw, err := reconciler.call(ctx, input, workspaceID, planKey, prompt)
 		if err != nil {
 			return err
 		}
@@ -78,7 +74,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 			"conversation_id", input.ConversationID, "round", round,
 			"kind", next.Kind, "subtask_count", len(next.Tasks))
 		if next.Kind != "summary" {
-			batch, err := reconciler.executeBatch(ctx, input, workspace.ID, query, history, round, next.Tasks)
+			batch, err := reconciler.executeBatch(ctx, input, workspaceID, query, history, round, next.Tasks)
 			if err != nil {
 				return err
 			}
@@ -109,7 +105,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 				summaryKey = fmt.Sprintf("summarize/%d", summaries)
 			}
 			summaries++
-			answer, err := reconciler.call(ctx, input, workspace.ID, summaryKey, summaryPrompt(query, history, tasks, results))
+			answer, err := reconciler.call(ctx, input, workspaceID, summaryKey, summaryPrompt(query, history, tasks, results))
 			if err != nil {
 				return err
 			}

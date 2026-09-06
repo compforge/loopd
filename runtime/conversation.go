@@ -48,10 +48,3 @@ func (conv Conv) Speak(ctx context.Context, conversationID string, request contr
 	}
 	return conv.messages.handle(conv.client, result), nil
 }
-
-// Workspace is a write Verb lazily reusing this actor's internal conversation.
-func (conv Conv) Workspace(ctx context.Context, conversationID string, actor contract.ActorRef) (contract.Conversation, error) {
-	var result contract.Conversation
-	err := conv.client.do(ctx, http.MethodPost, "/v1/conversations/"+url.PathEscape(conversationID)+"/actors", actor, &result)
-	return result, err
-}

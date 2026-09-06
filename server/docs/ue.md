@@ -10,7 +10,7 @@ DB、CRD 与 Redis 的整体责任分层见 [Kernel](../../docs/kernel.md)。
 ## 页面布局
 
 页面按左、中、右组织：左侧列出 User conv，中间展示选中会话的消息与发送框，右侧展示
-当前 User conv 与相关 Operator 共同确定的内部会话。发送目标跟随发送框，每次发言可以选择不同参与者。
+server 在主会话接收定向消息时分配的内部会话，页面通过 User conv 与目标 Actor 查找。发送目标跟随发送框，每次发言可以选择不同参与者。
 
 用户发送后，右侧立即按接收 Operator 查找工作会话，不等待它先在主会话回答；尚未创建时显示
 该 Operator 的等待提示并持续查找。点击历史消息时优先使用其目标 Operator；回答、Ask/Confirm

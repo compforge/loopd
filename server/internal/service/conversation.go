@@ -12,19 +12,6 @@ import (
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
-type ConversationRepository interface {
-	repo.ConversationRepository
-	EnsureActorConversation(context.Context, string, contract.ActorRef) (model.Conversation, error)
-}
-
-func (service *ConversationService) ActorConversation(ctx context.Context, parentID string, actor contract.ActorRef) (contract.Conversation, error) {
-	if !actor.ValidTarget() {
-		return contract.Conversation{}, ErrInvalid
-	}
-	value, err := service.repo.EnsureActorConversation(ctx, parentID, actor)
-	return conversationFromModel(value), err
-}
-
 func (service *ConversationService) FindActorConversation(ctx context.Context, parentID string, kind contract.ActorKind, key string) ([]contract.Conversation, error) {
 	value, err := service.repo.FindActorConversation(ctx, parentID, kind, key)
 	if errors.Is(err, repo.ErrNotFound) {
@@ -37,11 +24,11 @@ func (service *ConversationService) FindActorConversation(ctx context.Context, p
 }
 
 type ConversationService struct {
-	repo   ConversationRepository
+	repo   repo.ConversationRepository
 	logger *slog.Logger
 }
 
-func NewConversationService(repository ConversationRepository, logger *slog.Logger) *ConversationService {
+func NewConversationService(repository repo.ConversationRepository, logger *slog.Logger) *ConversationService {
 	return &ConversationService{repo: repository, logger: loggerOrDefault(logger)}
 }
 

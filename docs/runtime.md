@@ -49,7 +49,6 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 | Conv | Poll | write：拉取收件消息，记录 Position，不自动提交 |
 | Conv | Commit | write：确认连续安全消费前缀 |
 | Conv | Speak | write：一次说完，或开启流式消息并返回句柄 |
-| Conv | Workspace | write：懒创建或复用该 Actor 的内部会话 |
 | Human | Ask / Confirm | write：创建或复用独立问题 Message |
 | Human / Human handle | Get / Wait | read：观察问题的权威结果 |
 | Harness | Prompt | write：发起或复用有身份的执行，返回 Call |
@@ -67,10 +66,13 @@ Effect 分类不增加额外的 Verbs 容器或独立 CRD。
 与恢复分支。每行展示一种协作能力，真实 Operator 按需选择，不必把所有 Verb 串成固定流程。
 
 ```go
-func Reconcile(convID) {
+func Reconcile(conv) {
+    convID := conv.Name
+    participant, ok := loopruntime.Participant(conv, self) // 从已读取的 Conv CRD 合并 spec/status
+    if !ok || participant.ConversationID == "" { return }  // 尚未就绪，不启动工作
+    workspace := participant.ConversationID                // server 随定向消息分配的过程会话
     inbox := Loop.Conv.Poll(convID)                         // 收到发给自己的消息，不代表处理完成
     history := Loop.Conv.Read(convID)                       // 主动查看共享历史，不改变消费位置
-    workspace := Loop.Conv.Workspace(convID, self)          // 复用内部工作会话，不干扰主会话
     question := Loop.Human.Ask(convID, "希望怎样处理？")     // 反问用户；handle.Get / Wait 获取选择
     approval := Loop.Human.Confirm(convID, "确认执行吗？")   // 请求确认；普通追加发言不等于同意
     call := Loop.Harness.Prompt(workspace, prompt, tools)   // 按选择与确认结果调用 Harness，立即取得句柄
@@ -106,7 +108,7 @@ AgentUE set/append，最后 `stream.End`。两种模式返回同一 Go 句柄类
 模式只在首次创建时生效，同 Key 重试不能把已结束消息重新打开。
 
 `stream.End(ctx)` 默认将 Message.status 从 streaming 改为 completed；输出异常或明确取消时，
-可传 `stream.End(ctx, loopd.MessageStatusFailed)` 或 `loopd.MessageStatusCancelled`。
+可传 `stream.End(ctx, contract.MessageStatusFailed)` 或 `contract.MessageStatusCancelled`。
 相同终态的 End 可重复调用，不同终态冲突，结束后不再接受 Emit；重新 Speak 同 Key 可取回状态与 Revision。
 句柄只属于一条消息，不关闭 Conv、不 Commit，也不结束其他 Actor 的工作或页面订阅。
 
@@ -115,9 +117,16 @@ reply_to_id 表达回应哪条消息，Target 表达说给谁听，两者不能�
 页面实时观察流式内容；其他 Operator 的 Poll 在 End 后收到已结束消息及其状态，
 不消费仍在追加的消息。failed/cancelled 可保留已输出的部分内容，不能当作完整成功结果。
 
-Conv.Workspace 按 User conv + Actor 懒创建并复用内部会话。Operator 决定哪些信息面向用户，
-哪些属于内部协作；Toolkit 承担工作会话的分配细节。归属见
-[持久化](../server/docs/persistence.md)。
+server 在 User conv 接收定向消息时，按父会话 + 完整 Actor 身份创建或复用过程会话，
+在通知中写入 `spec.participants[].conversationID`。Operator 从 Conv CRD 取得 ID，将内部协作
+消息写入过程会话，面向用户的消息仍写入主会话；Poll/Commit 始终针对接收输入的主会话。
+过程会话只组织可见消息，不定义业务执行或恢复边界。
+
+`loopruntime.Participant(conv, actor)` 是本地读取 helper，不是网络 Verb。它按 kind/key 合并
+参与者的 ConversationID、EndOffset 与消费状态 Position、Committed；成员不存在时返回 false。
+Operator 在启动新工作前检查 ConversationID，关联尚未投影时等待重试，不提交待处理输入。
+分配、原子写入与通知重试见 [持久化](../server/docs/persistence.md) 和
+[Conversation](../server/docs/conversation.md)。
 
 ## 消费与连续输入
 

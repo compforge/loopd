@@ -26,7 +26,10 @@ func (store *Store) CreateMessage(ctx context.Context, message model.Message) (m
 	defer cancel()
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conversation model.Conversation
-		if err := tx.First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
+			return err
+		}
+		if err := ensureParticipantConversation(tx, conversation, contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}); err != nil {
 			return err
 		}
 		return store.saveMessage(tx, &message, true)
@@ -136,11 +139,14 @@ func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (m
 	input.Purpose = "input"
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conversation model.Conversation
-		if err := tx.First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
 			return err
 		}
 		if conversation.ParentID != nil || conversation.ActorKind != contract.ActorKindUser {
 			return ErrConflict
+		}
+		if err := ensureParticipantConversation(tx, conversation, contract.ActorRef{Kind: input.TargetKind, Key: input.TargetKey}); err != nil {
+			return err
 		}
 		return store.saveMessage(tx, &input, true)
 	})

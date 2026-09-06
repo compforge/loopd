@@ -19,6 +19,8 @@ type ConversationParticipant struct {
 	Kind contract.ActorKind `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
+	// ConversationID is the server-allocated detail conversation for this root recipient.
+	ConversationID string `json:"conversationID,omitempty"`
 	// EndOffset is the newest database message notified to this actor.
 	EndOffset string `json:"endOffset,omitempty"`
 }

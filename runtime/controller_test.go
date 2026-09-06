@@ -38,3 +38,29 @@ func TestConversationPredicateUsesUncommittedInputNotReceipt(t *testing.T) {
 		t.Fatal("another actor's signal must not wake a")
 	}
 }
+
+func TestParticipantJoinsFullActorIdentityAndRepairsWake(t *testing.T) {
+	actor := contract.ActorRef{Kind: "operator/custom/manager", Key: "same"}
+	conv := &convapi.Conversation{
+		Spec:   convapi.ConversationSpec{Participants: []convapi.ConversationParticipant{{Kind: "operator", Key: "same", ConversationID: "other"}, {Kind: actor.Kind, Key: actor.Key, EndOffset: "003"}}},
+		Status: convapi.ConversationStatus{Consumers: []convapi.ConversationConsumer{{Kind: "operator", Key: "same", Committed: "999"}, {Kind: actor.Kind, Key: actor.Key, Position: "003", Committed: "001"}}},
+	}
+	state, ok := Participant(conv, actor)
+	if !ok || state.Actor != actor || state.ConversationID != "" || state.EndOffset != "003" || state.Position != "003" || state.Committed != "001" {
+		t.Fatalf("merged state: %+v %v", state, ok)
+	}
+	repaired := conv.DeepCopy()
+	repaired.Spec.Participants[1].ConversationID = "detail"
+	if !ConversationPredicate(actor).Update(event.UpdateEvent{ObjectOld: conv, ObjectNew: repaired}) {
+		t.Fatal("binding repair must wake pending work")
+	}
+	if ConversationPredicate(contract.ActorRef{Kind: "operator", Key: "same"}).Update(event.UpdateEvent{ObjectOld: conv, ObjectNew: repaired}) {
+		t.Fatal("binding repair woke other actor")
+	}
+	if _, ok := Participant(conv, contract.ActorRef{Kind: actor.Kind, Key: "missing"}); ok {
+		t.Fatal("unknown member")
+	}
+	if _, ok := Participant(nil, actor); ok {
+		t.Fatal("nil member")
+	}
+}

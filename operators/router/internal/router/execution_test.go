@@ -41,6 +41,9 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 			}
 			defer runtime.Close()
 			reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+			if reconciler != nil {
+				reconciler.reader = routerReader(t)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,6 +127,9 @@ func TestInputArrivingDuringSummaryDoesNotStarveCurrentAnswer(t *testing.T) {
 	}
 	defer runtime.Close()
 	reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+	if reconciler != nil {
+		reconciler.reader = routerReader(t)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +163,9 @@ func TestRouterConsumesMessageWithoutUIDelivery(t *testing.T) {
 	}
 	defer runtime.Close()
 	reconciler, err := New(runtime.Loop, Config{HarnessTarget: "temporary"})
+	if reconciler != nil {
+		reconciler.reader = routerReader(t)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

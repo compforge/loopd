@@ -9,7 +9,8 @@ import (
 )
 
 // Question identity is serialized on its conversation; replies/timeouts on the
-// question row. Neither lock depends on an open user Chat.
+// parent then question row, matching message allocation lock order. Neither
+// lock depends on an open user Chat.
 func (s *Store) withHumanContext(ctx context.Context, r contract.HumanRequest, fn func(*gorm.DB) error) error {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
@@ -33,6 +34,13 @@ func (s *Store) withHumanMessage(ctx context.Context, id string, fn func(*gorm.D
 	defer cancel()
 	return mapError(s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var message model.Message
+		if err := tx.Select("conversation_id").First(&message, "id = ?", id).Error; err != nil {
+			return err
+		}
+		var conv model.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conv, "id = ?", message.ConversationID).Error; err != nil {
+			return err
+		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&message, "id = ?", id).Error; err != nil {
 			return err
 		}

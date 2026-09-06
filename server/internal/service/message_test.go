@@ -88,17 +88,17 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := conversations.ActorConversation(ctx, root.ID, contract.ActorRef{Kind: contract.ActorKindOperator, Key: "operator-1"})
+	detail, err := store.FindActorConversation(ctx, root.ID, contract.ActorKindOperator, "operator-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.ParentID != root.ID || detail.ActorKind != contract.ActorKindOperator || detail.ActorKey != "operator-1" {
+	if (detail.ParentID == nil || *detail.ParentID != root.ID) || detail.ActorKind != contract.ActorKindOperator || detail.ActorKey != "operator-1" {
 		t.Fatalf("work conversation ownership = %+v", detail)
 	}
 	if root.ActorKind != contract.ActorKindUser || root.ActorKey != "user-1" || root.ParentID != "" {
 		t.Fatalf("user conversation ownership = %+v", root)
 	}
-	if again, err := conversations.ActorConversation(ctx, root.ID, contract.ActorRef{Kind: contract.ActorKindOperator, Key: "operator-1"}); err != nil || again.ID != detail.ID {
+	if again, err := store.FindActorConversation(ctx, root.ID, contract.ActorKindOperator, "operator-1"); err != nil || again.ID != detail.ID {
 		t.Fatalf("workspace not reused: %+v %v", again, err)
 	}
 	_, err = messages.CreateMessage(
@@ -119,7 +119,7 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherDetail, err := conversations.ActorConversation(ctx, root.ID, contract.ActorRef{Kind: other.TargetKind, Key: other.TargetKey})
+	otherDetail, err := store.FindActorConversation(ctx, root.ID, other.TargetKind, other.TargetKey)
 	if err != nil || otherDetail.ActorKind != contract.ActorKindHarness || otherDetail.ActorKey != "direct" || otherDetail.ID == detail.ID {
 		t.Fatalf("other work conversation = %+v, error = %v", otherDetail, err)
 	}
