@@ -19,7 +19,7 @@ export interface Conversation {
 export interface Message {
   card?: MessageCard;
   reply_to?: { id: string; kind: ActorKind; key: string; preview: string };
-  status: "streaming" | "completed" | "failed" | "cancelled";
+  status: "streaming" | "completed" | "failed" | "cancelled" | "expired";
   id: string;
   target_kind?: ActorKind;
   target_key?: string;
@@ -69,9 +69,8 @@ export async function createConversation(name: string, signal?: AbortSignal): Pr
   });
 }
 
-export async function listMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
+export async function listMessages(conversationID: string, signal?: AbortSignal, after = ""): Promise<Message[]> {
   const messages: Message[] = [];
-  let after = "";
   for (;;) {
     const page = await requestJSON<Page<Message>>(
       `/v1/conversations/${encodeURIComponent(conversationID)}/messages?limit=100&after=${encodeURIComponent(after)}`,
@@ -81,6 +80,19 @@ export async function listMessages(conversationID: string, signal?: AbortSignal)
     if (page.data.length < 100) return messages;
     after = page.data[page.data.length - 1].id;
   }
+}
+
+export async function messageChanges(conversationID: string, revisions: Map<string, number>, signal?: AbortSignal): Promise<Message[]> {
+  const entries = [...revisions];
+  const messages: Message[] = [];
+  for (let i = 0; i < entries.length; i += 100) {
+    const watch = entries.slice(i, i + 100).map(([id, revision]) => `${id}:${revision}`).join(",");
+    const page = await requestJSON<Page<Message>>(
+      `/v1/conversations/${encodeURIComponent(conversationID)}/messages?watch=${encodeURIComponent(watch)}`, { signal },
+    );
+    messages.push(...page.data);
+  }
+  return messages;
 }
 
 export interface StreamRequest {
@@ -118,6 +130,19 @@ export async function streamMessage(request: StreamRequest): Promise<void> {
   if (!taskID) throw new Error("loop-server response omitted task ID");
   request.onTaskID(taskID);
 
+  await readMessageStream(response, request.onEvent);
+}
+
+export async function streamConversation(conversationID: string, signal: AbortSignal, onEvent: (event: MessageEvent) => void): Promise<void> {
+  const response = await fetch(`/v1/conversations/${encodeURIComponent(conversationID)}/stream`, {
+    headers: { Accept: "text/event-stream" }, signal,
+  });
+  if (!response.ok) throw await responseError(response);
+  await readMessageStream(response, onEvent);
+}
+
+async function readMessageStream(response: Response, onEvent: (event: MessageEvent) => void) {
+  if (!response.body) throw new Error("loop-server returned an empty event stream");
   const decoder = new TextDecoder();
   const frames = new SseFrameDecoder();
   const reader = response.body.getReader();
@@ -125,12 +150,12 @@ export async function streamMessage(request: StreamRequest): Promise<void> {
     const chunk = await reader.read();
     if (chunk.done) break;
     for (const frame of frames.push(decoder.decode(chunk.value, { stream: true }))) {
-      request.onEvent(decodeMessageFrame(frame));
+      onEvent(decodeMessageFrame(frame));
     }
   }
-  for (const frame of frames.push(decoder.decode())) request.onEvent(decodeMessageFrame(frame));
+  for (const frame of frames.push(decoder.decode())) onEvent(decodeMessageFrame(frame));
   const tail = frames.finish();
-  if (tail) request.onEvent(decodeMessageFrame(tail));
+  if (tail) onEvent(decodeMessageFrame(tail));
 }
 
 export class SseFrameDecoder {

@@ -97,16 +97,16 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if event.Op == agentueui.OpEnd && m.TargetKind != contract.ActorKindUser {
 			updates["dispatch_pending"] = true
 		}
-		at := time.Now().UTC()
+		// TTL measures server acceptance, not an untrusted or replayed event clock.
+		now := time.Now().UTC()
+		at := now
 		if event.Timestamp != nil {
 			at = time.UnixMilli(*event.Timestamp).UTC()
 		}
 		if at.Before(m.CreatedAt) {
 			updates["created_at"] = at
 		}
-		if at.After(m.UpdatedAt) {
-			updates["updated_at"] = at
-		}
+		updates["updated_at"] = now
 		return tx.Model(&m).UpdateColumns(updates).Error
 	})
 }

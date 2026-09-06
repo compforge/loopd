@@ -32,7 +32,7 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 		t.Fatal(err)
 	}
 	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	if _, err := store.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial}); err != nil {
+	if _, err := store.CreateChatInput(ctx, model.Message{ID: "00000000-0000-7000-8000-000000000001", ConversationID: "root", TaskID: "task", Kind: "user", ActorKey: "human", Content: initial}); err != nil {
 		t.Fatal(err)
 	}
 	redisServer := miniredis.RunT(t)

@@ -34,7 +34,8 @@ func run() error {
 		return err
 	}
 	loopServer, err := server.New(server.Config{
-		Database: server.DatabaseConfig{MessageInlineBlocks: config.messageInlineBlocks, MessageInlineBytes: config.messageInlineBytes, MessagePartBytes: config.messagePartBytes, Driver: config.databaseDriver, DSN: config.databaseDSN},
+		MessageTTL: config.messageTTL,
+		Database:   server.DatabaseConfig{MessageInlineBlocks: config.messageInlineBlocks, MessageInlineBytes: config.messageInlineBytes, MessagePartBytes: config.messagePartBytes, Driver: config.databaseDriver, DSN: config.databaseDSN},
 		Redis: server.RedisConfig{
 			Address:  config.redisAddress,
 			Username: config.redisUsername,

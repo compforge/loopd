@@ -23,6 +23,7 @@ import (
 type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
 
 type Config struct {
+	MessageTTL    time.Duration
 	Conversations ConversationCoordinator
 	Database      DatabaseConfig
 	Redis         RedisConfig
@@ -44,15 +45,23 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
-	poll  *service.PollService
-	store *repo.Store
-	redis redis.UniversalClient
-	api   *serverapi.Server
-	human *service.HumanService
-	chat  *service.ChatService
+	messages   *service.MessageService
+	messageTTL time.Duration
+	poll       *service.PollService
+	store      *repo.Store
+	redis      redis.UniversalClient
+	api        *serverapi.Server
+	human      *service.HumanService
+	chat       *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
+	if config.MessageTTL < 0 {
+		return nil, errors.New("message TTL must be positive")
+	}
+	if config.MessageTTL == 0 {
+		config.MessageTTL = DefaultMessageTTL
+	}
 	if config.Conversations == nil {
 		return nil, errors.New("conversation coordinator is required")
 	}
@@ -68,7 +77,7 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	events, redisClient, err := newEventBridge(config.Redis)
+	events, redisClient, err := newEventBridge(config.Redis, config.MessageTTL)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
@@ -85,6 +94,7 @@ func New(config Config) (*Server, error) {
 	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
+		messages: messages, messageTTL: config.MessageTTL,
 		poll:  poll,
 		human: human, chat: chat,
 		store: store,
@@ -98,13 +108,14 @@ func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.poll.Run(ctx) })
+	workers.Go(func() { server.messages.Run(ctx, server.messageTTL) })
 	workers.Wait()
 }
 func (server *Server) Close() error {
 	return errors.Join(server.redis.Close(), server.store.Close())
 }
 
-func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.UniversalClient, error) {
+func newEventBridge(config RedisConfig, ttl time.Duration) (agentuerunner.EventBridge, redis.UniversalClient, error) {
 	if config.Address == "" {
 		config.Address = "127.0.0.1:6379"
 	}
@@ -122,9 +133,6 @@ func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.Univer
 	}
 	if config.MinIdleConns < 0 {
 		config.MinIdleConns = 0
-	}
-	if config.TaskTTL <= 0 {
-		config.TaskTTL = 30 * 24 * time.Hour
 	}
 	if config.ReadBlock <= 0 {
 		config.ReadBlock = time.Second
@@ -147,7 +155,7 @@ func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.Univer
 		return nil, nil, fmt.Errorf("connect to loop-server Redis %q: %w", config.Address, err)
 	}
 	return agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{
-		KeyPrefix: config.KeyPrefix, TaskTTL: config.TaskTTL,
+		KeyPrefix: config.KeyPrefix, TaskTTL: ttl,
 		ReadBlock: config.ReadBlock, ReadCount: config.ReadCount,
 	}), client, nil
 }

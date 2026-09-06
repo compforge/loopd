@@ -125,7 +125,7 @@ func TestMessagePartsMixedStorageAndReadPaths(t *testing.T) {
 	reads := []func() ([]model.Message, error){
 		func() ([]model.Message, error) { return s.ListMessages(ctx, "conv", "", 100) },
 		func() ([]model.Message, error) { return s.ListInbox(ctx, "conv", "operator", "reader", "", 100) },
-		func() ([]model.Message, error) { return s.ListDeliveryMessages(ctx, "conv") },
+		func() ([]model.Message, error) { return s.ListDeliveryMessages(ctx, "conv", "", 100) },
 		func() ([]model.Message, error) { return s.PendingDispatches(ctx, 100) },
 	}
 	for _, read := range reads {

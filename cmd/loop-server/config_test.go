@@ -28,6 +28,7 @@ func TestLoadConfigUsesUnprefixedEnvironment(t *testing.T) {
 	t.Setenv("REDIS_ADDRESS", "redis:6379")
 	t.Setenv("TASK_NAMESPACE", "loopd-system")
 	t.Setenv("HTTP_IDLE_TIMEOUT", "2m")
+	t.Setenv("MESSAGE_TTL", "48h")
 	config, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,9 @@ func TestLoadConfigUsesUnprefixedEnvironment(t *testing.T) {
 	}
 	if config.redisAddress != "redis:6379" || config.taskNamespace != "loopd-system" || config.idleTimeout != 2*time.Minute {
 		t.Fatalf("runtime config = %#v", config)
+	}
+	if config.messageTTL != 48*time.Hour {
+		t.Fatal("message TTL not parsed")
 	}
 }
 
@@ -86,6 +90,7 @@ func TestLoadConfigRejectsLegacyEnvironment(t *testing.T) {
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
+		"MESSAGE_TTL",
 		"SERVER_ADDRESS", "DATABASE_DRIVER", "DATABASE_DSN", "REDIS_ADDRESS", "REDIS_USERNAME", "REDIS_PASSWORD",
 		"TASK_NAMESPACE", "TASK_CLIENT_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
 		"LOOP_SERVER_MYSQL_DSN", "LOOP_SERVER_SQLITE_PATH", "LOOP_SERVER_ADDR", "LOOP_SERVER_REDIS_ADDR",

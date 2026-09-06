@@ -1,10 +1,13 @@
 import { ActorKind, operatorOwner } from "./actor";
 import { MessageBody, ReplyReference } from "./MessageBody";
 import type { HumanResult } from "./api";
-import { messageStatusLabel } from "./message";
+import { messageStatusLabel, mergeMessage } from "./message";
+import { useConversationStream } from "./streams";
+import { applyMessageEvent } from "./message";
+import { MessagePoller } from "./message-poll";
 import { useEffect, useState, type CSSProperties } from "react";
 import { parseMessageContent, type MessageContent } from "./content";
-import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
+import { findDetailConversation, type Conversation, type Message } from "./api";
 import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
@@ -21,10 +24,8 @@ export interface DetailSelection {
 }
 
 /** @spec 按父会话/Operator 观察工作会话，不等待主回答；切换参与者不能泄漏上一个查询的结果。 */
-export function DetailPanel({ selection, liveMessages, running, onReply }: {
+export function DetailPanel({ selection, onReply }: {
   selection?: DetailSelection;
-  liveMessages?: Message[];
-  running: boolean;
   onReply?(result: HumanResult): void;
 }) {
   const [detail, setDetail] = useState<Detail>();
@@ -37,35 +38,41 @@ export function DetailPanel({ selection, liveMessages, running, onReply }: {
     if (!parentID || !actorKind || !actorKey) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let conversation: Conversation | undefined;
+    let poller: MessagePoller | undefined;
+    let messages: Message[] = [];
     // The actor's workspace stays observable beyond any single UI delivery.
     async function refresh() {
       try {
-        const conversation = await findDetailConversation(parentID!, actorKind!, actorKey!, controller.signal);
-        const messages = conversation ? await listMessages(conversation.id, controller.signal) : [];
-        if (!controller.signal.aborted) setDetail({ scope, conversation, messages });
+        conversation ??= await findDetailConversation(parentID!, actorKind!, actorKey!, controller.signal);
+        if (conversation) {
+          poller ??= new MessagePoller(conversation.id);
+          for (const message of await poller.poll(controller.signal)) messages = mergeMessage(messages, message);
+        }
+        if (!controller.signal.aborted) setDetail((current) => {
+          let merged = current?.scope === scope ? current.messages : [];
+          for (const message of messages) merged = mergeMessage(merged, message);
+          return { scope, conversation, messages: merged };
+        });
       } catch (cause) {
         if (!controller.signal.aborted) {
           setDetail({ scope, messages: [], error: String(cause) });
         }
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, running ? 1_000 : 2_000);
+        if (!controller.signal.aborted) timer = setTimeout(refresh, 2_000);
       }
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [scope, parentID, actorKind, actorKey, running]);
+  }, [scope, parentID, actorKind, actorKey]);
 
   const selected = detail?.scope === scope ? detail : undefined;
-  const visible = [...(selected?.messages ?? [])];
-  for (const item of liveMessages ?? []) {
-    if (item.conversation_id !== selected?.conversation?.id) continue;
-    const index = visible.findIndex((value) => value.id === item.id);
-    if (index < 0) visible.push(item);
-    else if ((item.revision ?? 0) > (visible[index].revision ?? 0)) {
-      // The stream carries content updates; polling refreshes the activity interval.
-      visible[index] = { ...item, created_at: visible[index].created_at, updated_at: visible[index].updated_at };
-    }
-  }
+  useConversationStream(selected?.conversation?.id, (event) => {
+    if (!event.messageID) return;
+    setDetail((current) => current?.scope === scope
+      ? { ...current, messages: applyMessageEvent(current.messages, event) } : current);
+  });
+  const visible = selected?.messages ?? [];
   const groups = groupParallelMessages(visible);
   const indices = new Map(visible.map((item, index) => [item.id, index]));
   return (

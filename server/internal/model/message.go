@@ -7,7 +7,7 @@ import (
 )
 
 type Message struct {
-	Status string `gorm:"size:24;not null;default:completed"`
+	Status string `gorm:"size:24;not null;default:completed;index:idx_message_expiry,priority:1"`
 	// Empty recipient kind and key explicitly address the conversation.
 	TargetKind      contract.ActorKind `gorm:"size:128"`
 	TargetKey       string             `gorm:"size:128"`
@@ -26,7 +26,7 @@ type Message struct {
 	ActorKey       string             `gorm:"size:128;not null"`
 	Content        []byte             `gorm:"type:json;not null"`
 	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	UpdatedAt      time.Time `gorm:"index:idx_message_expiry,priority:2"`
 }
 
 func (Message) TableName() string { return "messages" }

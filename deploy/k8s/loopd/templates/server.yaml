@@ -73,6 +73,8 @@ spec:
           env:
             - name: SERVER_ADDRESS
               value: :8080
+            - name: MESSAGE_TTL
+              value: {{ .Values.server.messageTTL | quote }}
             {{- if $mysqlEnabled }}
             - name: DATABASE_DRIVER
               value: mysql

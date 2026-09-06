@@ -100,6 +100,11 @@ func (service *ChatService) Stream(
 	return err
 }
 
+// StreamConversation observes a page, not an actor execution or one user input.
+func (service *ChatService) StreamConversation(ctx context.Context, convID string, deliver func(delivery.Event) error) error {
+	return mapDeliveryError(service.delivery.Stream(ctx, "", convID, "", deliver))
+}
+
 func mapDeliveryError(err error) error {
 	switch {
 	case err == nil:

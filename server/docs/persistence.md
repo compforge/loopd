@@ -51,9 +51,9 @@ revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状�
 [页面交付](ue.md#页面交付)。
 
 task_id 仅保存在开启 UI／Redis 交付的真实用户 input 上，其他 Actor 发言不需要关联它。
-不再保存页面关闭意图。Message.status 列记录 streaming/completed/failed/cancelled，
+不再保存页面关闭意图。Message.status 列记录 streaming/completed/failed/cancelled/expired，
 只表示这条消息的发送状态，不表示业务完成。默认 Speak、用户输入和 Human 卡片直接 completed；
-流式输出从 streaming 开始，End 的终态与 Revision 一起保存。
+流式输出从 streaming 开始，End 的终态与 Revision 一起保存；长期失活由 server 按 updated_at + TTL 收口为 expired。
 受控 meta.output 只保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
@@ -132,7 +132,8 @@ reply_to_id 是答复关联的唯一依据，不能用最近消息、相邻位�
 UUIDv7 的时间顺序不是多节点数据库的全局提交顺序；当前采用人类输入通常有先后的假设，
 严格消费顺序的限制见 [Conversation](conversation.md)。
 
-created_at 与 updated_at 表达首次到最后一次可见活动。Harness 事件携带时间戳，
-完成投影不把每条消息的结束时间改成整个页面流的完成时间，重试不缩短活动区间。
+created_at 与 updated_at 表达首次到最后一次可见活动。updated_at 使用 server 实际接受新输出的时间，
+不跟随 Harness 的历史或未来时间戳；读取与幂等重试不刷新它。过期只改变 status/revision，
+保留最后活动时间与正文。DB 和 Redis 的 TTL 独立推进，容许短暂不一致，详见 [失活与 TTL](ue.md#失活与-ttl)。
 
 时间区间如何用于并行展示见 [消息呈现](ue.md#消息呈现)，不由存储层规定页面布局。

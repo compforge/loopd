@@ -8,143 +8,292 @@ import (
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/server/internal/model"
+	"github.com/compforge/loopd/server/internal/repo"
 )
 
+const discoveryPageSize = 100
+
+type messageReader struct {
+	message model.Message
+	cancel  context.CancelFunc
+}
 type messageDelivery struct {
-	message  model.Message
+	reader   *messageReader
 	delivery agentuerunner.Delivery
 	done     bool
-	err      error
+}
+type watchedMessage struct {
+	message  model.Message // Only active messages remain in this map.
+	revision uint64
+	reader   *messageReader
+	retryAt  time.Time
 }
 
-// Stream multiplexes messages without folding their models together.
-// The UI transport advances Last-Event-ID; each message replays its independent
-// stream on reconnect. A message's end never terminates the Chat transport.
+// Stream discovers new messages by ID and checks only active message revisions.
+// +spec=`Ended history is loaded once, in pages. Human interaction is observed independently of output status.`
 func (coordinator *Coordinator) Stream(ctx context.Context, taskID, conversationID, after string, deliver func(Event) error) error {
-	input, err := coordinator.input(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if input.ConversationID != conversationID {
-		return agentuerunner.ErrNotFound
+	var control *watchedMessage
+	watermark := ""
+	if taskID != "" {
+		input, err := coordinator.input(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if input.ConversationID != conversationID {
+			return agentuerunner.ErrNotFound
+		}
+		control = &watchedMessage{message: transportMessage(input)}
+	} else {
+		var err error
+		watermark, err = coordinator.repo.LatestMessageID(ctx, conversationID)
+		if err != nil {
+			return err
+		}
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	incoming := make(chan messageDelivery)
-	started := map[string]bool{}
-	revisions := map[string]uint64{}
-	start := func(message model.Message, cursor string) error {
-		if started[message.ID] {
-			return nil
+	watching := map[string]*watchedMessage{}
+	stop := func(watch *watchedMessage) {
+		if watch.reader != nil {
+			watch.reader.cancel()
+			watch.reader = nil
 		}
-		if err := coordinator.ensureStream(ctx, message); err != nil {
-			return err
+	}
+	start := func(watch *watchedMessage, cursor string) {
+		if watch == nil {
+			return
 		}
-		started[message.ID] = true
+		if watch.reader != nil || time.Now().Before(watch.retryAt) {
+			return
+		}
+		watch.retryAt = time.Now().Add(time.Second)
+		// Bridge outages do not disable SQL discovery or re-run business work.
+		if err := coordinator.ensureStream(ctx, watch.message); err != nil {
+			return
+		}
+		readerCtx, cancelReader := context.WithCancel(ctx)
+		reader := &messageReader{message: watch.message, cancel: cancelReader}
+		watch.reader = reader
 		go func() {
+			defer cancelReader()
 			send := func(value messageDelivery) error {
 				select {
 				case incoming <- value:
 					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-readerCtx.Done():
+					return readerCtx.Err()
 				}
 			}
-			err := (agentuerunner.Replayer{Bridge: coordinator.events}).Stream(ctx, streamKey(message), cursor, func(value agentuerunner.Delivery) error {
-				return send(messageDelivery{message: message, delivery: value})
+			_ = (agentuerunner.Replayer{Bridge: coordinator.events}).Stream(readerCtx, streamKey(reader.message), cursor, func(value agentuerunner.Delivery) error {
+				return send(messageDelivery{reader: reader, delivery: value})
 			})
-			_ = send(messageDelivery{message: message, done: true, err: err})
+			_ = send(messageDelivery{reader: reader, done: true})
 		}()
-		return nil
 	}
-	snapshot := func(message model.Message) error {
-		revision := message.Revision
+	snapshot := func(row model.Message, watch *watchedMessage) error {
+		revision := row.Revision
 		if revision == 0 {
 			revision = 1
 		}
-		if revisions[message.ID] >= revision {
+		if watch.revision >= revision {
 			return nil
 		}
-		event, err := agentueui.Start(message.Content, revision)
+		patch, err := agentueui.Start(row.Content, revision)
 		if err != nil {
 			return err
 		}
-		data, err := event.Marshal()
+		data, err := patch.Marshal()
 		if err != nil {
 			return err
 		}
-		msg := visibleMessage(message)
-		if err := deliver(Event{MessageID: message.ID, Message: &msg, Data: data}); err != nil {
+		message := visibleMessage(row)
+		if err := deliver(Event{MessageID: row.ID, Message: &message, Data: data}); err != nil {
 			return err
 		}
-		revisions[message.ID] = revision
-		return nil
-	}
-	discover := func() error {
-		rows, err := coordinator.repo.ListDeliveryMessages(ctx, conversationID)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			// SQL snapshots repair missed bridge deliveries without asking writers
-			// or Operators to know whether a browser was connected.
-			if err := snapshot(row); err != nil {
+		watch.revision = revision
+		if row.Purpose == "output" && message.Ended() {
+			data, err := agentueui.End(revision).Marshal()
+			if err != nil {
 				return err
 			}
+			return deliver(Event{MessageID: row.ID, Message: &message, Data: data})
+		}
+		return nil
+	}
+	observe := func(row model.Message) error {
+		watch := watching[row.ID]
+		if watch == nil {
+			watch = &watchedMessage{}
+		}
+		if err := snapshot(row, watch); err != nil {
+			return err
+		}
+		watch.message = row
+		if !visibleMessage(row).Ended() || row.HumanDueAt != nil {
+			watching[row.ID] = watch
 			if row.Purpose == "output" && !visibleMessage(row).Ended() {
-				if err := start(row, ""); err != nil {
-					return err
+				start(watch, "")
+			}
+		} else {
+			stop(watch)
+			delete(watching, row.ID)
+		}
+		return nil
+	}
+	afterID := ""
+	discover := func() (int, error) {
+		// UUIDv7 is an allocation order, not a distributed commit watermark.
+		// This uses the existing conversation cursor assumption, not Kafka's stronger guarantee.
+		var rows []model.Message
+		var err error
+		if control != nil {
+			rows, err = coordinator.repo.ListDeliveryMessages(ctx, conversationID, afterID, discoveryPageSize)
+		} else {
+			rows, err = coordinator.repo.ListStreamMessages(ctx, conversationID, afterID, watermark, discoveryPageSize)
+		}
+		if err != nil {
+			return 0, err
+		}
+		for _, row := range rows {
+			if err := observe(row); err != nil {
+				return 0, err
+			}
+			afterID = row.ID
+		}
+		return len(rows), nil
+	}
+	refreshActive := func() error {
+		ids := make([]string, 0, len(watching))
+		for id := range watching {
+			ids = append(ids, id)
+		}
+		for from := 0; from < len(ids); from += discoveryPageSize {
+			batch := ids[from:min(from+discoveryPageSize, len(ids))]
+			states, err := coordinator.repo.GetMessageStates(ctx, "", batch)
+			if err != nil {
+				return err
+			}
+			found := map[string]bool{}
+			for _, state := range states {
+				found[state.ID] = true
+				watch := watching[state.ID]
+				if state.Revision > watch.revision || state.Status != visibleMessage(watch.message).Status {
+					row, err := coordinator.repo.GetMessage(ctx, state.ID)
+					if errors.Is(err, repo.ErrNotFound) {
+						stop(watch)
+						delete(watching, state.ID)
+						continue
+					}
+					if err != nil {
+						return err
+					}
+					if err := observe(row); err != nil {
+						return err
+					}
+				} else if state.Ended && state.HumanDueAt == nil {
+					stop(watch)
+					delete(watching, state.ID)
+				} else if watch.message.Purpose == "output" {
+					start(watch, "")
+				}
+			}
+			for _, id := range batch {
+				if !found[id] {
+					stop(watching[id])
+					delete(watching, id)
 				}
 			}
 		}
 		return nil
 	}
-	if err := discover(); err != nil {
-		return err
+	// Conv subscriptions bootstrap active outputs and pending Human cards only.
+	// Completed history belongs to the paginated messages endpoint.
+	for {
+		count, err := discover()
+		if err != nil {
+			return err
+		}
+		if count < discoveryPageSize {
+			break
+		}
 	}
-	control := transportMessage(input)
-	// A lost bridge can only restart from the durable message snapshot.
-	if _, err := coordinator.events.State(ctx, streamKey(control)); errors.Is(err, agentuerunner.ErrNotFound) {
-		after = ""
-	} else if err != nil {
-		return err
+	if afterID < watermark {
+		afterID = watermark
 	}
-	if err := start(control, after); err != nil {
-		return err
+	if control != nil {
+		if _, err := coordinator.events.State(ctx, streamKey(control.message)); errors.Is(err, agentuerunner.ErrNotFound) {
+			after = ""
+		}
 	}
-	ticker := time.NewTicker(250 * time.Millisecond)
+	start(control, after)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	ping, _ := agentueui.Ping(0).Marshal()
+	if err := deliver(Event{Data: ping}); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
-			if err := discover(); err != nil {
+		case <-heartbeat.C:
+			if err := deliver(Event{Data: ping}); err != nil {
 				return err
 			}
+		case <-ticker.C:
+			if _, err := discover(); err != nil {
+				return err
+			}
+			if err := refreshActive(); err != nil {
+				return err
+			}
+			start(control, "")
 		case value := <-incoming:
-			if value.done {
-				if value.err != nil {
-					return value.err
-				}
+			id := value.reader.message.ID
+			watch := watching[id]
+			if value.reader.message.Purpose == "transport" {
+				watch = control
+			}
+			// Drop queued events from readers cancelled after a SQL terminal snapshot.
+			if watch == nil || watch.reader != value.reader {
 				continue
 			}
-			msg := visibleMessage(value.message)
+			if value.done {
+				stop(watch)
+				continue
+			}
+			message := visibleMessage(watch.message)
 			patch, err := agentueui.Parse(value.delivery.Data)
 			if err != nil {
 				return err
 			}
-			if msg.ID != "" && patch.Op == agentueui.OpEnd {
-				// AgentUE End carries no business payload. Read the SQL terminal
-				// status rather than infer successful output from transport closure.
-				state, err := coordinator.repo.GetMessageState(ctx, msg.ID)
-				if err != nil {
-					return err
+			if watch != control {
+				if patch.Op == agentueui.OpEnd || (patch.Op == agentueui.OpStart && patch.Seq > watch.revision) {
+					// A bridge rebuilt from SQL may already represent a terminal
+					// snapshot. Its AgentUE Start alone cannot carry Message.status.
+					row, err := coordinator.repo.GetMessage(ctx, id)
+					if err != nil {
+						return err
+					}
+					if err := observe(row); err != nil {
+						return err
+					}
+					continue
 				}
-				msg.Status = state.Status
+				if patch.Op == agentueui.OpPing || patch.Seq <= watch.revision {
+					continue
+				}
+				// Live deltas may overlap a newer SQL snapshot, but cannot jump a gap.
+				if patch.Op != agentueui.OpStart && patch.Seq != watch.revision+1 {
+					continue
+				}
+				watch.revision = patch.Seq
 			}
-			event := Event{MessageID: msg.ID, Message: &msg, Data: value.delivery.Data}
-			if msg.ID == control.ID {
+			event := Event{MessageID: id, Message: &message, Data: value.delivery.Data}
+			if watch == control {
 				event.Message = nil
 				event.ID = value.delivery.Cursor
 				event.Persisted = event.ID != ""

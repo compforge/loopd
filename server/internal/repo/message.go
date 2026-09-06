@@ -11,6 +11,8 @@ import (
 )
 
 type MessageRepository interface {
+	ExpireMessages(context.Context, time.Time, int) ([]string, error)
+	GetMessageStates(context.Context, string, []string) ([]MessageState, error)
 	GetMessages(context.Context, string, []string) ([]model.Message, error)
 	ListHumanReplies(context.Context, string, []string) ([]model.Message, error)
 	Speak(context.Context, string, contract.SpeakRequest) (model.Message, error)
@@ -66,6 +68,7 @@ type MessageState struct {
 	Revision       uint64
 	Status         contract.MessageStatus
 	Ended          bool
+	HumanDueAt     *time.Time
 }
 
 // GetMessageState reads progress without loading message bodies.
@@ -120,19 +123,6 @@ func (store *Store) DeleteMessage(ctx context.Context, id string) error {
 	}))
 }
 
-// ObserveMessageActivity only widens the interval. Conditional updates remain
-// safe when different servers deliver accepted events to SQL out of order.
-func (store *Store) ObserveMessageActivity(ctx context.Context, id string, at time.Time) error {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	if err := store.db.WithContext(ctx).Model(&model.Message{}).
-		Where("id = ? AND created_at > ?", id, at).UpdateColumn("created_at", at).Error; err != nil {
-		return mapError(err)
-	}
-	return mapError(store.db.WithContext(ctx).Model(&model.Message{}).
-		Where("id = ? AND updated_at < ?", id, at).UpdateColumn("updated_at", at).Error)
-}
-
 func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -154,11 +144,15 @@ func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (m
 }
 
 // ListDeliveryMessages observes a user conversation and its direct actor workspaces.
-func (store *Store) ListDeliveryMessages(ctx context.Context, conversationID string) ([]model.Message, error) {
+func (store *Store) ListDeliveryMessages(ctx context.Context, conversationID, after string, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
-		return tx.Joins("JOIN conversations ON conversations.id = messages.conversation_id").Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID).Order("messages.id ASC")
+		q := tx.Joins("JOIN conversations ON conversations.id = messages.conversation_id").Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID)
+		if after != "" {
+			q = q.Where("messages.id > ?", after)
+		}
+		return q.Order("messages.id ASC").Limit(limit)
 	})
 }
 

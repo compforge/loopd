@@ -1,0 +1,41 @@
+import { listMessages, messageChanges, type Message } from "./api";
+import { parseMessageContent } from "./content";
+
+// One poller belongs to one selected conversation. Only discovery advances after;
+// receiving an SSE frame must not skip earlier, not-yet-discovered messages.
+export class MessagePoller {
+  private after = "";
+  private active = new Map<string, number>();
+  private pending?: Promise<Message[]>;
+
+  constructor(private readonly conversationID: string) {}
+
+  poll(signal?: AbortSignal): Promise<Message[]> {
+    // Initial load, timer and submit callbacks may coincide. Share the request
+    // instead of racing cursor updates or letting a slow network build a queue.
+    if (!this.pending) this.pending = this.read(signal).finally(() => { this.pending = undefined; });
+    return this.pending;
+  }
+
+  private async read(signal?: AbortSignal): Promise<Message[]> {
+    const added = await listMessages(this.conversationID, signal, this.after);
+    const changed = await messageChanges(this.conversationID, this.active, signal);
+    signal?.throwIfAborted();
+    if (added.length) this.after = added[added.length - 1].id;
+    const updates = [...added, ...changed];
+    for (const message of updates) {
+      if (isActive(message)) this.active.set(message.id, message.revision ?? 0);
+      else this.active.delete(message.id);
+    }
+    return updates;
+  }
+}
+
+function isActive(message: Message): boolean {
+  if (message.status === "streaming") return true;
+  if (message.purpose !== "human_request") return false;
+  if (message.card?.type === "ask" || message.card?.type === "confirm") return message.card.question.status === "pending";
+  // The content model remains valid without a server-enriched card.
+  return parseMessageContent(message.content).blocks.some((block) =>
+    (block.type === "ask" || block.type === "confirm") && block.status === "pending");
+}

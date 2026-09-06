@@ -17,6 +17,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route/param"
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/delivery"
+	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
@@ -142,6 +143,48 @@ func TestChatHTTPFlow(t *testing.T) {
 }
 
 type completedChatRunner struct{}
+
+type convStreamRunner struct {
+	completedChatRunner
+	t      *testing.T
+	convID string
+}
+
+func (runner convStreamRunner) Stream(_ context.Context, taskID, convID, after string, deliver func(delivery.Event) error) error {
+	if taskID != "" || after != "" || convID != runner.convID {
+		runner.t.Fatalf("stream args = %q %q %q", taskID, convID, after)
+	}
+	m := contract.Message{ID: "message", ConversationID: convID, Status: contract.MessageStatusStreaming, Kind: contract.ActorKindOperator, Key: "router", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
+	return deliver(delivery.Event{MessageID: m.ID, Message: &m, Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.1","biz":"chat","meta":{},"blocks":[]}}`)})
+}
+
+func TestConversationStreamHTTPWithoutUserInput(t *testing.T) {
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "stream.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.CreateConversation(context.Background(), model.Conversation{ID: "conv"}); err != nil {
+		t.Fatal(err)
+	}
+	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil),
+		service.NewChatService(store, convStreamRunner{t: t, convID: "conv"}, nil, nil), nil)
+	engine := route.NewEngine(config.NewOptions(nil))
+	server.Register(engine)
+	request := hertzapp.NewContext(1)
+	request.Request.Header.SetMethod("GET")
+	request.Request.SetRequestURI("/v1/conversations/conv/stream")
+	writer := &streamWriter{}
+	request.Response.HijackWriter(writer)
+	engine.ServeHTTP(context.Background(), request)
+	if request.Response.StatusCode() != 200 || !strings.Contains(writer.String(), `"message_id":"message"`) || !strings.Contains(string(request.Response.Header.ContentType()), "text/event-stream") {
+		t.Fatalf("stream response: %d %s", request.Response.StatusCode(), writer.String())
+	}
+	missing := ut.PerformRequest(engine, "GET", "/v1/conversations/missing/stream", nil).Result()
+	if missing.StatusCode() != 404 {
+		t.Fatalf("missing conv status=%d", missing.StatusCode())
+	}
+}
 
 func (completedChatRunner) Initialize(context.Context, string, json.RawMessage) error { return nil }
 func (completedChatRunner) Delete(context.Context, string) error                      { return nil }

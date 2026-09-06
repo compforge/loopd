@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	hertzsse "github.com/cloudwego/hertz/pkg/protocol/sse"
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
@@ -54,5 +57,37 @@ func (server *Server) listConversations(ctx context.Context, request *hertzapp.R
 		return err
 	}
 	request.JSON(consts.StatusOK, view.Page[contract.Conversation]{Data: conversations})
+	return nil
+}
+
+// streamConversation multiplexes message-addressed events for exactly one Conv.
+func (server *Server) streamConversation(ctx context.Context, request *hertzapp.RequestContext) error {
+	convID := request.Param("conversation_id")
+	if _, err := server.conversations.GetConversation(ctx, convID); err != nil {
+		return err
+	}
+	var writer *hertzsse.Writer
+	err := server.chat.StreamConversation(ctx, convID, func(event delivery.Event) error {
+		data := event.Data
+		if event.MessageID != "" {
+			var err error
+			data, err = server.messageEventData(ctx, event.MessageID, event.Message, data)
+			if err != nil {
+				return err
+			}
+		}
+		if writer == nil {
+			writer = hertzsse.NewWriter(request)
+		}
+		// Redis cursors are message-local; there is no shared Conv event cursor.
+		return writer.WriteEvent("", "", data)
+	})
+	if writer == nil {
+		return err
+	}
+	closeErr := writer.Close()
+	if !errors.Is(err, context.Canceled) && errors.Join(err, closeErr) != nil {
+		server.logger.WarnContext(ctx, "conversation stream stopped", "conversation_id", convID, "error", errors.Join(err, closeErr))
+	}
 	return nil
 }

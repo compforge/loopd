@@ -62,6 +62,18 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			_ = writer.Close()
 			return nil
 		}
+		// Input submission is acknowledged once. The page independently subscribes
+		// to its Conv; it does not need an input-owned connection to observe actors.
+		end, _ := ui.End(accepted.Revision).Marshal()
+		endData, err := server.messageEventData(ctx, accepted.ID, accepted, end)
+		if err == nil {
+			err = writer.WriteEvent("", "", endData)
+		}
+		if err != nil {
+			server.logger.WarnContext(ctx, "input acknowledgement ended early", "message_id", accepted.ID, "error", err)
+		}
+		_ = writer.Close()
+		return nil
 	}
 	streamErr := server.chat.Stream(
 		ctx,

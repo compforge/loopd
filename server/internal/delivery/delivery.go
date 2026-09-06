@@ -21,7 +21,10 @@ var ErrInvalidEvent = errors.New("invalid AgentUE event")
 type MessageRepository interface {
 	ProjectOutput(context.Context, string, agentueui.Event, ...contract.MessageStatus) error
 	GetDeliveryInput(context.Context, string) (model.Message, error)
-	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
+	ListDeliveryMessages(context.Context, string, string, int) ([]model.Message, error)
+	GetMessageStates(context.Context, string, []string) ([]repo.MessageState, error)
+	LatestMessageID(context.Context, string) (string, error)
+	ListStreamMessages(context.Context, string, string, string, int) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	GetMessageState(context.Context, string) (repo.MessageState, error)
 }
