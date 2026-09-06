@@ -1,3 +1,5 @@
+import { MessageBody, ReplyReference } from "./MessageBody";
+import type { HumanResult } from "./api";
 import { useEffect, useState, type CSSProperties } from "react";
 import { parseMessageContent, type MessageContent } from "./content";
 import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
@@ -12,10 +14,11 @@ interface Detail {
 }
 
 /** @spec 同一父会话/Operator 的消息共享详情；切换参与者不能泄漏上一个查询的结果。 */
-export function DetailPanel({ message, liveMessages, running }: {
+export function DetailPanel({ message, liveMessages, running, onReply }: {
   message?: Message;
   liveMessages?: Message[];
   running: boolean;
+  onReply?(result: HumanResult): void;
 }) {
   const [detail, setDetail] = useState<Detail>();
   const parentID = message?.conversation_id;
@@ -51,7 +54,7 @@ export function DetailPanel({ message, liveMessages, running }: {
     if (item.conversation_id !== selected?.conversation?.id) continue;
     const index = visible.findIndex((value) => value.id === item.id);
     if (index < 0) visible.push(item);
-    else if ((item.revision ?? 0) >= (visible[index].revision ?? 0)) {
+    else if ((item.revision ?? 0) > (visible[index].revision ?? 0)) {
       // The stream carries content updates; polling refreshes the activity interval.
       visible[index] = { ...item, created_at: visible[index].created_at, updated_at: visible[index].updated_at };
     }
@@ -82,7 +85,7 @@ export function DetailPanel({ message, liveMessages, running }: {
                   <div className="parallel-columns" style={{ gridTemplateColumns: `repeat(${group.columns.length}, 240px)` }}>
                     {group.columns.map((column) => (
                       <div className="parallel-column" key={column[0].id}>
-                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} />)}
+                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} onReply={onReply} />)}
                       </div>
                     ))}
                   </div>
@@ -96,7 +99,7 @@ export function DetailPanel({ message, liveMessages, running }: {
   );
 }
 
-export function DetailMessage({ message, index }: { message: Message; index: number }) {
+export function DetailMessage({ message, index, onReply }: { message: Message; index: number; onReply?(result: HumanResult): void }) {
   const style = message.kind !== "user" ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
   let model: MessageContent | undefined;
   try { model = parseMessageContent(message.content); } catch { /* Invalid persisted model is shown below. */ }
@@ -105,7 +108,7 @@ export function DetailMessage({ message, index }: { message: Message; index: num
   const title = typeof explicitTitle === "string" && explicitTitle ? explicitTitle
     : model?.blocks[0] ? traceLabel(model.blocks[0], index) : `步骤 ${index + 1}`;
   return (
-    <article className={`detail-card${style ? " harness-trace" : ""}`} style={style} data-message-id={message.id}>
+    <article className={`detail-card${style ? " harness-trace" : ""}`} style={style} id={`message-${message.id}`} data-message-id={message.id}>
       <div className="timeline-node">{index + 1}</div>
       <div className="detail-card-head">
         <span className="block-kind" title={`${message.kind} / ${message.key}`}>{actorName.toUpperCase()}</span>
@@ -114,16 +117,8 @@ export function DetailMessage({ message, index }: { message: Message; index: num
       <div className="detail-card-time" title={`${message.created_at} → ${message.updated_at}`}>
         {activityTime(message.created_at)} → {activityTime(message.updated_at)}
       </div>
-      {!model && <p>消息内容无法显示。</p>}
-      {model?.blocks.map((block) => (
-        <div key={block.id}>
-          {block.type === "tool" && <div className="detail-card-subtitle">{String(block.name ?? "TOOL")} {String(block.status ?? "")}</div>}
-          {typeof block.content === "string" && <p>{block.content}</p>}
-          {typeof block.error === "string" && block.error && <p role="alert">{block.error}</p>}
-        </div>
-      ))}
-      {model?.blocks.length === 0 && <p className="quiet">等待输出…</p>}
-      {model?.meta.error && <p>{model.meta.error.message}</p>}
+      <ReplyReference message={message} />
+      <MessageBody message={message} onReply={onReply} />
     </article>
   );
 }

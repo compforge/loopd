@@ -242,3 +242,34 @@ button { color: inherit; }
 .human-question textarea { display: block; width: 100%; min-height: 70px; margin: 10px 0; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; }
 .human-question .human-dismiss { margin-top: 10px; color: #64748b; }
 .human-question [role="alert"] { margin-top: 8px; color: #b91c1c; }
+
+/* Selected answers remain legible in both actor and user cards. */
+.message-content p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-content > div + div { margin-top: 10px; }
+.human-question { min-width: 0; }
+.human-options { display: grid; gap: 8px; }
+.human-choice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #d2d9d3; border-radius: 9px; color: #33453a; background: #fafbf9; cursor: pointer; }
+.human-choice input { flex: 0 0 auto; margin: 5px 0 0; accent-color: #365b42; }
+.human-choice small { display: block; margin-top: 3px; color: #64736a; }
+.human-choice.is-selected { border-color: #54735d; background: #dfeade; box-shadow: inset 3px 0 #54735d; font-weight: 650; }
+.human-options:disabled .human-choice { cursor: default; }
+.human-choice:has(input:focus-visible) { outline: 2px solid #54735d; outline-offset: 2px; }
+.human-answer { padding: 10px 12px; border-radius: 9px; border-left: 3px solid #54735d; background: #eef3eb; color: #33453a; }
+.human-answer small { color: #64736a; }
+.human-answer p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.message.user .human-status, .message.user .reply-reference { color: #d5e1d7; }
+.message.user .human-choice { background: #3e5345; border-color: #738778; color: #f7f7f3; }
+.message.user .human-choice small { color: #d5e1d7; }
+.message.user .human-choice.is-selected { background: #dfeade; color: #263d2b; border-color: #dfeade; }
+.message.user .human-choice.is-selected small { color: #496150; }
+.reply-reference { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.markdown-content { white-space: normal; overflow-wrap: anywhere; }
+.markdown-content p { white-space: normal; margin: 8px 0; }
+.markdown-content :first-child { margin-top: 0; }
+.markdown-content :last-child { margin-bottom: 0; }
+.markdown-content pre { padding: 12px; background: #eef0eb; color: #263d2b; border-radius: 8px; overflow-x: auto; }
+.markdown-content code { font-size: .9em; }
+.markdown-content blockquote { margin-left: 0; padding-left: 12px; border-left: 3px solid #a8b8ab; }
+.markdown-content img { max-width: 100%; }
+.message.user .markdown-content a { color: #d5e1d7; }

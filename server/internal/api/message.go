@@ -7,7 +7,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
-	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/service"
 )
 
@@ -24,7 +23,11 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, page[loopd.Message]{Data: messages})
+	views, err := server.messages.EnrichMessages(ctx, messages)
+	if err != nil {
+		return err
+	}
+	request.JSON(consts.StatusOK, page[service.MessageView]{Data: views})
 	return nil
 }
 

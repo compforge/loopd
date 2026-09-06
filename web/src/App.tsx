@@ -13,7 +13,7 @@ import {
   type Conversation,
   type Message,
 } from "./api";
-import { HumanMessage } from "./HumanMessage";
+import { MessageBody, ReplyReference } from "./MessageBody";
 import { mergeMessage, applyMessageEvent } from "./message";
 import { DetailPanel } from "./DetailPanel";
 
@@ -127,8 +127,9 @@ export function App() {
       const items = await listMessages(conversationID, signal);
       if (signal?.aborted) return [];
       setMessages((current) => {
-        let result = items;
-        for (const m of current) if (m.conversation_id === conversationID && !m.id.startsWith("local-")) result = mergeMessage(result, m);
+        // Equal message revisions may carry refreshed reference previews/cards.
+        let result = current.filter((m) => m.conversation_id === conversationID && !m.id.startsWith("local-"));
+        for (const m of items) result = mergeMessage(result, m);
         return result;
       });
       return items;
@@ -330,7 +331,6 @@ export function App() {
             const model = safeModel(message.content);
             const output = model?.meta.output;
             const isLive = message.purpose === "output" && output !== null && typeof output === "object" && "ended" in output && output.ended === false;
-            const text = messageText(model);
             const active = selectedMessageID === message.id;
             return (
               <article
@@ -344,14 +344,12 @@ export function App() {
                   {isLive && <span className="run-badge running">STREAMING</span>}
                 </div>
                 <div className="bubble">
-                  {message.reply_to_id && <a className="reply-reference" href={`#message-${message.reply_to_id}`}>查看所回复的消息</a>}
-                  {message.purpose === "human_request" || message.purpose === "human_reply" ? (
-                    <HumanMessage message={message} replyTo={renderedMessages.find((item) => item.id === message.reply_to_id)} onReply={(result) => setMessages((current) => {
-                      let next = mergeMessage(current, result.message);
-                      if (result.reply) next = mergeMessage(next, result.reply);
-                      return next;
-                    })} />
-                  ) : text || (isLive ? <Typing /> : <span className="quiet">等待处理…</span>)}
+                  <ReplyReference message={message} />
+                  <MessageBody message={message} onReply={(result) => setMessages((current) => {
+                    let next = mergeMessage(current, result.message);
+                    if (result.reply) next = mergeMessage(next, result.reply);
+                    return next;
+                  })} empty={isLive ? <Typing /> : <span className="quiet">等待处理…</span>} />
                 </div>
               </article>
             );
@@ -417,6 +415,11 @@ export function App() {
       </main>
 
       <DetailPanel
+        onReply={(result) => setMessages((current) => {
+          let next = mergeMessage(current, result.message);
+          if (result.reply) next = mergeMessage(next, result.reply);
+          return next;
+        })}
         message={selectedMessage}
         liveMessages={subscription?.messages}
         running={subscription?.status === "connected"}
@@ -435,16 +438,6 @@ function safeModel(value: unknown): MessageContent | undefined {
   } catch {
     return undefined;
   }
-}
-
-function messageText(model: MessageContent | undefined): string {
-  if (!model) return "";
-  const answer = model.blocks.find((block) => block.id === "answer" && block.type === "text");
-  if (answer && typeof answer.content === "string") return answer.content;
-  return model.blocks
-    .filter((block) => block.type === "text" && typeof block.content === "string")
-    .map((block) => block.content as string)
-    .join("\n");
 }
 
 function textModel(text: string): MessageContent {

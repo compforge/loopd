@@ -58,7 +58,11 @@ func (s *Server) createHuman(ctx context.Context, r *hertzapp.RequestContext) er
 	if err != nil {
 		return err
 	}
-	r.JSON(200, result)
+	view, err := s.humanView(ctx, result)
+	if err != nil {
+		return err
+	}
+	r.JSON(200, view)
 	return nil
 }
 func (s *Server) getHuman(ctx context.Context, r *hertzapp.RequestContext) error {
@@ -69,7 +73,11 @@ func (s *Server) getHuman(ctx context.Context, r *hertzapp.RequestContext) error
 	if err != nil {
 		return err
 	}
-	r.JSON(200, result)
+	view, err := s.humanView(ctx, result)
+	if err != nil {
+		return err
+	}
+	r.JSON(200, view)
 	return nil
 }
 func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) error {
@@ -95,6 +103,10 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	if err != nil {
 		return err
 	}
-	r.JSON(200, result)
+	view, err := s.humanView(ctx, result)
+	if err != nil {
+		return err
+	}
+	r.JSON(200, view)
 	return nil
 }

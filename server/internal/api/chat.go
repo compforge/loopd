@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -47,11 +46,11 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 		if err != nil {
 			return err
 		}
-		data, err := json.Marshal(struct {
-			MessageID string         `json:"message_id"`
-			Message   *loopd.Message `json:"message"`
-			Event     ui.Event       `json:"event"`
-		}{accepted.ID, accepted, start})
+		raw, err := start.Marshal()
+		if err != nil {
+			return err
+		}
+		data, err := server.messageEventData(ctx, accepted.ID, accepted, raw)
 		if err != nil {
 			return err
 		}
@@ -74,11 +73,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			data := event.Data
 			if event.MessageID != "" {
 				var err error
-				data, err = json.Marshal(struct {
-					MessageID string          `json:"message_id"`
-					Message   any             `json:"message,omitempty"`
-					Event     json.RawMessage `json:"event"`
-				}{event.MessageID, event.Message, event.Data})
+				data, err = server.messageEventData(ctx, event.MessageID, event.Message, event.Data)
 				if err != nil {
 					return err
 				}

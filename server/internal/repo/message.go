@@ -11,6 +11,8 @@ import (
 )
 
 type MessageRepository interface {
+	GetMessages(context.Context, string, []string) ([]model.Message, error)
+	ListHumanReplies(context.Context, string, []string) ([]model.Message, error)
 	Speak(context.Context, string, loopd.SpeakRequest) (model.Message, error)
 	CreateMessage(context.Context, model.Message) (model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
@@ -150,5 +152,29 @@ func (store *Store) ListDeliveryMessages(ctx context.Context, conversationID str
 	defer cancel()
 	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
 		return tx.Joins("JOIN conversations ON conversations.id = messages.conversation_id").Where("messages.conversation_id = ? OR conversations.parent_id = ?", conversationID, conversationID).Order("messages.id ASC")
+	})
+}
+
+// GetMessages resolves IDs only within the already selected conversation.
+func (store *Store) GetMessages(ctx context.Context, conversationID string, ids []string) ([]model.Message, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("conversation_id = ? AND id IN ?", conversationID, ids)
+	})
+}
+
+// ListHumanReplies finds typed answers without expanding a reply chain.
+func (store *Store) ListHumanReplies(ctx context.Context, conversationID string, questionIDs []string) ([]model.Message, error) {
+	if len(questionIDs) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("conversation_id = ? AND reply_to_id IN ? AND purpose = ?", conversationID, questionIDs, "human_reply").Order("id ASC")
 	})
 }

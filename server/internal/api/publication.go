@@ -16,7 +16,11 @@ func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext)
 	if err != nil {
 		return err
 	}
-	r.JSON(200, message)
+	views, err := s.messages.EnrichMessages(ctx, []loopd.Message{message})
+	if err != nil {
+		return err
+	}
+	r.JSON(200, views[0])
 	return nil
 }
 func (s *Server) actorConversation(ctx context.Context, r *hertzapp.RequestContext) error {

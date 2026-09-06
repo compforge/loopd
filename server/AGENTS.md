@@ -33,6 +33,7 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
+│   ├── message_view.go     # 页面消息富化；分页不变、直接引用与卡片投影
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；输入提交与 UI 流交付
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
