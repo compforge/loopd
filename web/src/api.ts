@@ -1,3 +1,4 @@
+import type { MessageCard } from "./card";
 import type { MessageContent } from "./content";
 import { decodeSse, type SseMessage } from "@compforge/agentue/ui";
 
@@ -22,6 +23,8 @@ export interface Conversation {
 }
 
 export interface Message {
+  card?: MessageCard;
+  reply_to?: { id: string; kind: ActorKind; key: string; preview: string };
   id: string;
   target_kind?: ActorKind;
   target_key?: string;

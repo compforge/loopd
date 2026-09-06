@@ -13,6 +13,7 @@ import (
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
@@ -72,6 +73,39 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	if result.Value != "custom" || result.Reply.ReplyToID != question.Message.ID {
 		t.Fatalf("result=%+v", result)
+	}
+	// +case=`分页、答复响应和 SSE 采用同一卡片投影；跨页问题不插入返回列表。`
+	var projected view.HumanResult
+	if err := json.Unmarshal(accepted.Body(), &projected); err != nil {
+		t.Fatal(err)
+	}
+	if projected.Reply == nil || projected.Reply.Card.Mode != "reply" || projected.Reply.Card.SelectedValue == nil || *projected.Reply.Card.SelectedValue != "custom" || projected.Message.Card.Editable {
+		t.Fatalf("answer projection: %s", accepted.Body())
+	}
+	history := performJSON(t, engine, "GET", "/v1/conversations/"+conv.ID+"/messages?after="+question.Message.ID+"&limit=1", "")
+	var onlyReply struct {
+		Data []view.Message `json:"data"`
+	}
+	if err := json.Unmarshal(history.Body(), &onlyReply); err != nil {
+		t.Fatal(err)
+	}
+	if history.StatusCode() != 200 || len(onlyReply.Data) != 1 || onlyReply.Data[0].ID != result.Reply.ID || onlyReply.Data[0].Card.QuestionID != question.Message.ID {
+		t.Fatalf("page: %s", history.Body())
+	}
+	streamData, err := server.messageEventData(ctx, result.Reply.ID, result.Reply, json.RawMessage(`{"op":"start","seq":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stream struct {
+		Message view.Message `json:"message"`
+	}
+	if err := json.Unmarshal(streamData, &stream); err != nil {
+		t.Fatal(err)
+	}
+	streamCard, _ := json.Marshal(stream.Message.Card)
+	pageCard, _ := json.Marshal(onlyReply.Data[0].Card)
+	if string(streamCard) != string(pageCard) {
+		t.Fatalf("history/live mismatch: %s / %s", streamCard, pageCard)
 	}
 	taskAfter, err := store.GetDeliveryInput(ctx, taskID)
 	if err != nil || taskAfter.ID != task.ID {

@@ -19,6 +19,7 @@ import (
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func TestChatHTTPFlow(t *testing.T) {
@@ -52,7 +53,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if listed.StatusCode() != 200 {
 		t.Fatalf("list conversations status=%d body=%s", listed.StatusCode(), listed.Body())
 	}
-	var conversations page[loopd.Conversation]
+	var conversations view.Page[loopd.Conversation]
 	if err := json.Unmarshal(listed.Body(), &conversations); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if history.StatusCode() != 200 {
 		t.Fatalf("history status=%d body=%s", history.StatusCode(), history.Body())
 	}
-	var result page[loopd.Message]
+	var result view.Page[loopd.Message]
 	if err := json.Unmarshal(history.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestChatHTTPFlow(t *testing.T) {
 		if response.StatusCode() != 200 {
 			t.Fatalf("query %s: %s", test.query, response.Body())
 		}
-		var page page[loopd.Conversation]
+		var page view.Page[loopd.Conversation]
 		if err := json.Unmarshal(response.Body(), &page); err != nil {
 			t.Fatal(err)
 		}

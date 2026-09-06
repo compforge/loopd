@@ -6,10 +6,11 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func (server *Server) createConversation(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input createConversationRequest
+	var input view.CreateConversationRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -40,7 +41,7 @@ func (server *Server) listConversations(ctx context.Context, request *hertzapp.R
 		if err != nil {
 			return err
 		}
-		request.JSON(consts.StatusOK, page[loopd.Conversation]{Data: values})
+		request.JSON(consts.StatusOK, view.Page[loopd.Conversation]{Data: values})
 		return nil
 	}
 
@@ -52,6 +53,6 @@ func (server *Server) listConversations(ctx context.Context, request *hertzapp.R
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, page[loopd.Conversation]{Data: conversations})
+	request.JSON(consts.StatusOK, view.Page[loopd.Conversation]{Data: conversations})
 	return nil
 }

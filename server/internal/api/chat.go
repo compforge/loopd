@@ -10,12 +10,13 @@ import (
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/delivery"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 const taskIDHeader = "X-Loopd-Task-ID"
 
 func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input createChatMessagesRequest
+	var input view.CreateChatMessagesRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -47,11 +48,11 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 		if err != nil {
 			return err
 		}
-		data, err := json.Marshal(struct {
-			MessageID string         `json:"message_id"`
-			Message   *loopd.Message `json:"message"`
-			Event     ui.Event       `json:"event"`
-		}{accepted.ID, accepted, start})
+		raw, err := start.Marshal()
+		if err != nil {
+			return err
+		}
+		data, err := server.messageEventData(ctx, accepted.ID, accepted, raw)
 		if err != nil {
 			return err
 		}
@@ -74,11 +75,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 			data := event.Data
 			if event.MessageID != "" {
 				var err error
-				data, err = json.Marshal(struct {
-					MessageID string          `json:"message_id"`
-					Message   any             `json:"message,omitempty"`
-					Event     json.RawMessage `json:"event"`
-				}{event.MessageID, event.Message, event.Data})
+				data, err = server.messageEventData(ctx, event.MessageID, event.Message, event.Data)
 				if err != nil {
 					return err
 				}
@@ -99,4 +96,17 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 		server.logger.ErrorContext(ctx, "chat stream stopped", "task_id", taskID, "error", err)
 	}
 	return nil
+}
+
+// Historical snapshots, live snapshots and acknowledgements use the same projection.
+func (s *Server) messageEventData(ctx context.Context, id string, message *loopd.Message, event json.RawMessage) ([]byte, error) {
+	var projected *view.Message
+	if message != nil {
+		values, err := s.messages.EnrichMessages(ctx, []loopd.Message{*message})
+		if err != nil {
+			return nil, err
+		}
+		projected = &values[0]
+	}
+	return json.Marshal(view.MessageEvent{MessageID: id, Message: projected, Event: event})
 }
