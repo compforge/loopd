@@ -16,8 +16,7 @@ func TestHumanMaintenanceRecoversNotifications(t *testing.T) {
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv"}); err != nil {
 		t.Fatal(err)
 	}
-	runner := &recordingChatRunner{}
-	chat := NewChatService(store, runner, nil, nil)
+	chat := NewChatService(store, nil, nil)
 	message, err := chat.Create(ctx, "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)

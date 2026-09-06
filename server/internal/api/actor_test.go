@@ -26,8 +26,8 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 	server := New(
 		service.NewActorService(store, nil),
 		service.NewConversationService(store, nil),
-		service.NewMessageService(store, nil),
-		service.NewChatService(store, completedChatRunner{}, nil, nil),
+		service.NewMessageService(store, nil, nil),
+		service.NewChatService(store, nil, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))

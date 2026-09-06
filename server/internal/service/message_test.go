@@ -23,7 +23,7 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat := NewChatService(store, nopChatRunner{}, nil, nil)
+	chat := NewChatService(store, nil, nil)
 	input, err := chat.Create(ctx, conversation.ID, "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestChatAcceptsInputWithoutPageDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat := NewChatService(store, nil, nil, nil)
+	chat := NewChatService(store, nil, nil)
 	_, err = chat.Create(ctx, conversation.ID, "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err != nil {
 		t.Fatalf("Create = %v", err)
@@ -61,19 +61,18 @@ func TestChatAcceptsInputWithoutPageDelivery(t *testing.T) {
 }
 
 func TestChatReportsDatabaseFailure(t *testing.T) {
-	runner := &recordingChatRunner{}
-	chat := NewChatService(failingCommitRepository{}, runner, nil, nil)
+	chat := NewChatService(failingCommitRepository{}, nil, nil)
 	_, err := chat.Create(context.Background(), "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, textContent("question"))
 	if err == nil {
-		t.Fatalf("commit error: %+v %v", runner, err)
+		t.Fatalf("commit error: %v", err)
 	}
 }
 
 func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	store := openServiceStore(t)
 	conversations := NewConversationService(store, nil)
-	messages := NewMessageService(store, nil)
-	chat := NewChatService(store, nopChatRunner{}, nil, nil)
+	messages := NewMessageService(store, nil, nil)
+	chat := NewChatService(store, nil, nil)
 	ctx := context.Background()
 
 	root, err := conversations.CreateConversation(ctx, "Root", "user-1")
@@ -128,10 +127,6 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 	}
 }
 
-type nopChatRunner struct{}
-
-type recordingChatRunner struct{}
-
 type failingCommitRepository struct{}
 
 func (failingCommitRepository) CreateChatInput(
@@ -159,11 +154,4 @@ func textContent(text string) json.RawMessage {
 		"blocks":  []map[string]any{{"id": "text", "type": "text", "content": text}},
 	})
 	return value
-}
-
-func (nopChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error) {
-	return "", nil
-}
-func (runner *recordingChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error) {
-	return "", nil
 }

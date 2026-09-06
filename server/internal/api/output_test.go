@@ -13,7 +13,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -31,8 +30,8 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	defer client.Close()
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
-	chat := service.NewChatService(store, delivery.New(bridge, store, nil), nil, nil)
-	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil), chat, nil)
+	chat := service.NewChatService(store, nil, nil)
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, bridge, nil), chat, nil)
 	engine := route.NewEngine(config.NewOptions(nil))
 	api.Register(engine)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {

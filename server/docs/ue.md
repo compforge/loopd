@@ -96,7 +96,7 @@ Conv.Speak 默认原子发布完整消息，不创建独立消息流；只有 St
 返回的句柄通过 Emit/End 按 Message ID 更新消息；Operator 不传 task_id。
 Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批准。
 
-消息事件先原子推进 SQL 可见快照，再尽力写 Redis。DB 接收即发送成功；桥故障只影响页面
+MessageService 统一承接 Speak 和 EmitMessage：前者创建消息，后者先原子推进 SQL 可见快照，再尽力写 Redis。DB 接收即发送成功；桥故障只影响页面
 实时性，不改变 Actor 的协作结果。runtime 隐藏序号与瞬时重试，SQL 保存最后事件指纹，避免
 响应丢失后重复追加；同一序号不同内容会冲突。Message End 不代表 Actor 或整个 Conv 完成。
 

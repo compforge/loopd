@@ -35,12 +35,12 @@ func TestConversationPollHTTP(t *testing.T) {
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
-	chat := service.NewChatService(store, completedChatRunner{}, nil, poll)
+	chat := service.NewChatService(store, nil, poll)
 	if _, err := chat.Create(ctx, "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"},
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}`)); err != nil {
 		t.Fatal(err)
 	}
-	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil),
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil, nil),
 		chat, nil)
 	api.Poll = poll
 	engine := route.NewEngine(config.NewOptions(nil))
@@ -109,7 +109,7 @@ func testActorKindConversationConsumption(t *testing.T, kind contract.ActorKind)
 	_ = conversationv1.AddToScheme(scheme)
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
-	messages := service.NewMessageService(store, nil)
+	messages := service.NewMessageService(store, nil, nil)
 	// Speak persistence queues the notification; Poll service reconciles it.
 	role := contract.ActorRef{Kind: kind, Key: "run-uid"}
 	message, err := messages.Speak(ctx, "conv", contract.SpeakRequest{Key: "audit-report", Actor: contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})

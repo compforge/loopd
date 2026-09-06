@@ -29,7 +29,7 @@ func (s *Server) emitPublishedMessage(ctx context.Context, r *hertzapp.RequestCo
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
-	id, err := s.chat.EmitMessage(ctx, r.Param("message_id"), input.Event, input.Status)
+	id, err := s.messages.EmitMessage(ctx, r.Param("message_id"), input.Event, input.Status)
 	if err != nil {
 		return err
 	}

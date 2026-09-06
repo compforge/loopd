@@ -1,4 +1,4 @@
-package delivery
+package service
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
+func TestMessageOutputAcrossInstances(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "loopd.db")})
@@ -42,8 +42,8 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	t.Cleanup(func() { _ = clientA.Close() })
 	t.Cleanup(func() { _ = clientB.Close() })
 	options := agentuerunner.BridgeOptions{KeyPrefix: "test", ReadBlock: time.Millisecond}
-	producer := New(agentuerunner.NewRedisEventBridge(clientA, options), store, nil)
-	consumer := New(agentuerunner.NewRedisEventBridge(clientB, options), store, nil)
+	producer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientA, options), nil)
+	consumer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientB, options), nil)
 
 	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	defer client.Close()
-	coordinator := New(agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond}), store, nil)
+	coordinator := NewMessageService(store, agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond}), nil)
 	// No Redis stream exists. Observe must recover Human snapshots from Messages.
 	seen := map[string]bool{}
 	err = listen(ctx, coordinator, "conv", func(value Event) error {

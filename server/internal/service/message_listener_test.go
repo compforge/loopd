@@ -1,4 +1,4 @@
-package delivery
+package service
 
 import (
 	"context"
@@ -125,6 +125,6 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 
 type Event = component.Event
 
-func listen(ctx context.Context, coordinator *Coordinator, convID string, deliver func(Event) error) error {
+func listen(ctx context.Context, coordinator *MessageService, convID string, deliver func(Event) error) error {
 	return component.NewConvListener(coordinator.events, coordinator.repo.(component.ConvMessageRepository), convID).Run(ctx, deliver)
 }
