@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext) error {
@@ -39,7 +41,7 @@ func (s *Server) actorConversation(ctx context.Context, r *hertzapp.RequestConte
 	return nil
 }
 func (s *Server) emitPublishedMessage(ctx context.Context, r *hertzapp.RequestContext) error {
-	var input messageEventRequest
+	var input view.MessageEventRequest
 	if err := decodeBody(r, &input); err != nil {
 		return err
 	}
@@ -47,6 +49,6 @@ func (s *Server) emitPublishedMessage(ctx context.Context, r *hertzapp.RequestCo
 	if err != nil {
 		return err
 	}
-	r.JSON(202, messageEventResponse{ID: id})
+	r.JSON(202, view.MessageEventResponse{ID: id})
 	return nil
 }

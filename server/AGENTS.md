@@ -16,6 +16,7 @@ server/
 │   ├── actor.go            # Actor 聚合发现
 │   ├── operator.go         # Operator Registry
 │   └── harness.go          # Harness Registry
+├── internal/view/          # API 与 service 共用的 View Model；按领域拆文件，仅定义数据结构
 ├── internal/domain/        # Human 消息的纯状态规则，不持有独立存储
 ├── internal/delivery/      # Message 寻址与独立流、会话聚合交付及固化
 ├── internal/migrations/    # 已有数据库的 Schema 迁移
@@ -33,7 +34,7 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService
-│   ├── message_view.go     # 页面消息富化；分页不变、直接引用与卡片投影
+│   ├── message_enrichment.go # 页面消息富化；分页不变、直接引用与卡片投影
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；输入提交与 UI 流交付
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
@@ -45,6 +46,8 @@ server/
 
 1. API 适配用例，service 协调生命周期，domain 表达纯状态规则，repo/model 负责持久化。
    状态规则不依赖 GORM 或 HTTP；Message 是问题与答复的唯一事实来源。
+   `view/` 与 `api/`、`service/` 平级，按领域存放 View Model；API 与 service 可依赖它，
+   View Model 不依赖 handler、service 或 repo。
 2. `model/` 一张表一个文件，`repo/` 按同名模型拆分；不要重新聚合成巨型 store 文件。
 3. Message 只保存页面可见聊天；完整轨迹进入 AgentLedger，Operator 领域状态不进入 server 的表。
 4. server 拥有 Conv 定向通知与可见 Message，AgentUE 拥有事件协议和续接；事务、完成顺序与重试必须

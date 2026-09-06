@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 type Server struct {
@@ -90,7 +91,7 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	default:
 		server.logger.Error("loop-server request failed", "error", err)
 	}
-	request.JSON(status, errorResponse{Error: apiError{Type: typeName, Message: message}})
+	request.JSON(status, view.ErrorResponse{Error: view.Error{Type: typeName, Message: message}})
 }
 
 func decodeBody(request *hertzapp.RequestContext, target any) error {

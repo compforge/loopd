@@ -14,6 +14,7 @@ import (
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func TestActorsOnlyListsLiveTargets(t *testing.T) {
@@ -50,7 +51,7 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 	if response.StatusCode() != 200 {
 		t.Fatalf("actors status=%d body=%s", response.StatusCode(), response.Body())
 	}
-	var actors page[loopd.Actor]
+	var actors view.Page[loopd.Actor]
 	if err := json.Unmarshal(response.Body(), &actors); err != nil {
 		t.Fatal(err)
 	}

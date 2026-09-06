@@ -13,6 +13,7 @@ import (
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
@@ -74,7 +75,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	// +case=`分页、答复响应和 SSE 采用同一卡片投影；跨页问题不插入返回列表。`
-	var projected humanResultView
+	var projected view.HumanResult
 	if err := json.Unmarshal(accepted.Body(), &projected); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	history := performJSON(t, engine, "GET", "/v1/conversations/"+conv.ID+"/messages?after="+question.Message.ID+"&limit=1", "")
 	var onlyReply struct {
-		Data []service.MessageView `json:"data"`
+		Data []view.Message `json:"data"`
 	}
 	if err := json.Unmarshal(history.Body(), &onlyReply); err != nil {
 		t.Fatal(err)
@@ -96,7 +97,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stream struct {
-		Message service.MessageView `json:"message"`
+		Message view.Message `json:"message"`
 	}
 	if err := json.Unmarshal(streamData, &stream); err != nil {
 		t.Fatal(err)

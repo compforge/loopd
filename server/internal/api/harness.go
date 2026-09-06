@@ -6,10 +6,11 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 func (server *Server) registerHarness(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input registrationRequest
+	var input view.RegistrationRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}

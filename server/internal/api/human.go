@@ -11,6 +11,7 @@ import (
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 // HumanIdentity may resolve an authenticated principal from a trusted host.
@@ -109,4 +110,20 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	}
 	r.JSON(200, view)
 	return nil
+}
+
+func (s *Server) humanView(ctx context.Context, result loopd.HumanResult) (view.HumanResult, error) {
+	messages := []loopd.Message{result.Message}
+	if result.Reply != nil {
+		messages = append(messages, *result.Reply)
+	}
+	views, err := s.messages.EnrichMessages(ctx, messages)
+	if err != nil {
+		return view.HumanResult{}, err
+	}
+	resultView := view.HumanResult{HumanResult: result, Message: views[0]}
+	if len(views) > 1 {
+		resultView.Reply = &views[1]
+	}
+	return resultView, nil
 }

@@ -6,29 +6,8 @@ import (
 	"strings"
 
 	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/server/internal/view"
 )
-
-// MessageView is a page projection. Cards and references are never persisted.
-type MessageView struct {
-	loopd.Message
-	Card    MessageCard       `json:"card"`
-	ReplyTo *MessageReference `json:"reply_to,omitempty"`
-}
-type MessageReference struct {
-	ID      string          `json:"id"`
-	Kind    loopd.ActorKind `json:"kind"`
-	Key     string          `json:"key"`
-	Preview string          `json:"preview"`
-}
-type MessageCard struct {
-	Type          string            `json:"type"`
-	Mode          string            `json:"mode,omitempty"`
-	QuestionID    string            `json:"question_id,omitempty"`
-	Question      *loopd.HumanBlock `json:"question,omitempty"`
-	SelectedValue *string           `json:"selected_value,omitempty"`
-	ReplyID       string            `json:"reply_id,omitempty"`
-	Editable      bool              `json:"editable"`
-}
 
 type humanAnswer struct {
 	Type    string            `json:"type"`
@@ -77,8 +56,8 @@ func isAnswer(question, answer loopd.Message) bool {
 // EnrichMessages keeps page membership, order and revisions unchanged. Only direct
 // references are read, in batches scoped to each visible conversation.
 // +spec=`富化不改变分页；引用跨页按 reply_to_id 读取，不能跨会话或递归展开，也不能用普通回复伪造 Human 选择`
-func (s *MessageService) EnrichMessages(ctx context.Context, messages []loopd.Message) ([]MessageView, error) {
-	views := make([]MessageView, len(messages))
+func (s *MessageService) EnrichMessages(ctx context.Context, messages []loopd.Message) ([]view.Message, error) {
+	views := make([]view.Message, len(messages))
 	groups := map[string][]int{}
 	for i, m := range messages {
 		groups[m.ConversationID] = append(groups[m.ConversationID], i)
@@ -140,19 +119,19 @@ func (s *MessageService) EnrichMessages(ctx context.Context, messages []loopd.Me
 		}
 		for _, i := range indices {
 			m := messages[i]
-			v := MessageView{Message: m, Card: MessageCard{Type: "content"}}
+			v := view.Message{Message: m, Card: view.MessageCard{Type: "content"}}
 			original, found := known[m.ReplyToID]
 			if found {
-				v.ReplyTo = &MessageReference{ID: original.ID, Kind: original.Kind, Key: original.Key, Preview: messagePreview(original)}
+				v.ReplyTo = &view.MessageReference{ID: original.ID, Kind: original.Kind, Key: original.Key, Preview: messagePreview(original)}
 			}
 			if q := questionBlock(m); q != nil {
-				v.Card = MessageCard{Type: q.Type, Mode: "request", QuestionID: m.ID, Question: q, Editable: q.Status == loopd.HumanPending}
+				v.Card = view.MessageCard{Type: q.Type, Mode: "request", QuestionID: m.ID, Question: q, Editable: q.Status == loopd.HumanPending}
 				if a, ok := answers[m.ID]; ok && q.Status != loopd.HumanPending {
 					applyAnswer(&v.Card, a)
 				}
 			} else if found && isAnswer(original, m) {
 				if q := questionBlock(original); q != nil {
-					v.Card = MessageCard{Type: q.Type, Mode: "reply", QuestionID: original.ID, Question: q}
+					v.Card = view.MessageCard{Type: q.Type, Mode: "reply", QuestionID: original.ID, Question: q}
 					// A reply describes its own accepted result, even if a stale question snapshot was supplied.
 					q.Status = answerBlock(m).Outcome
 					applyAnswer(&v.Card, m)
@@ -163,7 +142,7 @@ func (s *MessageService) EnrichMessages(ctx context.Context, messages []loopd.Me
 	}
 	return views, nil
 }
-func applyAnswer(card *MessageCard, m loopd.Message) {
+func applyAnswer(card *view.MessageCard, m loopd.Message) {
 	a := answerBlock(m)
 	if a == nil || a.Outcome != card.Question.Status {
 		return

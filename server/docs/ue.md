@@ -47,7 +47,9 @@ AgentUE blocks：text 展示原文，markdown 渲染 Markdown，tool 保留工�
 就继承原消息的交互类型。`reply_to` 提供直接引用的身份和
 简短预览，引用关系仍以 Message 的 `reply_to_id` 为准。
 
-富化在页面展示用例中完成，不持久化为新消息或卡片表，不改写 Message.content。repo 提供完整
+View Model 集中在与 api、service 平级的 `internal/view/`，按领域拆分，供两层共用。
+service 负责批量读取关联并组装富化结果，api 负责 HTTP 交付，view 只定义数据结构。
+富化不持久化为新消息或卡片表，不改写 Message.content。repo 提供完整
 消息的批量读取，Part 和存储引用仍封装在 repo 内部。分页先决定消息集合、顺序和游标；富化
 只补齐这些消息的展示上下文，不把原问题插入当前页，也不扩大分页条数。
 

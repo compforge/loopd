@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -9,12 +10,13 @@ import (
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/delivery"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 const taskIDHeader = "X-Loopd-Task-ID"
 
 func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.RequestContext) error {
-	var input createChatMessagesRequest
+	var input view.CreateChatMessagesRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -94,4 +96,17 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 		server.logger.ErrorContext(ctx, "chat stream stopped", "task_id", taskID, "error", err)
 	}
 	return nil
+}
+
+// Historical snapshots, live snapshots and acknowledgements use the same projection.
+func (s *Server) messageEventData(ctx context.Context, id string, message *loopd.Message, event json.RawMessage) ([]byte, error) {
+	var projected *view.Message
+	if message != nil {
+		values, err := s.messages.EnrichMessages(ctx, []loopd.Message{*message})
+		if err != nil {
+			return nil, err
+		}
+		projected = &values[0]
+	}
+	return json.Marshal(view.MessageEvent{MessageID: id, Message: projected, Event: event})
 }

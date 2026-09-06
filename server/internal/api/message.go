@@ -8,6 +8,7 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/compforge/loopd/server/internal/service"
+	"github.com/compforge/loopd/server/internal/view"
 )
 
 const defaultPageSize = 100
@@ -27,7 +28,7 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 	if err != nil {
 		return err
 	}
-	request.JSON(consts.StatusOK, page[service.MessageView]{Data: views})
+	request.JSON(consts.StatusOK, view.Page[view.Message]{Data: views})
 	return nil
 }
 
