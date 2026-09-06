@@ -86,6 +86,7 @@ func Reconcile(convID) {
 Ask/Confirm 得到有效结果后才进入依赖它们的步骤；取消、超时和拒绝由 Operator 决定如何收口。
 Harness 的可见输出由 runtime 自动交付，`call.Stream` 用于 Operator 自己观察，不必再转发一遍；
 `stream.Emit` 展示的是 Operator 自己逐步发言的能力，不是再转发一次 Harness 输出。追加消息何时再次 Poll，也由业务决定。
+若业务已用 Speak 创建角色消息，可用 `Prompt.Output` 绑定该句柄，避免 Harness 再创建一条消息。
 
 `Loop.Operator.Register(...)` 与可选的 `Loop.Harness.Register(...)` 在启动时登记在线身份并续租，
 不在每次 Reconcile 里调用。Watch 属于 controller-runtime 的启动配置，不是 Verb。
@@ -141,6 +142,15 @@ Harness.Prompt 返回 Call handle。Operator 提供 prompt、tools、目标、�
 
 Prompt.Actor 可指定合法非 user 作者，默认仍为 Harness/Call ID；Prompt.Timeout 交给 Adapter
 落实期限。Actor、Timeout 和 ConversationID 等参数参与同一 runtime 的幂等冲突检查。
+
+`Prompt.Output` 可绑定同一 Conversation 内已有的 streaming Message，输出作者沿用消息身份；
+若同时传 Actor，两者必须一致。绑定的 Message ID 参与 Call 幂等检查，其动态内容与 Revision 不参与。
+不传 Output 时，runtime 自动创建并结束 Harness 消息，原有调用方式不变。
+
+传入 Output 时，Call 运行期间只有 Harness 写入该句柄；Call 进入终态后写入权交回调用者，
+由调用者发布业务最终结果并 End（包括失败收尾）。终态表示执行和流事件转发已停止，不表示
+绑定消息已经完成。调用者必须检查 Call 错误，不能把部分输出当作成功结果，也不能在 Call
+运行期间抢先 End。此能力只组合消息发布，不改变 Adapter 的执行恢复责任。
 
 Call.Value 读取状态，Stream(ctx) 观察本地 AgentUE 增量（不需要页面游标），Wait 等待终态。耗时长不代表没有进展。Wait 的 context
 取消只结束等待；runtime 关闭会结束进程内执行，外部持久执行仍由 Harness 拥有。

@@ -231,23 +231,24 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var in struct {
-			Event ui.Event `json:"event"`
+			Event  ui.Event               `json:"event"`
+			Status contract.MessageStatus `json:"status,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			f.t.Error(err)
 		}
 		if in.Event.Op == ui.OpEnd {
-			if f.failEnd && strings.Contains(string(m.Content), `"id":"report"`) {
+			if _, err := reportFrom(m); f.failEnd && err == nil {
 				w.WriteHeader(503)
 				return
 			}
-			m.Status = contract.MessageStatusCompleted
+			m.Status = in.Status
 			m.Revision = in.Event.Seq
 			f.messages[id] = m
 			write(map[string]string{"id": "end"})
 			return
 		}
-		if f.failSeal && in.Event.Block["id"] == "report" {
+		if f.failSeal && in.Event.Block["longhorizon_report"] == true {
 			w.WriteHeader(503)
 			return
 		}
@@ -346,15 +347,16 @@ func TestThreeRoleLoop(t *testing.T) {
 	if f.calls["manager"] != 3 || f.calls["executor"] != 2 || f.calls["auditor"] != 2 {
 		t.Fatalf("calls=%v", f.calls)
 	}
-	for key, id := range f.outputs {
+	if len(f.outputs) != 8 { // Seven role invocations plus the final user-facing answer.
+		t.Fatalf("role calls created duplicate messages: %d", len(f.outputs))
+	}
+	for _, id := range f.outputs {
 		m := f.messages[id]
 		if m.Key != string(run.UID) || !strings.HasPrefix(string(m.Kind), "operator/longhorizon/") {
 			t.Fatalf("author=%+v", m)
 		}
-		if strings.HasSuffix(key, "/report") || strings.HasSuffix(key, "/final") {
-			if _, err := reportFrom(m); err != nil {
-				t.Fatalf("missing report %s: %v", key, err)
-			}
+		if _, err := reportFrom(m); err != nil {
+			t.Fatalf("missing report %s: %v", id, err)
 		}
 	}
 	if !strings.Contains(f.prompts["manager"][1], "partial") || !strings.Contains(f.prompts["auditor"][0], run.Spec.Goal) {
