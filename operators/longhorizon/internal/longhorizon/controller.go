@@ -301,7 +301,7 @@ func (c *Controller) readReport(ctx context.Context, conversationID, id string) 
 	return reportFrom(m)
 }
 func reportContent(value report, title, role string) json.RawMessage {
-	content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"title": title, "actor_display_name": role}, "blocks": []any{map[string]any{"id": "report", "type": "text", "content": value.Text, "error": value.Error}}})
+	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": title, "actor_display_name": role}, "blocks": []any{map[string]any{"id": "report", "type": "text", "content": value.Text, "error": value.Error}}})
 	return content
 }
 
@@ -315,7 +315,7 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	author := actor(run, kind)
 	role := strings.TrimPrefix(string(kind), "operator/longhorizon/")
 	key := stepKey(run, round, role)
-	content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat", "meta": map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}, "blocks": []any{}})
+	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}, "blocks": []any{}})
 	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, loopd.SpeakRequest{Stream: true, Key: key + "/report", Actor: author, Target: recipient(run), Content: content})
 	if err != nil {
 		return report{}, "", "", false, err

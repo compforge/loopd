@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/cloudwego/hertz v0.10.4
 	github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676
-	github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a
+	github.com/compforge/agentue/sdks/go v0.0.0-20260906011454-b2ac41b1ebfb
 	github.com/go-logr/logr v1.4.3
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/qiankunli/go-stdx v0.0.4-0.20260824051808-f7f6d7c53de2

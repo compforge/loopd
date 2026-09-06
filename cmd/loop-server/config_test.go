@@ -94,3 +94,24 @@ func clearConfigEnv(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+func TestMessageStorageThresholds(t *testing.T) {
+	t.Setenv("MESSAGE_INLINE_BLOCKS", "12")
+	t.Setenv("MESSAGE_INLINE_BYTES", "1024")
+	t.Setenv("MESSAGE_PART_BYTES", "4096")
+	config, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.messageInlineBlocks != 12 || config.messageInlineBytes != 1024 || config.messagePartBytes != 4096 {
+		t.Fatal("storage thresholds not parsed")
+	}
+	for _, name := range []string{"MESSAGE_INLINE_BLOCKS", "MESSAGE_INLINE_BYTES", "MESSAGE_PART_BYTES"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(name, "-1")
+			if _, err := loadConfig(); err == nil {
+				t.Fatal("accepted invalid threshold")
+			}
+		})
+	}
+}

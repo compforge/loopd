@@ -1,4 +1,5 @@
-import { decodeSse, type SseMessage, type UIModel } from "@compforge/agentue/ui";
+import type { MessageContent } from "./content";
+import { decodeSse, type SseMessage } from "@compforge/agentue/ui";
 
 export type ActorKind = "user" | "operator" | "harness" | `operator/${string}/${string}`;
 export type TargetActorKind = "operator" | "harness";
@@ -31,7 +32,7 @@ export interface Message {
   task_id: string;
   kind: ActorKind;
   key: string;
-  content: UIModel;
+  content: MessageContent;
   created_at: string;
   updated_at: string;
 }
@@ -156,9 +157,9 @@ export class SseFrameDecoder {
   }
 }
 
-function textModel(text: string): UIModel {
+function textModel(text: string): MessageContent {
   return {
-    version: "1.0",
+    version: "1.1",
     biz: "chat",
     meta: {},
     blocks: [{ id: "question", type: "text", role: "user", content: text }],

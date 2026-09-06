@@ -1,4 +1,5 @@
-import { applyPatch, parseUIModel } from "@compforge/agentue/ui";
+import { parseMessageContent } from "./content";
+import { applyPatch } from "@compforge/agentue/ui";
 import type { Message, MessageEvent } from "./api";
 
 // +spec=`Message ID owns the snapshot; equal block IDs in parallel questions never collide`
@@ -13,7 +14,7 @@ export function applyMessageEvent(messages: Message[], delivery: MessageEvent): 
   const existing = messages.find((m) => m.id === messageID);
   if (existing && ((existing.revision ?? 0) > event.seq || (event.op !== "start" && (existing.revision ?? 0) === event.seq))) return messages;
   const snapshot = applyPatch(structuredClone(existing?.content ?? {}), event);
-  const model = parseUIModel(snapshot);
+  const model = parseMessageContent(snapshot);
   if (event.op === "end") model.meta.output = { ended: true };
   return mergeMessage(messages, { ...message, revision: event.seq, content: model });
 }

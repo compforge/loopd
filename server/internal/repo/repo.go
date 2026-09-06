@@ -20,23 +20,30 @@ import (
 const defaultOperationTimeout = 10 * time.Second
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict")
+	ErrNotFound       = errors.New("not found")
+	ErrConflict       = errors.New("conflict")
+	ErrInvalidContent = errors.New("invalid message content")
 )
 
 type Config struct {
-	Driver           string
-	DSN              string
-	OperationTimeout time.Duration
-	MaxOpenConns     int
-	MaxIdleConns     int
-	ConnMaxLifetime  time.Duration
-	ConnMaxIdleTime  time.Duration
+	MessageInlineBlocks int
+	MessageInlineBytes  int
+	MessagePartBytes    int
+	Driver              string
+	DSN                 string
+	OperationTimeout    time.Duration
+	MaxOpenConns        int
+	MaxIdleConns        int
+	ConnMaxLifetime     time.Duration
+	ConnMaxIdleTime     time.Duration
 }
 
 type Store struct {
-	db               *gorm.DB
-	operationTimeout time.Duration
+	messageInlineBlocks int
+	messageInlineBytes  int
+	messagePartBytes    int
+	db                  *gorm.DB
+	operationTimeout    time.Duration
 }
 
 func Open(config Config) (*Store, error) {
@@ -86,7 +93,16 @@ func Open(config Config) (*Store, error) {
 	sqlDB.SetConnMaxLifetime(config.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(config.ConnMaxIdleTime)
 
-	store := &Store{db: db, operationTimeout: config.OperationTimeout}
+	if config.MessageInlineBlocks <= 0 {
+		config.MessageInlineBlocks = defaultMessageInlineBlocks
+	}
+	if config.MessageInlineBytes <= 0 {
+		config.MessageInlineBytes = defaultMessageInlineBytes
+	}
+	if config.MessagePartBytes <= 0 {
+		config.MessagePartBytes = defaultMessagePartBytes
+	}
+	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: config.MessageInlineBlocks, messageInlineBytes: config.MessageInlineBytes, messagePartBytes: config.MessagePartBytes}
 	ctx, cancel := store.withTimeout(context.Background())
 	defer cancel()
 	if err := sqlDB.PingContext(ctx); err != nil {
@@ -109,6 +125,7 @@ func Open(config Config) (*Store, error) {
 	if err := db.WithContext(migrationCtx).AutoMigrate(
 		&model.Conversation{},
 		&model.Message{},
+		&model.MessagePart{},
 		&model.Operator{},
 		&model.Harness{},
 	); err != nil {

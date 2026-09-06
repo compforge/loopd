@@ -39,6 +39,8 @@ github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676 h1:3SrN9Pu/DbK
 github.com/compforge/agentgo v0.0.2-0.20260903061638-26733f9a1676/go.mod h1:EXHfA5VXaBoEB0aVUy3latIXgr+nyMJ/nUs06BL4R+Q=
 github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a h1:ZxgLsatqSGYE1WBJ7mUVdEGHN9x6qKw6rIYtXRNIBko=
 github.com/compforge/agentue/sdks/go v0.0.0-20260904102512-0ec4d015e66a/go.mod h1:AH0Je8lE9kGZuG8EtdnwExIsj4EqNWwSDFRG17GwFL8=
+github.com/compforge/agentue/sdks/go v0.0.0-20260906011454-b2ac41b1ebfb h1:rKYoymBe6pOH4+ICWFgasJO0ZFuaI+nDzisyFeSiw1g=
+github.com/compforge/agentue/sdks/go v0.0.0-20260906011454-b2ac41b1ebfb/go.mod h1:AH0Je8lE9kGZuG8EtdnwExIsj4EqNWwSDFRG17GwFL8=
 github.com/coreos/go-semver v0.3.1 h1:yi21YpKnrx1gt5R+la8n5WgS0kCrsPp33dmEyHReZr4=
 github.com/coreos/go-semver v0.3.1/go.mod h1:irMmmIw/7yzSRPWryHsK7EYSg09caPQL03VsM8rvUec=
 github.com/coreos/go-systemd/v22 v22.7.0 h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=

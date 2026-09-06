@@ -22,11 +22,13 @@ server/
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
 │   ├── message.go          # messages
+│   ├── message_part.go     # message_parts，Message 内部的物理正文分片
 │   ├── operator.go         # operators 在线注册
 │   └── harness.go          # harnesses 在线注册
 ├── internal/repo/          # 数据库连接及按表拆分的持久化操作
 │   ├── conversation.go
-│   └── message.go
+│   ├── message.go
+│   └── message_part.go     # 内联/引用装箱、定点更新与一致性展开
 ├── internal/conversation/  # Conv CRD 定向唤醒与参与者接收游标
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService

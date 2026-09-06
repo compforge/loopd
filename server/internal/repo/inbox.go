@@ -4,18 +4,20 @@ import (
 	"context"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
+	"gorm.io/gorm"
 )
 
 // ListInbox queries SQL, not the CRD wake signal, for the next addressed batch.
 func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, after string, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	var messages []model.Message
-	err := store.db.WithContext(ctx).
-		Where("conversation_id = ? AND id > ?", conversationID, after).
-		Where("(target_kind = ? AND target_key = ?) OR (target_kind = ? AND target_key = ?)", kind, key, "", "").
-		Where("NOT (kind = ? AND actor_key = ?)", kind, key).
-		Order("id ASC").Limit(limit).Find(&messages).Error
+	messages, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.
+			Where("conversation_id = ? AND id > ?", conversationID, after).
+			Where("(target_kind = ? AND target_key = ?) OR (target_kind = ? AND target_key = ?)", kind, key, "", "").
+			Where("NOT (kind = ? AND actor_key = ?)", kind, key).
+			Order("id ASC").Limit(limit)
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -32,8 +34,7 @@ func (store *Store) ListInbox(ctx context.Context, conversationID, kind, key, af
 func (store *Store) PendingDispatches(ctx context.Context, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	var messages []model.Message
-	err := store.db.WithContext(ctx).Where("dispatch_pending = ?", true).Order("id ASC").Limit(limit).Find(&messages).Error
+	messages, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB { return tx.Where("dispatch_pending = ?", true).Order("id ASC").Limit(limit) })
 	return messages, mapError(err)
 }
 

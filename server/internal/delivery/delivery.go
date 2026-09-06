@@ -13,6 +13,7 @@ import (
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
 	"github.com/compforge/loopd/server/internal/model"
+	"github.com/compforge/loopd/server/internal/repo"
 )
 
 var ErrInvalidEvent = errors.New("invalid AgentUE event")
@@ -22,6 +23,7 @@ type MessageRepository interface {
 	GetDeliveryInput(context.Context, string) (model.Message, error)
 	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
+	GetMessageState(context.Context, string) (repo.MessageState, error)
 }
 
 type Event struct {
@@ -60,7 +62,7 @@ func (coordinator *Coordinator) Delete(ctx context.Context, taskID string) error
 
 // +spec=`Message ID 决定输出归属，block ID 与 seq 只在该 Message 内唯一；Human 状态只能经 typed action 写入`
 func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage) (string, error) {
-	message, err := coordinator.repo.GetMessage(ctx, messageID)
+	message, err := coordinator.repo.GetMessageState(ctx, messageID)
 	if err != nil {
 		return "", err
 	}
@@ -71,7 +73,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if err != nil {
 		return "", err
 	}
-	if visibleMessage(message).Ended() {
+	if message.Ended {
 		if event.Op == agentueui.OpEnd {
 			return "", nil
 		}
@@ -85,7 +87,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if err := coordinator.repo.ProjectOutput(ctx, message.ID, event); err != nil {
 		return "", err
 	}
-	message, err = coordinator.repo.GetMessage(ctx, messageID)
+	message, err = coordinator.repo.GetMessageState(ctx, messageID)
 	if err != nil {
 		return "", err
 	}
@@ -102,11 +104,11 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	return id, nil
 }
 
-func (coordinator *Coordinator) publish(ctx context.Context, message model.Message, event agentueui.Event) (string, error) {
-	key := streamKey(message)
+func (coordinator *Coordinator) publish(ctx context.Context, message repo.MessageState, event agentueui.Event) (string, error) {
+	key := "message/" + message.ID
 	state, err := coordinator.events.State(ctx, key)
 	if errors.Is(err, agentuerunner.ErrNotFound) {
-		if err := coordinator.ensureStream(ctx, message); err != nil {
+		if err := coordinator.ensureStream(ctx, model.Message{ID: message.ID, Purpose: message.Purpose}); err != nil {
 			return "", err
 		}
 	} else if err != nil {
@@ -115,7 +117,12 @@ func (coordinator *Coordinator) publish(ctx context.Context, message model.Messa
 		// A skipped delivery or an out-of-order publisher needs a full snapshot,
 		// not a delta whose predecessor never reached this bridge.
 		if state.LastSeq+1 != event.Seq || message.Revision != event.Seq {
-			event, err = agentueui.Start(message.Content, message.Revision)
+			snapshot, err := coordinator.repo.GetMessage(ctx, message.ID)
+			if err != nil {
+				return "", err
+			}
+			message.Ended = visibleMessage(snapshot).Ended()
+			event, err = agentueui.Start(snapshot.Content, snapshot.Revision)
 			if err != nil {
 				return "", err
 			}
@@ -128,11 +135,11 @@ func (coordinator *Coordinator) publish(ctx context.Context, message model.Messa
 		if err != nil {
 			return "", err
 		}
-		if !visibleMessage(message).Ended() {
+		if !message.Ended {
 			return id, nil
 		}
 	}
-	if visibleMessage(message).Ended() {
+	if message.Ended {
 		return "", coordinator.events.MarkTerminal(ctx, key, agentuerunner.StatusCompleted)
 	}
 	return "", nil
@@ -152,6 +159,13 @@ func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.
 		return nil
 	} else if !errors.Is(err, agentuerunner.ErrNotFound) {
 		return err
+	}
+	if message.Purpose != "transport" {
+		var err error
+		message, err = coordinator.repo.GetMessage(ctx, message.ID)
+		if err != nil {
+			return err
+		}
 	}
 	revision := message.Revision
 	if revision == 0 {
@@ -178,7 +192,7 @@ func (coordinator *Coordinator) input(ctx context.Context, taskID string) (model
 
 func transportMessage(input model.Message) model.Message {
 	return model.Message{TaskID: input.TaskID, ConversationID: input.ConversationID, Purpose: "transport", Revision: 1,
-		Content: []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
+		Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 }
 
 func visibleMessage(m model.Message) loopd.Message {

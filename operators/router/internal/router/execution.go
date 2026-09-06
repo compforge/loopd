@@ -28,7 +28,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 		}
 		if runErr != nil {
 			// Failure is an explicit actor message, including when no UI stream exists.
-			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
+			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 				"meta":   map[string]any{"error": map[string]any{"code": "router_failed", "message": "Router 执行失败，请重试。"}},
 				"blocks": []any{map[string]any{"id": "failure", "type": "text", "content": "Router 执行失败，请重试。"}}})
 			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
@@ -93,7 +93,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			return err
 		}
 		if len(additions) > 0 {
-			content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
+			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 				"meta":   map[string]any{"through_id": through, "phase": "progress"},
 				"blocks": []any{map[string]any{"id": "progress", "type": "text", "content": "阶段结果\n\n" + strings.Join(results, "\n\n")}}})
 			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
@@ -117,7 +117,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			// summarization. Those messages remain uncommitted for the next
 			// reconciliation; continuous human input must not starve answers.
 			{
-				content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
+				content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 					"meta":   map[string]any{"through_id": position},
 					"blocks": []any{map[string]any{"id": "answer", "type": "text", "content": answer}}})
 				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{

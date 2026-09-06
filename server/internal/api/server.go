@@ -78,7 +78,7 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, repo.ErrForbidden):
 		status, typeName = consts.StatusForbidden, "forbidden"
-	case errors.Is(err, service.ErrInvalid):
+	case errors.Is(err, service.ErrInvalid), errors.Is(err, repo.ErrInvalidContent):
 		status, typeName = consts.StatusBadRequest, "invalid_request"
 	case errors.Is(err, service.ErrConflict), errors.Is(err, repo.ErrConflict):
 		status, typeName = consts.StatusConflict, "conflict"

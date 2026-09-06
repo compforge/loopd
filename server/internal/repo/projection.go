@@ -3,7 +3,6 @@ package repo
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	loopd "github.com/compforge/loopd"
@@ -29,10 +28,11 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
 			return err
 		}
-		var snapshot map[string]any
-		if err := json.Unmarshal(m.Content, &snapshot); err != nil {
+		c, err := openMessageContent(tx, m)
+		if err != nil {
 			return err
 		}
+		snapshot := c.snapshot
 		meta, _ := snapshot["meta"].(map[string]any)
 		output, _ := meta["output"].(map[string]any)
 		if event.Seq <= m.Revision {
@@ -47,6 +47,16 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if (loopd.Message{Content: m.Content}).Ended() {
 			return ErrConflict
 		}
+		if _, ref := event.Block["ref"]; ref {
+			return fmt.Errorf("%w: complete block bodies are required", ErrInvalidContent)
+		}
+		if event.Op == agentueui.OpSet || event.Op == agentueui.OpAppend {
+			if id, ok := event.Block["id"].(string); ok {
+				if err := c.materialize(id); err != nil {
+					return err
+				}
+			}
+		}
 		next, err := agentueui.Apply(snapshot, event)
 		if err != nil {
 			return err
@@ -57,8 +67,12 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 			next["meta"] = meta
 		}
 		meta["output"] = map[string]any{"ended": event.Op == agentueui.OpEnd, "last_event": fingerprint}
-		content, err := agentueui.MarshalSnapshot(next)
+		c.snapshot = next
+		content, err := s.packContent(c)
 		if err != nil {
+			return err
+		}
+		if err := c.persist(); err != nil {
 			return err
 		}
 		updates := map[string]any{"content": content, "revision": event.Seq}

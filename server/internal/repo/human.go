@@ -14,6 +14,7 @@ import (
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/qiankunli/go-stdx/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrInvalidHuman = errors.New("invalid Human request")
@@ -60,6 +61,9 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 		if err := tx.First(&reply, "reply_to_id = ? AND purpose = ?", m.ID, "human_reply").Error; err != nil {
 			return result, err
 		}
+		if err := hydrateMessage(tx, &reply); err != nil {
+			return result, err
+		}
 		var content struct {
 			Blocks []replyBlock `json:"blocks"`
 		}
@@ -78,7 +82,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (loopd.HumanResul
 func publicMessage(m model.Message) loopd.Message {
 	return loopd.Message{TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
-func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
+func (store *Store) saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -87,13 +91,13 @@ func saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	m.Revision++
 	m.HumanDueAt = nil
 	m.WakePending = wake
-	return tx.Save(m).Error
+	return store.saveMessage(tx, m, false)
 }
-func expireHuman(tx *gorm.DB, m *model.Message, c *humanContent, now time.Time, active bool) error {
+func (store *Store) expireHuman(tx *gorm.DB, m *model.Message, c *humanContent, now time.Time, active bool) error {
 	q := humanQuestion(*m, *c)
 	if q.Expire(now) {
 		c.Blocks[0].Status, c.Blocks[0].Reason = q.Status, q.Reason
-		return saveHuman(tx, m, *c, active)
+		return store.saveHuman(tx, m, *c, active)
 	}
 	return nil
 }
@@ -109,8 +113,11 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 	fingerprint := hex.EncodeToString(sum[:])
 	err = store.withHumanContext(ctx, r, func(tx *gorm.DB) error {
 		var existing []model.Message
-		query := tx.Where("conversation_id = ? AND kind = ? AND actor_key = ? AND purpose = ?", r.ConversationID, r.Actor.Kind, r.Actor.Key, "human_request")
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id = ? AND kind = ? AND actor_key = ? AND purpose = ?", r.ConversationID, r.Actor.Kind, r.Actor.Key, "human_request")
 		if err := query.Find(&existing).Error; err != nil {
+			return err
+		}
+		if err := hydrateMessages(tx.Clauses(clause.Locking{Strength: "UPDATE"}), existing); err != nil {
 			return err
 		}
 		for _, m := range existing {
@@ -124,7 +131,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 			if c.Meta.Human.Fingerprint != fingerprint {
 				return ErrConflict
 			}
-			if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
+			if err := store.expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 				return err
 			}
 			result, err = humanResult(tx, m, c)
@@ -133,7 +140,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 		now := time.Now().UTC()
 		question := domain.NewHumanQuestion(r, now)
 		deadline := question.Deadline
-		c := humanContent{Version: "1.0", Biz: "chat", Blocks: []loopd.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: question.Status, Deadline: deadline}}}
+		c := humanContent{Version: "1.1", Biz: "chat", Blocks: []loopd.HumanBlock{{ID: "human", Type: r.Type, Title: r.Title, Prompt: r.Prompt, Choices: r.Choices, AllowOther: r.AllowOther, ConfirmLabel: r.ConfirmLabel, DeclineLabel: r.DeclineLabel, Status: question.Status, Deadline: deadline}}}
 		c.Meta.Human.EffectKey = r.EffectKey
 		c.Meta.Human.Timeout = r.Timeout
 		c.Meta.Human.Fingerprint = fingerprint
@@ -142,7 +149,7 @@ func (store *Store) CreateHuman(ctx context.Context, r loopd.HumanRequest) (resu
 			return err
 		}
 		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: string(r.Actor.Kind), ActorKey: r.Actor.Key, TargetKind: string(r.Target.Kind), TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
-		if err := tx.Create(&m).Error; err != nil {
+		if err := store.saveMessage(tx, &m, true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -158,7 +165,7 @@ func (store *Store) GetHuman(ctx context.Context, id string) (result loopd.Human
 		if err != nil {
 			return err
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
+		if err := store.expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -184,7 +191,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 		if err := humanRequest(m, c).ValidateReply(r); err != nil {
 			return fmt.Errorf("%w: %v", ErrInvalidHuman, err)
 		}
-		if err := expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
+		if err := store.expireHuman(tx, &m, &c, time.Now().UTC(), true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
@@ -213,13 +220,13 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Biz     string         `json:"biz"`
 			Meta    map[string]any `json:"meta"`
 			Blocks  []replyBlock   `json:"blocks"`
-		}{"1.0", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
+		}{"1.1", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
 		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: "user", ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
-		if err := tx.Create(&reply).Error; err != nil {
+		if err := store.saveMessage(tx, &reply, true); err != nil {
 			return err
 		}
 		c.Blocks[0].Status, c.Blocks[0].Reason = question.Status, question.Reason
-		if err := saveHuman(tx, &m, c, true); err != nil {
+		if err := store.saveHuman(tx, &m, c, true); err != nil {
 			return err
 		}
 		result, err = humanResult(tx, m, c)
