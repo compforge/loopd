@@ -16,7 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/pkg/harness"
 )
 
 type Options struct {
@@ -75,7 +76,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
 	loop.Harness.conv = loop.Conv
 	loop.Operator = Operator{registry: newRegistry(
-		runCtx, c, "operator", "operators", options.RegistryLeaseDuration, options.Logger,
+		runCtx, c, contract.ActorKindOperator, "operators", options.RegistryLeaseDuration, options.Logger,
 	)}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }

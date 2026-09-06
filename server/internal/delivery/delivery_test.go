@@ -11,7 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/redis/go-redis/v9"
@@ -148,12 +148,12 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
+	r := contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
 	q, err := store.CreateHuman(ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "answer"}); err != nil {
+	if _, err := store.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "answer"}); err != nil {
 		t.Fatal(err)
 	}
 	redisServer := miniredis.RunT(t)

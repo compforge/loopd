@@ -1,14 +1,14 @@
 package runtime
 
 import (
-	loopd "github.com/compforge/loopd"
-	convapi "github.com/compforge/loopd/runtime/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"testing"
 )
 
 func TestConversationPredicateUsesUncommittedInputNotReceipt(t *testing.T) {
-	actor := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
+	actor := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"}
 	predicate := ConversationPredicate(actor)
 	old := &convapi.Conversation{
 		Spec:   convapi.ConversationSpec{Participants: []convapi.ConversationParticipant{{Kind: "operator", Key: "a", EndOffset: "003"}}},

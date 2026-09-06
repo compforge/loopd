@@ -8,12 +8,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 const defaultRegistryLeaseDuration = 30 * time.Second
 
 type registry struct {
-	kind          string
+	kind          contract.ActorKind
 	path          string
 	client        *client
 	runCtx        context.Context
@@ -30,7 +32,7 @@ type registration struct {
 func newRegistry(
 	runCtx context.Context,
 	client *client,
-	kind string,
+	kind contract.ActorKind,
 	path string,
 	leaseDuration time.Duration,
 	logger *slog.Logger,
@@ -51,7 +53,7 @@ func (service registry) register(ctx context.Context, value registration) error 
 	if err := service.renew(ctx, value); err != nil {
 		return fmt.Errorf("register %s %q: %w", service.kind, value.key, err)
 	}
-	service.logger.InfoContext(ctx, service.kind+" registered",
+	service.logger.InfoContext(ctx, string(service.kind)+" registered",
 		"key", value.key,
 		"lease", service.leaseDuration,
 	)
@@ -72,7 +74,7 @@ func (service registry) keepAlive(value registration) {
 			return
 		case <-ticker.C:
 			if err := service.renew(service.runCtx, value); err != nil && service.runCtx.Err() == nil {
-				service.logger.WarnContext(service.runCtx, "renew "+service.kind+" lease failed",
+				service.logger.WarnContext(service.runCtx, "renew "+string(service.kind)+" lease failed",
 					"key", value.key,
 					"error", err,
 				)

@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"strings"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	loopruntime "github.com/compforge/loopd/runtime"
 )
 
 // run keeps execution within the conversation reconciliation, without a Work
 // resource. This demo has no durable business checkpoint: Poll acknowledges
 // receipt, not completion. Harness recovery remains the adapter's responsibility.
-func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, messages []loopd.Message) (runErr error) {
+func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, messages []contract.Message) (runErr error) {
 	position := input.ID
 	// UI streams are delivery identities, not business task boundaries.
 	// Several published messages may contribute to the same input range.
@@ -31,9 +31,9 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 				"meta":   map[string]any{"error": map[string]any{"code": "router_failed", "message": "Router 执行失败，请重试。"}},
 				"blocks": []any{map[string]any{"id": "failure", "type": "text", "content": "Router 执行失败，请重试。"}}})
-			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
+			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
 				Key: input.ID + "/failure", Actor: routerActor,
-				Target:    loopd.ActorRef{Kind: input.Kind, Key: input.Key},
+				Target:    contract.ActorRef{Kind: input.Kind, Key: input.Key},
 				ReplyToID: input.ID, Content: content,
 			}); err != nil {
 				runErr = errors.Join(runErr, err)
@@ -41,7 +41,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			}
 		}
 		runErr = errors.Join(runErr, reconciler.loop.Conv.Commit(ctx, input.ConversationID,
-			loopd.CommitRequest{Actor: routerActor, Through: position}))
+			contract.CommitRequest{Actor: routerActor, Through: position}))
 	}()
 	workspace, err := reconciler.loop.Conv.Workspace(ctx, input.ConversationID, routerActor)
 	if err != nil {
@@ -96,9 +96,9 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 				"meta":   map[string]any{"through_id": through, "phase": "progress"},
 				"blocks": []any{map[string]any{"id": "progress", "type": "text", "content": "阶段结果\n\n" + strings.Join(results, "\n\n")}}})
-			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
+			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
 				Key: fmt.Sprintf("%s/progress/%d", input.ID, round), Actor: routerActor,
-				Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, Content: content,
+				Target: contract.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, Content: content,
 			}); err != nil {
 				return err
 			}
@@ -120,8 +120,8 @@ func (reconciler *Reconciler) run(ctx context.Context, input loopd.Message, mess
 				content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 					"meta":   map[string]any{"through_id": position},
 					"blocks": []any{map[string]any{"id": "answer", "type": "text", "content": answer}}})
-				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, loopd.SpeakRequest{
-					Key: input.ID + "/answer", Actor: routerActor, Target: loopd.ActorRef{Kind: input.Kind, Key: input.Key},
+				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
+					Key: input.ID + "/answer", Actor: routerActor, Target: contract.ActorRef{Kind: input.Kind, Key: input.Key},
 					ReplyToID: input.ID, Content: content,
 				})
 				return err
@@ -137,7 +137,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 	var texts []string
 	const limit = 100
 	for {
-		inbox, err := reconciler.loop.Conv.Poll(ctx, convID, loopd.PollRequest{Actor: routerActor, Limit: limit, After: *position})
+		inbox, err := reconciler.loop.Conv.Poll(ctx, convID, contract.PollRequest{Actor: routerActor, Limit: limit, After: *position})
 		if err != nil {
 			return nil, err
 		}
@@ -145,7 +145,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 			*position = inbox.Position
 		}
 		for _, message := range inbox.Messages {
-			if message.Kind != loopd.ActorKindUser {
+			if message.Kind != contract.ActorKindUser {
 				continue
 			}
 			text, err := modelText(message.Content)
@@ -160,7 +160,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 	}
 }
 
-func (reconciler *Reconciler) executeBatch(ctx context.Context, input loopd.Message, workspaceID, query, history string, round int, tasks []string) ([]string, error) {
+func (reconciler *Reconciler) executeBatch(ctx context.Context, input contract.Message, workspaceID, query, history string, round int, tasks []string) ([]string, error) {
 	calls := make([]*loopruntime.Call, len(tasks))
 	// Start the entire bounded batch before waiting, so independent work can
 	// run concurrently. Round-specific keys avoid replaying an earlier plan.
@@ -192,7 +192,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input loopd.Mess
 	return results, nil
 }
 
-func (reconciler *Reconciler) call(ctx context.Context, input loopd.Message, workspaceID, key, prompt string) (string, error) {
+func (reconciler *Reconciler) call(ctx context.Context, input contract.Message, workspaceID, key, prompt string) (string, error) {
 	call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
 		ConversationID: workspaceID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
 	})

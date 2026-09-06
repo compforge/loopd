@@ -10,7 +10,7 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/route"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
@@ -32,7 +32,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
 	response := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"Human"}`)
-	var conv loopd.Conversation
+	var conv contract.Conversation
 	if err := json.Unmarshal(response.Body(), &conv); err != nil {
 		t.Fatal(err)
 	}
@@ -41,13 +41,13 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err != nil || task.ActorKey != "alice" {
 		t.Fatalf("trusted principal=%+v %v", task, err)
 	}
-	request := loopd.HumanRequest{ConversationID: conv.ID, Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
+	request := contract.HumanRequest{ConversationID: conv.ID, Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
 	data, _ := json.Marshal(request)
 	created := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if created.StatusCode() != 200 {
 		t.Fatalf("create %d %s", created.StatusCode(), created.Body())
 	}
-	var question loopd.HumanResult
+	var question contract.HumanResult
 	if err := json.Unmarshal(created.Body(), &question); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if accepted.StatusCode() != 200 {
 		t.Fatalf("reply=%d %s", accepted.StatusCode(), accepted.Body())
 	}
-	var result loopd.HumanResult
+	var result contract.HumanResult
 	if err := json.Unmarshal(accepted.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	// +case=`Questions are conversation-owned even without a UI delivery ID.`
 	request.EffectKey = "independent"
-	request.Actor = loopd.ActorRef{Kind: "operator/longhorizon/manager", Key: "run-uid"}
+	request.Actor = contract.ActorRef{Kind: "operator/longhorizon/manager", Key: "run-uid"}
 	data, _ = json.Marshal(request)
 	independent := performJSON(t, engine, "POST", "/v1/conversations/"+conv.ID+"/human", string(data))
 	if independent.StatusCode() != 200 {

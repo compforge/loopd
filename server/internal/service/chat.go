@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -21,7 +21,7 @@ type ChatRepository interface {
 }
 
 type ChatDelivery interface {
-	EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error)
+	EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error)
 	Stream(context.Context, string, string, string, func(delivery.Event) error) error
 }
 
@@ -46,23 +46,23 @@ func (service *ChatService) Create(
 	ctx context.Context,
 	conversationID string,
 	userKey string,
-	target loopd.ActorRef,
+	target contract.ActorRef,
 	content json.RawMessage,
-) (loopd.Message, error) {
+) (contract.Message, error) {
 	userKey = strings.TrimSpace(userKey)
 	target.Key = strings.TrimSpace(target.Key)
 	if userKey == "" || !target.ValidTarget() || validateContent(content) != nil {
-		return loopd.Message{}, ErrInvalid
+		return contract.Message{}, ErrInvalid
 	}
 	taskID := uuid.V7()
 	input := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-		Kind: string(loopd.ActorKindUser), ActorKey: userKey, Content: content,
-		TargetKind: string(target.Kind), TargetKey: target.Key, DispatchPending: true,
+		Kind: contract.ActorKindUser, ActorKey: userKey, Content: content,
+		TargetKind: target.Kind, TargetKey: target.Key, DispatchPending: true,
 	}
 	message, err := service.repo.CreateChatInput(ctx, input)
 	if err != nil {
-		return loopd.Message{}, err
+		return contract.Message{}, err
 	}
 	if service.notifier != nil {
 		if err := service.notifier.Notify(ctx, message); err != nil {
@@ -115,7 +115,7 @@ func mapDeliveryError(err error) error {
 	}
 }
 
-func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage, statuses ...loopd.MessageStatus) (string, error) {
+func (service *ChatService) EmitMessage(ctx context.Context, messageID string, event json.RawMessage, statuses ...contract.MessageStatus) (string, error) {
 	id, err := service.delivery.EmitMessage(ctx, messageID, event, statuses...)
 	return id, mapDeliveryError(err)
 }

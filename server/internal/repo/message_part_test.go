@@ -12,7 +12,7 @@ import (
 	"time"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 )
@@ -73,7 +73,7 @@ func refAt(t *testing.T, s *Store, id string, index int) string {
 }
 func speech(t *testing.T, s *Store, n int) model.Message {
 	t.Helper()
-	m, err := s.Speak(context.Background(), "conv", loopd.SpeakRequest{Key: "speech", Stream: true, Actor: loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: "writer"}, Target: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "reader"}, Content: blocksContent(t, n)})
+	m, err := s.Speak(context.Background(), "conv", contract.SpeakRequest{Key: "speech", Stream: true, Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "writer"}, Target: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "reader"}, Content: blocksContent(t, n)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,11 +352,11 @@ func TestMessagePartsHumanReplyTimeoutAndRecovery(t *testing.T) {
 	if refAt(t, s, q.Message.ID, 0) == "" {
 		t.Fatal("question not externalized")
 	}
-	answer, err := s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "small"})
+	answer, err := s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "small"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.Status != loopd.HumanSuccess || answer.Value != "small" {
+	if answer.Status != contract.HumanSuccess || answer.Value != "small" {
 		t.Fatalf("reply=%+v", answer)
 	}
 	again, err := s.CreateHuman(ctx, question("external"))
@@ -370,7 +370,7 @@ func TestMessagePartsHumanReplyTimeoutAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	timed, err := s.GetHuman(ctx, q.Message.ID)
-	if err != nil || timed.Status != loopd.HumanTimeout || timed.Reply != nil {
+	if err != nil || timed.Status != contract.HumanTimeout || timed.Reply != nil {
 		t.Fatalf("timeout=%+v %v", timed, err)
 	}
 }

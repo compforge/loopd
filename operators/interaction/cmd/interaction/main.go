@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/operators/interaction/internal/interaction"
+	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	rt "github.com/compforge/loopd/runtime"
-	convapi "github.com/compforge/loopd/runtime/api/v1alpha1"
 	"github.com/go-logr/logr"
 	krt "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"

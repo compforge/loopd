@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	loopruntime "github.com/compforge/loopd/runtime"
 )
 
@@ -21,11 +21,11 @@ func TestReadHistorySelectsBoundedTailBeforeInput(t *testing.T) {
 		}
 		after := r.URL.Query().Get("after")
 		afters = append(afters, after)
-		var page []loopd.Message
+		var page []contract.Message
 		for i := 1; i <= 260 && len(page) < 100; i++ {
 			id := fmt.Sprintf("m%04d", i)
 			if id > after {
-				page = append(page, loopd.Message{ID: id})
+				page = append(page, contract.Message{ID: id})
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": page})

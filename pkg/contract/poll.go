@@ -1,4 +1,4 @@
-package loopd
+package contract
 
 // Consumption follows Kafka's log/queue semantics: messages remain in DB,
 // each actor consumes independently, and Poll never implies Commit. Offsets

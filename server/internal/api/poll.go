@@ -4,7 +4,7 @@ import (
 	"context"
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/service"
 )
 
@@ -12,7 +12,7 @@ func (server *Server) pollConversation(ctx context.Context, request *hertzapp.Re
 	if server.Poll == nil {
 		return service.ErrUnavailable
 	}
-	var input loopd.PollRequest
+	var input contract.PollRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func (server *Server) commitConversation(ctx context.Context, request *hertzapp.
 	if server.Poll == nil {
 		return service.ErrUnavailable
 	}
-	var input loopd.CommitRequest
+	var input contract.CommitRequest
 	if err := decodeBody(request, &input); err != nil {
 		return err
 	}

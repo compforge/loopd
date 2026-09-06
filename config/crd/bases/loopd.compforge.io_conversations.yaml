@@ -57,8 +57,10 @@ spec:
                       minLength: 1
                       type: string
                     kind:
+                      description: ActorKind is an open string enum. The constants
+                        name built-in participants.
                       maxLength: 128
-                      pattern: ^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$
+                      minLength: 1
                       type: string
                   required:
                   - key
@@ -83,8 +85,10 @@ spec:
                       minLength: 1
                       type: string
                     kind:
+                      description: ActorKind is an open string enum. The constants
+                        name built-in participants.
                       maxLength: 128
-                      pattern: ^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$
+                      minLength: 1
                       type: string
                     position:
                       description: |-

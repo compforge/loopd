@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	conversationclient "github.com/compforge/loopd/server/internal/conversation"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -14,14 +14,14 @@ import (
 )
 
 type ConversationCoordinator interface {
-	Signal(context.Context, string, string, loopd.ActorRef, uint64) error
-	Poll(context.Context, string, loopd.ActorRef, string, conversationclient.ReadMessages) (loopd.PollResult, error)
-	Commit(context.Context, string, loopd.CommitRequest) error
+	Signal(context.Context, string, string, contract.ActorRef, uint64) error
+	Poll(context.Context, string, contract.ActorRef, string, conversationclient.ReadMessages) (contract.PollResult, error)
+	Commit(context.Context, string, contract.CommitRequest) error
 }
 
 type InboxRepository interface {
 	GetConversation(context.Context, string) (model.Conversation, error)
-	ListInbox(context.Context, string, string, string, string, int) ([]model.Message, error)
+	ListInbox(context.Context, string, contract.ActorKind, string, string, int) ([]model.Message, error)
 	PendingDispatches(context.Context, int) ([]model.Message, error)
 	AcknowledgeDispatch(context.Context, string) error
 }
@@ -37,19 +37,19 @@ func NewPollService(repository InboxRepository, conversations ConversationCoordi
 	return &PollService{repo: repository, conversations: conversations, logger: loggerOrDefault(logger)}
 }
 
-func (s *PollService) Poll(ctx context.Context, conversationID string, request loopd.PollRequest) (loopd.PollResult, error) {
+func (s *PollService) Poll(ctx context.Context, conversationID string, request contract.PollRequest) (contract.PollResult, error) {
 	if !request.Actor.ValidTarget() {
-		return loopd.PollResult{}, ErrInvalid
+		return contract.PollResult{}, ErrInvalid
 	}
 	if _, err := s.repo.GetConversation(ctx, conversationID); err != nil {
-		return loopd.PollResult{}, err
+		return contract.PollResult{}, err
 	}
-	result, err := s.conversations.Poll(ctx, conversationID, request.Actor, request.After, func(ctx context.Context, after string) ([]loopd.Message, error) {
-		rows, err := s.repo.ListInbox(ctx, conversationID, string(request.Actor.Kind), request.Actor.Key, after, pageSize(request.Limit))
+	result, err := s.conversations.Poll(ctx, conversationID, request.Actor, request.After, func(ctx context.Context, after string) ([]contract.Message, error) {
+		rows, err := s.repo.ListInbox(ctx, conversationID, request.Actor.Kind, request.Actor.Key, after, pageSize(request.Limit))
 		if err != nil {
 			return nil, err
 		}
-		messages := make([]loopd.Message, len(rows))
+		messages := make([]contract.Message, len(rows))
 		for i, row := range rows {
 			messages[i] = messageFromModel(row)
 		}
@@ -72,7 +72,7 @@ func (s *PollService) Poll(ctx context.Context, conversationID string, request l
 	return result, err
 }
 
-func (s *PollService) Commit(ctx context.Context, conversationID string, request loopd.CommitRequest) error {
+func (s *PollService) Commit(ctx context.Context, conversationID string, request contract.CommitRequest) error {
 	err := s.conversations.Commit(ctx, conversationID, request)
 	switch {
 	case apierrors.IsNotFound(err):
@@ -95,7 +95,7 @@ func (s *PollService) Commit(ctx context.Context, conversationID string, request
 // server replica can retry without creating a second user message.
 func (s *PollService) Notify(ctx context.Context, message model.Message) error {
 	if err := s.conversations.Signal(ctx, message.ConversationID, message.ID,
-		loopd.ActorRef{Kind: loopd.ActorKind(message.TargetKind), Key: message.TargetKey}, message.Revision); err != nil {
+		contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, message.Revision); err != nil {
 		return err
 	}
 	if err := s.repo.AcknowledgeDispatch(ctx, message.ID); err != nil {

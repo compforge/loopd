@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	rt "github.com/compforge/loopd/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,10 +19,10 @@ import (
 
 const conversationID = "conv"
 
-func userMessage(id, taskID, text string) loopd.Message {
+func userMessage(id, taskID, text string) contract.Message {
 	content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 		"blocks": []map[string]any{{"id": "text", "type": "text", "content": text}}})
-	return loopd.Message{ID: id, ConversationID: conversationID, Kind: loopd.ActorKindUser,
+	return contract.Message{ID: id, ConversationID: conversationID, Kind: contract.ActorKindUser,
 		Key: "user", TargetKind: actor.Kind, TargetKey: actor.Key, Purpose: "input",
 		TaskID: taskID, Content: content}
 }
@@ -31,18 +31,18 @@ type fixture struct {
 	t                 *testing.T
 	server            *httptest.Server
 	mu                sync.Mutex
-	messages          []loopd.Message
-	questions         map[string]loopd.HumanRequest
-	results           map[string]loopd.HumanResult
-	answers           map[string]loopd.SpeakRequest
+	messages          []contract.Message
+	questions         map[string]contract.HumanRequest
+	results           map[string]contract.HumanResult
+	answers           map[string]contract.SpeakRequest
 	committed         string
 	failPath          string
 	loseSpeakResponse bool
 }
 
-func newFixture(t *testing.T, messages ...loopd.Message) *fixture {
-	f := &fixture{t: t, messages: messages, questions: map[string]loopd.HumanRequest{},
-		results: map[string]loopd.HumanResult{}, answers: map[string]loopd.SpeakRequest{}}
+func newFixture(t *testing.T, messages ...contract.Message) *fixture {
+	f := &fixture{t: t, messages: messages, questions: map[string]contract.HumanRequest{},
+		results: map[string]contract.HumanResult{}, answers: map[string]contract.SpeakRequest{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
 	return f
@@ -58,7 +58,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/poll":
-		var request loopd.PollRequest
+		var request contract.PollRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			f.t.Error(err)
 			return
@@ -66,17 +66,17 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		if request.Actor != actor || request.Limit != 1 || request.After != "" {
 			f.t.Errorf("unexpected Poll: %+v", request)
 		}
-		result := loopd.PollResult{Committed: f.committed, Position: f.committed}
+		result := contract.PollResult{Committed: f.committed, Position: f.committed}
 		for _, message := range f.messages {
 			if message.ID > f.committed {
-				result.Messages = []loopd.Message{message}
+				result.Messages = []contract.Message{message}
 				result.Position = message.ID
 				break
 			}
 		}
 		_ = json.NewEncoder(w).Encode(result)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/commit":
-		var request loopd.CommitRequest
+		var request contract.CommitRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			f.t.Error(err)
 			return
@@ -87,7 +87,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		f.committed = request.Through
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/human":
-		var request loopd.HumanRequest
+		var request contract.HumanRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			f.t.Error(err)
 			return
@@ -96,20 +96,20 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error(err)
 		}
 		if request.Timeout != 10*time.Second || request.ConversationID != conversationID ||
-			request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "user"}) ||
+			request.Actor != actor || request.Target != (contract.ActorRef{Kind: contract.ActorKindUser, Key: "user"}) ||
 			!strings.HasPrefix(request.EffectKey, request.ReplyToID+"/") {
 			f.t.Errorf("invalid question identity or timeout: %+v", request)
 		}
 		if prior, ok := f.questions[request.EffectKey]; ok && !reflect.DeepEqual(prior, request) {
 			f.t.Error("retry changed immutable question")
 		}
-		if request.Type == "confirm" && f.results[request.ReplyToID+"/answer-style"].Status != loopd.HumanSuccess {
+		if request.Type == "confirm" && f.results[request.ReplyToID+"/answer-style"].Status != contract.HumanSuccess {
 			f.t.Error("Confirm created before Ask was answered")
 		}
 		f.questions[request.EffectKey] = request
 		result, exists := f.results[request.EffectKey]
 		if !exists {
-			result = loopd.HumanResult{Status: loopd.HumanPending, Deadline: time.Now().Add(request.Timeout)}
+			result = contract.HumanResult{Status: contract.HumanPending, Deadline: time.Now().Add(request.Timeout)}
 		}
 		result.Message.ID = request.EffectKey
 		f.results[request.EffectKey] = result
@@ -117,12 +117,12 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/human/"):
 		_ = json.NewEncoder(w).Encode(f.results[strings.TrimPrefix(r.URL.Path, "/v1/human/")])
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/speak":
-		var request loopd.SpeakRequest
+		var request contract.SpeakRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			f.t.Error(err)
 			return
 		}
-		if request.Actor != actor || request.Target != (loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "user"}) ||
+		if request.Actor != actor || request.Target != (contract.ActorRef{Kind: contract.ActorKindUser, Key: "user"}) ||
 			request.Key != request.ReplyToID+"/summary" || request.Stream {
 			f.t.Errorf("invalid summary identity: %+v", request)
 		}
@@ -135,7 +135,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "response lost after persistence", http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(loopd.Message{ID: request.Key, Content: request.Content})
+		_ = json.NewEncoder(w).Encode(contract.Message{ID: request.Key, Content: request.Content})
 	default:
 		f.t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
@@ -162,7 +162,7 @@ func (f *fixture) step(wantDelay time.Duration) {
 	}
 }
 
-func (f *fixture) resolve(key string, result loopd.HumanResult) {
+func (f *fixture) resolve(key string, result contract.HumanResult) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	prior := f.results[key]
@@ -175,16 +175,16 @@ func (f *fixture) resolve(key string, result loopd.HumanResult) {
 func TestSequentialInteraction(t *testing.T) {
 	for _, test := range []struct {
 		name         string
-		ask, confirm loopd.HumanResult
+		ask, confirm contract.HumanResult
 		want         string
 	}{
-		{"confirmed", loopd.HumanResult{Status: loopd.HumanSuccess, Value: "steps"}, loopd.HumanResult{Status: loopd.HumanSuccess, Value: "accepted"}, "你的确认：已确认"},
-		{"ask canceled", loopd.HumanResult{Status: loopd.HumanDismissed}, loopd.HumanResult{}, "你的选择：已取消"},
-		{"ask timeout", loopd.HumanResult{Status: loopd.HumanTimeout}, loopd.HumanResult{}, "你的选择：已超时"},
-		{"ask failure", loopd.HumanResult{Status: loopd.HumanFailure, Reason: "unavailable"}, loopd.HumanResult{}, "交互失败：unavailable"},
-		{"confirm canceled", loopd.HumanResult{Status: loopd.HumanSuccess, Value: "brief"}, loopd.HumanResult{Status: loopd.HumanDismissed}, "你的确认：已取消"},
-		{"confirm declined", loopd.HumanResult{Status: loopd.HumanSuccess, Value: "examples"}, loopd.HumanResult{Status: loopd.HumanSuccess, Value: "declined"}, "你的确认：已取消"},
-		{"confirm timeout", loopd.HumanResult{Status: loopd.HumanSuccess, Value: "brief"}, loopd.HumanResult{Status: loopd.HumanTimeout}, "你的确认：已超时"},
+		{"confirmed", contract.HumanResult{Status: contract.HumanSuccess, Value: "steps"}, contract.HumanResult{Status: contract.HumanSuccess, Value: "accepted"}, "你的确认：已确认"},
+		{"ask canceled", contract.HumanResult{Status: contract.HumanDismissed}, contract.HumanResult{}, "你的选择：已取消"},
+		{"ask timeout", contract.HumanResult{Status: contract.HumanTimeout}, contract.HumanResult{}, "你的选择：已超时"},
+		{"ask failure", contract.HumanResult{Status: contract.HumanFailure, Reason: "unavailable"}, contract.HumanResult{}, "交互失败：unavailable"},
+		{"confirm canceled", contract.HumanResult{Status: contract.HumanSuccess, Value: "brief"}, contract.HumanResult{Status: contract.HumanDismissed}, "你的确认：已取消"},
+		{"confirm declined", contract.HumanResult{Status: contract.HumanSuccess, Value: "examples"}, contract.HumanResult{Status: contract.HumanSuccess, Value: "declined"}, "你的确认：已取消"},
+		{"confirm timeout", contract.HumanResult{Status: contract.HumanSuccess, Value: "brief"}, contract.HumanResult{Status: contract.HumanTimeout}, "你的确认：已超时"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t, userMessage("01", "delivery", "如何学习 Go？"))
@@ -200,7 +200,7 @@ func TestSequentialInteraction(t *testing.T) {
 			}
 			f.mu.Unlock()
 			f.resolve("01/answer-style", test.ask)
-			if test.ask.Status == loopd.HumanSuccess {
+			if test.ask.Status == contract.HumanSuccess {
 				f.step(time.Second)
 				f.mu.Lock()
 				if len(f.questions) != 2 || len(f.answers) != 0 || f.committed != "" {
@@ -218,7 +218,7 @@ func TestSequentialInteraction(t *testing.T) {
 				!strings.Contains(answer, test.want) || !strings.Contains(answer, "如何学习 Go？") {
 				t.Fatalf("committed=%s answer=%s", f.committed, answer)
 			}
-			if test.ask.Status != loopd.HumanSuccess && len(f.questions) != 1 {
+			if test.ask.Status != contract.HumanSuccess && len(f.questions) != 1 {
 				t.Error("unsuccessful Ask still created Confirm")
 			}
 		})
@@ -231,8 +231,8 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 	f.step(time.Second)
 	f.mu.Lock()
 	f.messages = append(f.messages, userMessage("02", "", "确认"),
-		loopd.Message{ID: "03", Kind: loopd.ActorKindUser, Key: "user", Purpose: "human_reply", ReplyToID: "card"},
-		loopd.Message{ID: "04", Kind: loopd.ActorKindOperator, Key: "other"})
+		contract.Message{ID: "03", Kind: contract.ActorKindUser, Key: "user", Purpose: "human_reply", ReplyToID: "card"},
+		contract.Message{ID: "04", Kind: contract.ActorKindOperator, Key: "other"})
 	f.mu.Unlock()
 	f.step(time.Second)
 	f.mu.Lock()
@@ -240,7 +240,7 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 		t.Error("ordinary followup approved or overtook pending interaction")
 	}
 	f.mu.Unlock()
-	f.resolve("01/answer-style", loopd.HumanResult{Status: loopd.HumanDismissed})
+	f.resolve("01/answer-style", contract.HumanResult{Status: contract.HumanDismissed})
 	f.step(time.Millisecond)
 	f.step(time.Second)
 	f.mu.Lock()
@@ -248,7 +248,7 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 		t.Error("queued input did not start its own interaction")
 	}
 	f.mu.Unlock()
-	f.resolve("02/answer-style", loopd.HumanResult{Status: loopd.HumanTimeout})
+	f.resolve("02/answer-style", contract.HumanResult{Status: contract.HumanTimeout})
 	f.step(time.Millisecond)
 	f.step(time.Millisecond) // typed reply is observed via its Human handle, not another Ask
 	f.step(time.Millisecond) // non-user input is outside this demo's policy
@@ -267,7 +267,7 @@ func TestRetryBeforeCommit(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			f := newFixture(t, userMessage("01", "delivery", "你好"))
 			f.step(time.Second)
-			f.resolve("01/answer-style", loopd.HumanResult{Status: loopd.HumanTimeout})
+			f.resolve("01/answer-style", contract.HumanResult{Status: contract.HumanTimeout})
 			f.mu.Lock()
 			switch stage {
 			case "speak":

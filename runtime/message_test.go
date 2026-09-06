@@ -10,23 +10,23 @@ import (
 	"testing"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 // +case=`Speak defaults to an already-ended message; streaming handles restore revision, retry the same seq, and End idempotently.`
 func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	ctx := context.Background()
 	snapshot := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	value := loopd.Message{Status: loopd.MessageStatusStreaming, ID: "output", Revision: 7, Content: snapshot}
+	value := contract.Message{Status: contract.MessageStatusStreaming, ID: "output", Revision: 7, Content: snapshot}
 	var seqs []uint64
 	fail := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/conversations/conv/speak":
-			var input loopd.SpeakRequest
+			var input contract.SpeakRequest
 			_ = json.NewDecoder(r.Body).Decode(&input)
 			if !input.Stream {
-				_ = json.NewEncoder(w).Encode(loopd.Message{Status: loopd.MessageStatusCompleted, ID: "once", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
+				_ = json.NewEncoder(w).Encode(contract.Message{Status: contract.MessageStatusCompleted, ID: "once", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			} else {
 				_ = json.NewEncoder(w).Encode(value)
 			}
@@ -41,7 +41,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 			}
 			value.Revision = input.Event.Seq
 			if input.Event.Op == ui.OpEnd {
-				value.Status = loopd.MessageStatusCompleted
+				value.Status = contract.MessageStatusCompleted
 			}
 			fmt.Fprint(w, `{"id":"cursor"}`)
 		default:
@@ -55,7 +55,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	once, err := runtime.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Key: "once"})
+	once, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Key: "once"})
 	if err != nil || !once.Value().Ended() {
 		t.Fatalf("once=%v err=%v", once, err)
 	}
@@ -66,11 +66,11 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	if err := once.Emit(ctx, event); err == nil {
 		t.Fatal("one-shot message stayed writable")
 	}
-	stream, err := runtime.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Stream: true, Key: "stream"})
+	stream, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := runtime.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Stream: true, Key: "stream"})
+	again, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
 	if err != nil || again != stream {
 		t.Fatalf("handle not shared: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	stream, err = restored.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Stream: true, Key: "stream"})
+	stream, err = restored.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
 	if err != nil || stream.ID() != "output" || !stream.Value().Ended() {
 		t.Fatalf("restore: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 // +case=`An exhausted ambiguous update cannot be skipped by another Emit, End, or Speak refresh.`
 func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 	ctx := context.Background()
-	value := loopd.Message{Status: loopd.MessageStatusStreaming, ID: "stream", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
+	value := contract.Message{Status: contract.MessageStatusStreaming, ID: "stream", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 	attempts, fail := 0, true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/conversations/conv/speak" {
@@ -132,7 +132,7 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	request := loopd.SpeakRequest{Key: "step", Stream: true}
+	request := contract.SpeakRequest{Key: "step", Stream: true}
 	stream, err := rt.Loop.Conv.Speak(ctx, "conv", request)
 	if err != nil {
 		t.Fatal(err)
@@ -155,9 +155,9 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 }
 
 func TestMessageEndStatus(t *testing.T) {
-	for _, status := range []loopd.MessageStatus{loopd.MessageStatusFailed, loopd.MessageStatusCancelled} {
+	for _, status := range []contract.MessageStatus{contract.MessageStatusFailed, contract.MessageStatusCancelled} {
 		t.Run(string(status), func(t *testing.T) {
-			value := loopd.Message{ID: "stream", Status: loopd.MessageStatusStreaming, Revision: 1, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
+			value := contract.Message{ID: "stream", Status: contract.MessageStatusStreaming, Revision: 1, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/v1/conversations/conv/speak" {
@@ -166,7 +166,7 @@ func TestMessageEndStatus(t *testing.T) {
 				}
 				var input struct {
 					Event  json.RawMessage
-					Status loopd.MessageStatus
+					Status contract.MessageStatus
 				}
 				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 					t.Error(err)
@@ -186,11 +186,11 @@ func TestMessageEndStatus(t *testing.T) {
 			}
 			defer rt.Close()
 			ctx := context.Background()
-			stream, err := rt.Loop.Conv.Speak(ctx, "conv", loopd.SpeakRequest{Key: "step", Stream: true})
+			stream, err := rt.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Key: "step", Stream: true})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := stream.End(ctx, loopd.MessageStatusStreaming); err == nil {
+			if err := stream.End(ctx, contract.MessageStatusStreaming); err == nil {
 				t.Fatal("accepted nonterminal End")
 			}
 			for i := 0; i < 2; i++ {

@@ -4,19 +4,20 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"time"
+
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"time"
 )
 
 // ProjectOutput maintains the visible snapshot for conversation-scoped output
 // before attempting page delivery. SQL serializes revisions and remembers the
 // last event fingerprint so an ambiguous response can be retried without appending twice.
-func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Event, statuses ...loopd.MessageStatus) error {
-	status := loopd.MessageStatus("")
+func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Event, statuses ...contract.MessageStatus) error {
+	status := contract.MessageStatus("")
 	if len(statuses) > 1 {
 		return ErrConflict
 	}
@@ -24,7 +25,7 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		status = statuses[0]
 	}
 	if event.Op == agentueui.OpEnd && status == "" {
-		status = loopd.MessageStatusCompleted
+		status = contract.MessageStatusCompleted
 	}
 	if (event.Op == agentueui.OpEnd && !status.Terminal()) || (event.Op != agentueui.OpEnd && status != "") {
 		return ErrConflict
@@ -58,7 +59,7 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if event.Seq != m.Revision+1 {
 			return ErrConflict
 		}
-		if (loopd.Message{Status: loopd.MessageStatus(m.Status)}).Ended() {
+		if (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended() {
 			return ErrConflict
 		}
 		if _, ref := event.Block["ref"]; ref {
@@ -93,7 +94,7 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 		if event.Op == agentueui.OpEnd {
 			updates["status"] = string(status)
 		}
-		if event.Op == agentueui.OpEnd && m.TargetKind != "user" {
+		if event.Op == agentueui.OpEnd && m.TargetKind != contract.ActorKindUser {
 			updates["dispatch_pending"] = true
 		}
 		at := time.Now().UTC()

@@ -1,4 +1,4 @@
-package loopd
+package contract
 
 import (
 	"encoding/json"

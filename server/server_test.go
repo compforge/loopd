@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 func TestNewConnectsConfiguredRedis(t *testing.T) {
@@ -26,11 +26,11 @@ func TestNewConnectsConfiguredRedis(t *testing.T) {
 
 type testConversations struct{}
 
-func (testConversations) Signal(context.Context, string, string, loopd.ActorRef, uint64) error {
+func (testConversations) Signal(context.Context, string, string, contract.ActorRef, uint64) error {
 	return nil
 }
-func (testConversations) Poll(context.Context, string, loopd.ActorRef, string, func(context.Context, string) ([]loopd.Message, error)) (loopd.PollResult, error) {
-	return loopd.PollResult{}, nil
+func (testConversations) Poll(context.Context, string, contract.ActorRef, string, func(context.Context, string) ([]contract.Message, error)) (contract.PollResult, error) {
+	return contract.PollResult{}, nil
 }
 
-func (testConversations) Commit(context.Context, string, loopd.CommitRequest) error { return nil }
+func (testConversations) Commit(context.Context, string, contract.CommitRequest) error { return nil }

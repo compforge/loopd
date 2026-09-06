@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 // Message is the writer returned by Speak. Repeating Speak with the same key
@@ -17,7 +17,7 @@ import (
 type Message struct {
 	mu      sync.Mutex
 	client  *client
-	value   loopd.Message
+	value   contract.Message
 	next    uint64
 	ended   bool
 	pending json.RawMessage
@@ -28,7 +28,7 @@ type messageHandles struct {
 	values map[string]*Message
 }
 
-func (handles *messageHandles) handle(c *client, value loopd.Message) *Message {
+func (handles *messageHandles) handle(c *client, value contract.Message) *Message {
 	handles.mu.Lock()
 	message := handles.values[value.ID]
 	if message == nil {
@@ -62,7 +62,7 @@ func (message *Message) ID() string {
 }
 
 // Value observes the last locally known snapshot, not a server read.
-func (message *Message) Value() loopd.Message {
+func (message *Message) Value() contract.Message {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	value := message.value
@@ -87,10 +87,10 @@ func (message *Message) Emit(ctx context.Context, event ui.Event) error {
 // End finishes only this message (effect: write), not the Conv or UI subscription.
 // The optional terminal status defaults to completed. Repeating the same End,
 // including after restoring the handle with Speak, is safe.
-func (message *Message) End(ctx context.Context, statuses ...loopd.MessageStatus) error {
+func (message *Message) End(ctx context.Context, statuses ...contract.MessageStatus) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
-	status := loopd.MessageStatusCompleted
+	status := contract.MessageStatusCompleted
 	if len(statuses) > 1 {
 		return errors.New("End accepts at most one status")
 	}
@@ -113,15 +113,15 @@ func (message *Message) End(ctx context.Context, statuses ...loopd.MessageStatus
 	return nil
 }
 
-func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...loopd.MessageStatus) error {
+func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...contract.MessageStatus) error {
 	event.Seq = message.next
 	data, err := event.Marshal()
 	if err != nil {
 		return err
 	}
 	request := struct {
-		Event  json.RawMessage     `json:"event"`
-		Status loopd.MessageStatus `json:"status,omitempty"`
+		Event  json.RawMessage        `json:"event"`
+		Status contract.MessageStatus `json:"status,omitempty"`
 	}{Event: data}
 	if len(statuses) != 0 {
 		request.Status = statuses[0]

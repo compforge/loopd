@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
@@ -19,19 +19,19 @@ type HumanService struct {
 func NewHumanService(store *repo.Store, logger *slog.Logger) *HumanService {
 	return &HumanService{store: store, logger: loggerOrDefault(logger)}
 }
-func (s *HumanService) Create(ctx context.Context, r loopd.HumanRequest) (loopd.HumanResult, error) {
+func (s *HumanService) Create(ctx context.Context, r contract.HumanRequest) (contract.HumanResult, error) {
 	if err := r.Validate(); err != nil {
-		return loopd.HumanResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return contract.HumanResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	result, err := s.store.CreateHuman(ctx, r)
 	return result, humanError(err)
 }
-func (s *HumanService) Get(ctx context.Context, id string) (loopd.HumanResult, error) {
+func (s *HumanService) Get(ctx context.Context, id string) (contract.HumanResult, error) {
 	return s.store.GetHuman(ctx, id)
 }
-func (s *HumanService) Reply(ctx context.Context, conversationID, actor string, r loopd.HumanReply) (loopd.HumanResult, error) {
+func (s *HumanService) Reply(ctx context.Context, conversationID, actor string, r contract.HumanReply) (contract.HumanResult, error) {
 	if r.ReplyToID == "" {
-		return loopd.HumanResult{}, ErrInvalid
+		return contract.HumanResult{}, ErrInvalid
 	}
 	result, err := s.store.ReplyHuman(ctx, conversationID, actor, r)
 	return result, humanError(err)

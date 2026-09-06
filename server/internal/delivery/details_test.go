@@ -7,7 +7,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/redis/go-redis/v9"
@@ -46,8 +46,8 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 	return store, producer, consumer
 }
 func ptr(value string) *string { return &value }
-func outputRequest(key string) loopd.SpeakRequest {
-	return loopd.SpeakRequest{Stream: true, Key: key, Actor: loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
+func outputRequest(key string) contract.SpeakRequest {
+	return contract.SpeakRequest{Stream: true, Key: key, Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 }
 func outputText(t *testing.T, seq uint64, text string) json.RawMessage {
 	return marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: seq, Block: map[string]any{"id": "text", "type": "text", "content": text}})
@@ -158,7 +158,7 @@ func TestSpeakConcurrentIdentity(t *testing.T) {
 		t.Fatal("missing message")
 	}
 	changed := outputRequest("same")
-	changed.Target = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "another"}
+	changed.Target = contract.ActorRef{Kind: contract.ActorKindOperator, Key: "another"}
 	if _, err := store.Speak(context.Background(), "work", changed); !errors.Is(err, repo.ErrConflict) {
 		t.Fatalf("changed recipient=%v", err)
 	}

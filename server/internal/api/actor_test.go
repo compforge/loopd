@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/route"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -51,11 +51,11 @@ func TestActorsOnlyListsLiveTargets(t *testing.T) {
 	if response.StatusCode() != 200 {
 		t.Fatalf("actors status=%d body=%s", response.StatusCode(), response.Body())
 	}
-	var actors view.Page[loopd.Actor]
+	var actors view.Page[contract.Actor]
 	if err := json.Unmarshal(response.Body(), &actors); err != nil {
 		t.Fatal(err)
 	}
-	if len(actors.Data) != 1 || actors.Data[0].Kind != loopd.ActorKindOperator || actors.Data[0].Key != "router" {
+	if len(actors.Data) != 1 || actors.Data[0].Kind != contract.ActorKindOperator || actors.Data[0].Key != "router" {
 		t.Fatalf("actors = %#v", actors.Data)
 	}
 }

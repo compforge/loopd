@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 func TestHumanTerminalTransitions(t *testing.T) {
 	now := time.Unix(100, 0)
-	request := loopd.HumanRequest{EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", AllowOther: true, Timeout: time.Minute}
-	reply := loopd.HumanReply{ReplyToID: "question", Outcome: loopd.HumanSuccess, Value: "yes"}
+	request := contract.HumanRequest{EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", AllowOther: true, Timeout: time.Minute}
+	reply := contract.HumanReply{ReplyToID: "question", Outcome: contract.HumanSuccess, Value: "yes"}
 	q := NewHumanQuestion(request, now)
 	if q.Expire(now.Add(time.Second)) {
 		t.Fatal("expired early")

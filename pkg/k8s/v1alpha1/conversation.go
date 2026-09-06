@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	"github.com/compforge/loopd/pkg/contract"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -13,8 +14,9 @@ const ConversationKind = "Conversation"
 // for B must not overwrite the signal for A when Kubernetes coalesces updates.
 type ConversationParticipant struct {
 	// +kubebuilder:validation:MaxLength=128
-	// +kubebuilder:validation:Pattern=`^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$`
-	Kind string `json:"kind"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:MinLength=1
+	Kind contract.ActorKind `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
 	// EndOffset is the newest database message notified to this actor.
@@ -30,8 +32,9 @@ type ConversationSpec struct {
 
 type ConversationConsumer struct {
 	// +kubebuilder:validation:MaxLength=128
-	// +kubebuilder:validation:Pattern=`^(operator|harness|operator/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*)$`
-	Kind string `json:"kind"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:MinLength=1
+	Kind contract.ActorKind `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Key string `json:"key"`
 	// Committed is the last committed message, exclusive on the next read.
@@ -69,7 +72,7 @@ type ConversationList struct {
 	Items           []Conversation `json:"items"`
 }
 
-func (conversation *Conversation) EndOffset(kind, key string) string {
+func (conversation *Conversation) EndOffset(kind contract.ActorKind, key string) string {
 	for _, participant := range conversation.Spec.Participants {
 		if participant.Kind == kind && participant.Key == key {
 			return participant.EndOffset
@@ -78,7 +81,7 @@ func (conversation *Conversation) EndOffset(kind, key string) string {
 	return ""
 }
 
-func (conversation *Conversation) Committed(kind, key string) string {
+func (conversation *Conversation) Committed(kind contract.ActorKind, key string) string {
 	for _, consumer := range conversation.Status.Consumers {
 		if consumer.Kind == kind && consumer.Key == key {
 			return consumer.Committed
@@ -89,11 +92,11 @@ func (conversation *Conversation) Committed(kind, key string) string {
 
 // WakeAnnotation identifies an actor-specific message revision notification.
 // EndOffset alone cannot wake a reader when an earlier streamed message finishes.
-func WakeAnnotation(kind, key string) string {
-	sum := sha256.Sum256([]byte(kind + "\x00" + key))
+func WakeAnnotation(kind contract.ActorKind, key string) string {
+	sum := sha256.Sum256([]byte(string(kind) + "\x00" + key))
 	return fmt.Sprintf("loopd.compforge.io/wake-%x", sum[:16])
 }
 
-func (conversation *Conversation) Wake(kind, key string) string {
+func (conversation *Conversation) Wake(kind contract.ActorKind, key string) string {
 	return conversation.Annotations[WakeAnnotation(kind, key)]
 }

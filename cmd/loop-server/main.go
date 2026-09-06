@@ -10,7 +10,7 @@ import (
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/network/standard"
-	conversationv1alpha1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	conversationv1alpha1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	"github.com/compforge/loopd/server"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"

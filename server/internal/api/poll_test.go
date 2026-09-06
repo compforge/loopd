@@ -9,8 +9,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/route"
-	loopd "github.com/compforge/loopd"
-	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	conversationclient "github.com/compforge/loopd/server/internal/conversation"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -36,7 +36,7 @@ func TestConversationPollHTTP(t *testing.T) {
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
 	chat := service.NewChatService(store, completedChatRunner{}, nil, poll)
-	if _, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"},
+	if _, err := chat.Create(ctx, "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"},
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +51,14 @@ func TestConversationPollHTTP(t *testing.T) {
 		t.Fatalf("history = %s", history.Body())
 	}
 	first := performJSON(t, engine, "POST", "/v1/conversations/conv/poll", `{"actor":{"kind":"operator","key":"router"},"limit":10}`)
-	var result loopd.PollResult
+	var result contract.PollResult
 	if first.StatusCode() != 200 {
 		t.Fatalf("Poll = %d %s", first.StatusCode(), first.Body())
 	}
 	if err := json.Unmarshal(first.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Messages) != 1 || result.Messages[0].Kind != loopd.ActorKindUser ||
+	if len(result.Messages) != 1 || result.Messages[0].Kind != contract.ActorKindUser ||
 		result.Messages[0].TargetKey != "router" || result.Position != result.Messages[0].ID {
 		t.Fatalf("Poll = %+v", result)
 	}
@@ -84,6 +84,17 @@ func TestConversationPollHTTP(t *testing.T) {
 
 // +case=`Custom Operator roles are participants with independent consumption cursors.`
 func TestCustomRoleConversationConsumption(t *testing.T) {
+	testActorKindConversationConsumption(t, "operator/longhorizon/manager")
+}
+
+// +case=`ActorKind 开放值贯穿持久消息、通知、Poll 与 Commit，不需要新增枚举常量。`
+func TestOpenActorKindConversationConsumption(t *testing.T) {
+	for _, kind := range []contract.ActorKind{contract.ActorKindOperator, contract.ActorKindHarness, "operator/planner", "operator/longhorizon/manager/delegate", "harness/local", "future-kind"} {
+		t.Run(string(kind), func(t *testing.T) { testActorKindConversationConsumption(t, kind) })
+	}
+}
+
+func testActorKindConversationConsumption(t *testing.T, kind contract.ActorKind) {
 	ctx := context.Background()
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "roles.db")})
 	if err != nil {
@@ -100,8 +111,8 @@ func TestCustomRoleConversationConsumption(t *testing.T) {
 	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
 	messages := service.NewMessageService(store, nil)
 	// Speak persistence queues the notification; Poll service reconciles it.
-	role := loopd.ActorRef{Kind: "operator/longhorizon/manager", Key: "run-uid"}
-	message, err := messages.Speak(ctx, "conv", loopd.SpeakRequest{Key: "audit-report", Actor: loopd.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})
+	role := contract.ActorRef{Kind: kind, Key: "run-uid"}
+	message, err := messages.Speak(ctx, "conv", contract.SpeakRequest{Key: "audit-report", Actor: contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,17 +123,17 @@ func TestCustomRoleConversationConsumption(t *testing.T) {
 	if err := poll.Notify(ctx, stored); err != nil {
 		t.Fatal(err)
 	}
-	result, err := poll.Poll(ctx, "conv", loopd.PollRequest{Actor: role, Limit: 10})
+	result, err := poll.Poll(ctx, "conv", contract.PollRequest{Actor: role, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Messages) != 1 || result.Messages[0].ID != message.ID {
+	if len(result.Messages) != 1 || result.Messages[0].ID != message.ID || result.Messages[0].TargetKind != kind || stored.TargetKind != kind {
 		t.Fatalf("poll=%+v", result)
 	}
-	if err := poll.Commit(ctx, "conv", loopd.CommitRequest{Actor: role, Through: result.Position}); err != nil {
+	if err := poll.Commit(ctx, "conv", contract.CommitRequest{Actor: role, Through: result.Position}); err != nil {
 		t.Fatal(err)
 	}
-	result, err = poll.Poll(ctx, "conv", loopd.PollRequest{Actor: role})
+	result, err = poll.Poll(ctx, "conv", contract.PollRequest{Actor: role})
 	if err != nil || len(result.Messages) != 0 {
 		t.Fatalf("committed=%+v %v", result, err)
 	}

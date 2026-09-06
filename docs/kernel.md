@@ -39,6 +39,12 @@ Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费�
 - Harness 通过 Adapter 提供智能执行；执行状态与恢复属于 Harness。
 - AgentLedger 承载完整执行轨迹，不替代可见聊天记录。
 
+公共协作模型和调用契约由 `pkg/contract`（`package contract`）定义，包含 Actor、Message、
+Conversation、Human 及 Speak/Poll/Commit；`pkg/k8s/v1alpha1` 定义共享的 Conv CRD。
+server、runtime 和 harness 使用同一份公共契约；CRD 可以依赖 contract，contract 不依赖 Kubernetes
+或任何组件实现。`pkg/harness` 定义 Adapter 接口及执行句柄，依赖 contract；
+调用、调度和消息发布由 runtime 负责。页面 View 和持久化模型继续由 server 拥有。
+
 Operator 不依赖 server 的私有 model/repo，不直接操作聊天数据库或 Redis。
 server 不导入 Operator 领域 CRD，也不执行 Harness Adapter。
 
@@ -48,7 +54,11 @@ Operator 关注收发消息与业务逻辑。消费进度持久化、通知重�
 
 ## 参与者与会话
 
-公开角色只有 `user`、`operator`、`harness`。Message 的发送者和收件者各有 kind/key，
+ActorKind 是开放字符串枚举，`user`、`operator`、`harness` 是内置常量。Operator 可以写入
+扩展 kind，`operator/<operator-key>/<role>` 是已有的命名惯例，不是封闭的枚举或固定层级限制。
+扩展 kind 约定沿用三个内置身份前缀，当前不强校验前缀；未知值原样读写。Actor 是这些身份的聚合概念，
+以 kind/key 共同标识；`/actors` 只发现在线注册的 Operator/Harness，不枚举全部用户或自定义角色。
+Message 的发送者和收件者各有 kind/key，
 回复引用表达“回应哪条消息”，不定义执行依赖，也不等于一次业务任务。
 
 Conversation 是一个对话框。习惯上称用户的主会话为 **User conv**，Operator 组织的工作会话为

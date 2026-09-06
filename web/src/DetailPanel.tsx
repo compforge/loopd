@@ -1,9 +1,10 @@
+import { ActorKind, operatorOwner } from "./actor";
 import { MessageBody, ReplyReference } from "./MessageBody";
 import type { HumanResult } from "./api";
 import { messageStatusLabel } from "./message";
 import { useEffect, useState, type CSSProperties } from "react";
 import { parseMessageContent, type MessageContent } from "./content";
-import { findDetailConversation, listMessages, type ActorKind, type Conversation, type Message } from "./api";
+import { findDetailConversation, listMessages, type Conversation, type Message } from "./api";
 import { traceColor, traceLabel } from "./trace";
 import { groupParallelMessages } from "./parallel";
 
@@ -16,7 +17,7 @@ interface Detail {
 
 export interface DetailSelection {
   parentID: string;
-  organizer?: { kind: "operator"; key: string };
+  organizer?: { kind: typeof ActorKind.Operator; key: string };
 }
 
 /** @spec 按父会话/Operator 观察工作会话，不等待主回答；切换参与者不能泄漏上一个查询的结果。 */
@@ -106,7 +107,7 @@ export function DetailPanel({ selection, liveMessages, running, onReply }: {
 }
 
 export function DetailMessage({ message, index, onReply }: { message: Message; index: number; onReply?(result: HumanResult): void }) {
-  const style = message.kind !== "user" ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
+  const style = message.kind !== ActorKind.User ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
   let model: MessageContent | undefined;
   try { model = parseMessageContent(message.content); } catch { /* Invalid persisted model is shown below. */ }
   const actorName = typeof model?.meta.actor_display_name === "string" ? model.meta.actor_display_name : message.kind.split("/").at(-1)!;
@@ -147,6 +148,7 @@ export function detailOrganizer(message?: Pick<Message, "kind" | "key" | "target
 }
 
 function operatorActor(kind?: ActorKind, key?: string): DetailSelection["organizer"] {
-  if (kind?.startsWith("operator/")) return { kind: "operator", key: kind.split("/")[1] };
-  return kind === "operator" && key ? { kind, key } : undefined;
+  const owner = kind ? operatorOwner(kind) : undefined;
+  if (owner) return { kind: ActorKind.Operator, key: owner };
+  return kind === ActorKind.Operator && key ? { kind: ActorKind.Operator, key } : undefined;
 }

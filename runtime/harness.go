@@ -11,8 +11,8 @@ import (
 	"time"
 
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
-	provider "github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/contract"
+	provider "github.com/compforge/loopd/pkg/harness"
 	"github.com/qiankunli/go-stdx/uuid"
 )
 
@@ -40,8 +40,8 @@ type Prompt struct {
 	EffectKey      string
 	Target         string
 	Text           string
-	Tools          []loopd.Tool
-	Actor          *loopd.ActorRef
+	Tools          []contract.Tool
+	Actor          *contract.ActorRef
 	Timeout        time.Duration
 }
 
@@ -62,7 +62,7 @@ func newHarness(
 	for key, adapter := range adapters {
 		values[key] = adapter
 	}
-	return Harness{registry: newRegistry(ctx, client, "harness", "harnesses", leaseDuration, logger), state: &harnessState{
+	return Harness{registry: newRegistry(ctx, client, contract.ActorKindHarness, "harnesses", leaseDuration, logger), state: &harnessState{
 		ctx: ctx, adapters: values, logger: logger,
 		calls: make(map[string]*Call),
 	}}
@@ -116,7 +116,7 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	request := provider.Request{
 		CallID:         callID,
 		IdempotencyKey: effectID,
-		Timeout:        prompt.Timeout, Prompt: prompt.Text, Tools: append([]loopd.Tool(nil), prompt.Tools...),
+		Timeout:        prompt.Timeout, Prompt: prompt.Text, Tools: append([]contract.Tool(nil), prompt.Tools...),
 	}
 	providerCall, err := adapter.Prompt(service.state.ctx, request)
 	if err != nil {
@@ -129,10 +129,10 @@ func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error)
 	}
 	now := time.Now().UTC()
 	call := &Call{
-		value: loopd.HarnessCall{
+		value: contract.HarnessCall{
 			ID: providerCall.ID(), EffectKey: prompt.EffectKey,
-			Target: prompt.Target, Phase: loopd.CallRunning,
-			Timestamped: loopd.Timestamped{CreatedAt: now, UpdatedAt: now},
+			Target: prompt.Target, Phase: contract.CallRunning,
+			Timestamped: contract.Timestamped{CreatedAt: now, UpdatedAt: now},
 		},
 		fingerprint: fingerprint,
 		changed:     make(chan struct{}),
@@ -161,7 +161,7 @@ func promptFingerprint(prompt Prompt) ([32]byte, error) {
 
 type Call struct {
 	mu          sync.Mutex
-	value       loopd.HarnessCall
+	value       contract.HarnessCall
 	fingerprint [32]byte
 	events      []agentueui.Event
 	changed     chan struct{}
@@ -170,14 +170,14 @@ type Call struct {
 }
 
 // Value is a Verb (effect: read) observing the locally known execution state.
-func (call *Call) Value() loopd.HarnessCall {
+func (call *Call) Value() contract.HarnessCall {
 	call.mu.Lock()
 	defer call.mu.Unlock()
 	return call.value
 }
 
 // Wait is a Verb (effect: read); cancelling the wait does not cancel execution.
-func (call *Call) Wait(ctx context.Context) (loopd.HarnessCall, error) {
+func (call *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
 	select {
 	case <-ctx.Done():
 		return call.Value(), ctx.Err()
@@ -264,11 +264,11 @@ func (call *Call) follow(
 			var message *Message
 			var err error
 			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
-			author := loopd.ActorRef{Kind: loopd.ActorKindHarness, Key: call.value.ID}
+			author := contract.ActorRef{Kind: contract.ActorKindHarness, Key: call.value.ID}
 			if prompt.Actor != nil {
 				author = *prompt.Actor
 			}
-			message, err = conv.Speak(ctx, prompt.ConversationID, loopd.SpeakRequest{
+			message, err = conv.Speak(ctx, prompt.ConversationID, contract.SpeakRequest{
 				Stream: true, Key: prompt.IdempotencyKey, Actor: author, Content: content,
 			})
 			if err != nil {
@@ -286,18 +286,18 @@ func (call *Call) follow(
 	}
 	result, waitErr := providerCall.Wait(ctx)
 	if output != nil && publishErr == nil && ctx.Err() == nil {
-		status := loopd.MessageStatusCompleted
+		status := contract.MessageStatusCompleted
 		if errors.Is(waitErr, context.Canceled) {
-			status = loopd.MessageStatusCancelled
+			status = contract.MessageStatusCancelled
 		} else if waitErr != nil {
-			status = loopd.MessageStatusFailed
+			status = contract.MessageStatusFailed
 		}
 		publishErr = output.End(ctx, status)
 	}
 	err := errors.Join(publishErr, waitErr)
-	phase := loopd.CallSucceeded
+	phase := contract.CallSucceeded
 	if err != nil {
-		phase = loopd.CallFailed
+		phase = contract.CallFailed
 	}
 	call.finish(phase, result.Text, err)
 	value := call.Value()
@@ -331,7 +331,7 @@ func (call *Call) appendEvent(event agentueui.Event) {
 	call.mu.Unlock()
 }
 
-func (call *Call) finish(phase loopd.CallPhase, result string, err error) {
+func (call *Call) finish(phase contract.CallPhase, result string, err error) {
 	call.mu.Lock()
 	call.value.Phase = phase
 	call.value.Result = result

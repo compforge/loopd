@@ -1,3 +1,4 @@
+import { ActorKind, isOperatorKind, operatorRole } from "./actor";
 import type { MessageContent } from "./content";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
@@ -10,6 +11,7 @@ import {
   listMessages,
   streamMessage,
   type Actor,
+  type ActorRef,
   type Conversation,
   type Message,
 } from "./api";
@@ -71,7 +73,8 @@ export function App() {
     const controller = new AbortController();
     const refresh = () => {
       void listActors(controller.signal)
-        .then((items) => {
+        .then((discovered) => {
+          const items = discovered.filter((actor) => actor.kind !== ActorKind.User);
           setActors(items);
           setSelectedActorID((current) => {
             const saved = current ?? localStorage.getItem(selectedActorKey) ?? undefined;
@@ -202,7 +205,7 @@ export function App() {
         status: "completed",
         conversation_id: conversationID,
         task_id: "",
-        kind: "user",
+        kind: ActorKind.User,
         key: "web-user",
         target_kind: selectedActor.kind,
         target_key: selectedActor.key,
@@ -218,7 +221,7 @@ export function App() {
     conversationID: string,
     stored?: StoredSubscription,
     text?: string,
-    requestedTarget?: Pick<Actor, "kind" | "key">,
+    requestedTarget?: ActorRef,
   ) {
     const slot = conversationID;
     if (stored && streams.current.has(slot)) return;
@@ -343,7 +346,7 @@ export function App() {
             const active = selectedMessageID === message.id;
             return (
               <article
-                className={`message ${message.kind.startsWith("operator/") ? "operator" : message.kind} ${active ? "selected" : ""}`}
+                className={`message ${isOperatorKind(message.kind) ? ActorKind.Operator : message.kind} ${active ? "selected" : ""}`}
                 key={message.id}
                 id={`message-${message.id}`}
                 onClick={() => {
@@ -352,7 +355,7 @@ export function App() {
                 }}
               >
                 <div className="message-author">
-                  <span title={`${message.kind} / ${message.key}`}>{message.kind === "user" ? "YOU" : message.kind.startsWith("operator/") ? message.kind.split("/").at(-1)!.toUpperCase() : message.key.toUpperCase()}</span>
+                  <span title={`${message.kind} / ${message.key}`}>{message.kind === ActorKind.User ? "YOU" : operatorRole(message.kind) ? operatorRole(message.kind)!.toUpperCase() : message.key.toUpperCase()}</span>
                   {message.status !== "completed" && <span className="run-badge">{messageStatusLabel(message.status)}</span>}
                 </div>
                 <div className="bubble">
@@ -405,16 +408,23 @@ export function App() {
                 }}
               >
                 {actors.length === 0 && <option value="">暂无可用 Actor</option>}
-                {actors.filter((actor) => actor.kind === "operator").length > 0 && (
+                {actors.filter((actor) => actor.kind === ActorKind.Operator).length > 0 && (
                   <optgroup label="Operators">
-                    {actors.filter((actor) => actor.kind === "operator").map((actor) => (
+                    {actors.filter((actor) => actor.kind === ActorKind.Operator).map((actor) => (
                       <option key={actorIdentity(actor)} value={actorIdentity(actor)}>{actorLabel(actor)}</option>
                     ))}
                   </optgroup>
                 )}
-                {actors.filter((actor) => actor.kind === "harness").length > 0 && (
+                {actors.filter((actor) => actor.kind === ActorKind.Harness).length > 0 && (
                   <optgroup label="Harnesses">
-                    {actors.filter((actor) => actor.kind === "harness").map((actor) => (
+                    {actors.filter((actor) => actor.kind === ActorKind.Harness).map((actor) => (
+                      <option key={actorIdentity(actor)} value={actorIdentity(actor)}>{actorLabel(actor)}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {actors.filter((actor) => actor.kind !== ActorKind.Operator && actor.kind !== ActorKind.Harness).length > 0 && (
+                  <optgroup label="Actors">
+                    {actors.filter((actor) => actor.kind !== ActorKind.Operator && actor.kind !== ActorKind.Harness).map((actor) => (
                       <option key={actorIdentity(actor)} value={actorIdentity(actor)}>{actorLabel(actor)}</option>
                     ))}
                   </optgroup>
@@ -465,7 +475,7 @@ function actorName(actor: Actor): string {
 }
 
 function actorLabel(actor: Actor): string {
-  const kind = actor.kind === "operator" ? "Operator" : "Harness";
+  const kind = actor.kind === ActorKind.Operator ? "Operator" : actor.kind === ActorKind.Harness ? "Harness" : actor.kind;
   return `${kind} · ${actorName(actor)}`;
 }
 

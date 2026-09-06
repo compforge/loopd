@@ -11,10 +11,10 @@ fix:
 	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
 
 generate: $(CONTROLLER_GEN)
-	$(CONTROLLER_GEN) object paths="./runtime/api/...;./operators/longhorizon/api/..."
+	$(CONTROLLER_GEN) object paths="./pkg/k8s/...;./operators/longhorizon/api/..."
 
 manifests: $(CONTROLLER_GEN)
-	$(CONTROLLER_GEN) crd paths="./runtime/api/...;./operators/longhorizon/api/..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) crd paths="./pkg/k8s/...;./operators/longhorizon/api/..." output:crd:artifacts:config=config/crd/bases
 	cp config/crd/bases/*.yaml deploy/k8s/loopd/crds/
 
 test:

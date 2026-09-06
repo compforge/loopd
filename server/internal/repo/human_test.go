@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/driver/sqlite"
 )
@@ -30,8 +30,8 @@ func humanStore(t *testing.T) *Store {
 	}
 	return s
 }
-func question(key string) loopd.HumanRequest {
-	return loopd.HumanRequest{ConversationID: "conv", Actor: loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "operator"}, Target: loopd.ActorRef{Kind: loopd.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []loopd.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
+func question(key string) contract.HumanRequest {
+	return contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "operator"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []contract.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
 }
 
 // +case=`两个并行问题按相反顺序答复，只按引用收口且 输入消息保持原身份`
@@ -53,7 +53,7 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	if ask.Message.Key != "operator" || ask.Message.ReplyToID != "input" {
 		t.Fatalf("message=%+v", ask.Message)
 	}
-	if ask.Message.Status != loopd.MessageStatusCompleted || ask.Status != loopd.HumanPending || confirm.Message.Status != loopd.MessageStatusCompleted {
+	if ask.Message.Status != contract.MessageStatusCompleted || ask.Status != contract.HumanPending || confirm.Message.Status != contract.MessageStatusCompleted {
 		t.Fatal("card publication status must be independent of its pending interaction")
 	}
 	for _, test := range []struct {
@@ -65,17 +65,17 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 		{"conv", "alice", "missing", "small", ErrNotFound},
 		{"conv", "alice", ask.Message.ID, "outside", ErrInvalidHuman},
 	} {
-		_, err := s.ReplyHuman(ctx, test.conv, test.actor, loopd.HumanReply{ReplyToID: test.id, Outcome: loopd.HumanSuccess, Value: test.value})
+		_, err := s.ReplyHuman(ctx, test.conv, test.actor, contract.HumanReply{ReplyToID: test.id, Outcome: contract.HumanSuccess, Value: test.value})
 		if !errors.Is(err, test.want) {
 			t.Fatalf("%+v: %v", test, err)
 		}
 	}
-	reply := loopd.HumanReply{ReplyToID: confirm.Message.ID, Outcome: loopd.HumanSuccess, Value: "declined"}
+	reply := contract.HumanReply{ReplyToID: confirm.Message.ID, Outcome: contract.HumanSuccess, Value: "declined"}
 	answered, err := s.ReplyHuman(ctx, "conv", "alice", reply)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answered.Status != loopd.HumanSuccess || answered.Value != "declined" || answered.Reply.ReplyToID != confirm.Message.ID {
+	if answered.Status != contract.HumanSuccess || answered.Value != "declined" || answered.Reply.ReplyToID != confirm.Message.ID {
 		t.Fatalf("result=%+v", answered)
 	}
 	again, err := s.ReplyHuman(ctx, "conv", "alice", reply)
@@ -86,7 +86,7 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	if _, err := s.ReplyHuman(ctx, "conv", "alice", reply); !errors.Is(err, ErrConflict) {
 		t.Fatalf("contradictory reply=%v", err)
 	}
-	askAnswer, err := s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: ask.Message.ID, Outcome: loopd.HumanSuccess, Value: "full"})
+	askAnswer, err := s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: ask.Message.ID, Outcome: contract.HumanSuccess, Value: "full"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,20 +122,20 @@ func TestHumanTimeoutDismissAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "small"})
+	_, err = s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "small"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("late reply=%v", err)
 	}
 	result, err := s.GetHuman(ctx, q.Message.ID)
-	if err != nil || result.Status != loopd.HumanTimeout || result.Reply != nil {
+	if err != nil || result.Status != contract.HumanTimeout || result.Reply != nil {
 		t.Fatalf("timeout=%+v %v", result, err)
 	}
 	dismiss, err := s.CreateHuman(ctx, question("dismiss"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err = s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: dismiss.Message.ID, Outcome: loopd.HumanDismissed})
-	if err != nil || result.Status != loopd.HumanDismissed || result.Value != "" {
+	result, err = s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: dismiss.Message.ID, Outcome: contract.HumanDismissed})
+	if err != nil || result.Status != contract.HumanDismissed || result.Value != "" {
 		t.Fatalf("dismiss=%+v %v", result, err)
 	}
 	pending, err := s.CreateHuman(ctx, question("pending"))
@@ -143,7 +143,7 @@ func TestHumanTimeoutDismissAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err = s.GetHuman(ctx, pending.Message.ID)
-	if err != nil || result.Status != loopd.HumanPending || result.Reason != "" || result.Reply != nil {
+	if err != nil || result.Status != contract.HumanPending || result.Reason != "" || result.Reply != nil {
 		t.Fatalf("failure=%+v %v", result, err)
 	}
 	rows, _ := s.ListMessages(ctx, "conv", "", 100)
@@ -166,7 +166,7 @@ func TestConcurrentHumanRepliesHaveOneWinner(t *testing.T) {
 			if i%2 != 0 {
 				value = "full"
 			}
-			_, err := s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: value})
+			_, err := s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: value})
 			errs <- err
 		})
 	}
@@ -189,7 +189,7 @@ func TestHumanRecoversFromDatabaseAndKeepsWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReplyHuman(ctx, "conv", "alice", loopd.HumanReply{ReplyToID: q.Message.ID, Outcome: loopd.HumanSuccess, Value: "small"}); err != nil {
+	if _, err := s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "small"}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := s.HumanMaintenance(ctx)

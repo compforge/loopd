@@ -8,7 +8,7 @@ import (
 
 	agent "github.com/compforge/agentgo"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/harness"
 )
 
 func TestAdapterPromptStreamsTextAndReturnsResult(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
-	"github.com/compforge/loopd/harness"
+	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/pkg/harness"
 	loopruntime "github.com/compforge/loopd/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -57,9 +57,9 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 				t.Fatal("execution Harness did not start")
 			}
 			server.mu.Lock()
-			server.inbox = [][]loopd.Message{{{
+			server.inbox = [][]contract.Message{{{
 				ID: "message-3", ConversationID: "conversation-1", TaskID: "task-2",
-				Kind: loopd.ActorKindUser, Content: semanticModel("Please include the new constraint."),
+				Kind: contract.ActorKindUser, Content: semanticModel("Please include the new constraint."),
 			}}}
 			polls := server.polls
 			server.mu.Unlock()
@@ -113,8 +113,8 @@ func TestInputArrivingDuringSummaryDoesNotStarveCurrentAnswer(t *testing.T) {
 	}, 1)
 	server := newLoopServer(t, "task-1")
 	// No input at the batch boundary; one arrives before the summary boundary.
-	server.inbox = [][]loopd.Message{nil, {{
-		ID: "new", Kind: loopd.ActorKindUser, TaskID: "task-2", Content: semanticModel("A late constraint"),
+	server.inbox = [][]contract.Message{nil, {{
+		ID: "new", Kind: contract.ActorKindUser, TaskID: "task-2", Content: semanticModel("A late constraint"),
 	}}}
 	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
 		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},

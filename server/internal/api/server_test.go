@@ -15,7 +15,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/cloudwego/hertz/pkg/route/param"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -42,18 +42,18 @@ func TestChatHTTPFlow(t *testing.T) {
 	if created.StatusCode() != 201 {
 		t.Fatalf("create conversation status=%d body=%s", created.StatusCode(), created.Body())
 	}
-	var conversation loopd.Conversation
+	var conversation contract.Conversation
 	if err := json.Unmarshal(created.Body(), &conversation); err != nil {
 		t.Fatal(err)
 	}
-	if conversation.ActorKind != loopd.ActorKindUser || conversation.ActorKey == "" || conversation.ParentID != "" {
+	if conversation.ActorKind != contract.ActorKindUser || conversation.ActorKey == "" || conversation.ParentID != "" {
 		t.Fatalf("user conversation = %+v", conversation)
 	}
 	listed := ut.PerformRequest(engine, "GET", "/v1/conversations", nil).Result()
 	if listed.StatusCode() != 200 {
 		t.Fatalf("list conversations status=%d body=%s", listed.StatusCode(), listed.Body())
 	}
-	var conversations view.Page[loopd.Conversation]
+	var conversations view.Page[contract.Conversation]
 	if err := json.Unmarshal(listed.Body(), &conversations); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	if history.StatusCode() != 200 {
 		t.Fatalf("history status=%d body=%s", history.StatusCode(), history.Body())
 	}
-	var result view.Page[loopd.Message]
+	var result view.Page[contract.Message]
 	if err := json.Unmarshal(history.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -92,14 +92,14 @@ func TestChatHTTPFlow(t *testing.T) {
 	if childResponse.StatusCode() != 200 {
 		t.Fatalf("create detail=%s", childResponse.Body())
 	}
-	var child loopd.Conversation
+	var child contract.Conversation
 	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.ParentID != conversation.ID || child.ActorKind != loopd.ActorKindOperator || child.ActorKey != "intent" {
+	if child.ParentID != conversation.ID || child.ActorKind != contract.ActorKindOperator || child.ActorKey != "intent" {
 		t.Fatalf("work conversation=%+v", child)
 	}
-	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, loopd.ActorKindHarness, "call-1",
+	_, err = server.messages.CreateMessage(context.Background(), child.ID, taskID, contract.ActorKindHarness, "call-1",
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"detail output"}]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestChatHTTPFlow(t *testing.T) {
 		if response.StatusCode() != 200 {
 			t.Fatalf("query %s: %s", test.query, response.Body())
 		}
-		var page view.Page[loopd.Conversation]
+		var page view.Page[contract.Conversation]
 		if err := json.Unmarshal(response.Body(), &page); err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +183,7 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 	).Result()
 }
 
-func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...loopd.MessageStatus) (string, error) {
+func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error) {
 	return "", nil
 }
 
@@ -205,7 +205,7 @@ func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
 	created := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"offline bridge"}`)
-	var conv loopd.Conversation
+	var conv contract.Conversation
 	if err := json.Unmarshal(created.Body(), &conv); err != nil {
 		t.Fatal(err)
 	}

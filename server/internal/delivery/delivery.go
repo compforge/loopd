@@ -11,7 +11,7 @@ import (
 
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -19,7 +19,7 @@ import (
 var ErrInvalidEvent = errors.New("invalid AgentUE event")
 
 type MessageRepository interface {
-	ProjectOutput(context.Context, string, agentueui.Event, ...loopd.MessageStatus) error
+	ProjectOutput(context.Context, string, agentueui.Event, ...contract.MessageStatus) error
 	GetDeliveryInput(context.Context, string) (model.Message, error)
 	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
@@ -28,7 +28,7 @@ type MessageRepository interface {
 
 type Event struct {
 	MessageID string
-	Message   *loopd.Message
+	Message   *contract.Message
 	ID        string
 	Data      json.RawMessage
 	Persisted bool
@@ -61,7 +61,7 @@ func (coordinator *Coordinator) Delete(ctx context.Context, taskID string) error
 }
 
 // +spec=`Message ID 决定输出归属，block ID 与 seq 只在该 Message 内唯一；Human 状态只能经 typed action 写入`
-func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage, statuses ...loopd.MessageStatus) (string, error) {
+func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID string, data json.RawMessage, statuses ...contract.MessageStatus) (string, error) {
 	message, err := coordinator.repo.GetMessageState(ctx, messageID)
 	if err != nil {
 		return "", err
@@ -73,7 +73,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 	if err != nil {
 		return "", err
 	}
-	status := loopd.MessageStatus("")
+	status := contract.MessageStatus("")
 	if len(statuses) > 1 {
 		return "", fmt.Errorf("%w: at most one message status", ErrInvalidEvent)
 	}
@@ -81,7 +81,7 @@ func (coordinator *Coordinator) EmitMessage(ctx context.Context, messageID strin
 		status = statuses[0]
 	}
 	if event.Op == agentueui.OpEnd && status == "" {
-		status = loopd.MessageStatusCompleted
+		status = contract.MessageStatusCompleted
 	}
 	if (event.Op == agentueui.OpEnd && !status.Terminal()) || (event.Op != agentueui.OpEnd && status != "") {
 		return "", fmt.Errorf("%w: only End accepts a terminal message status", ErrInvalidEvent)
@@ -211,8 +211,8 @@ func transportMessage(input model.Message) model.Message {
 		Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 }
 
-func visibleMessage(m model.Message) loopd.Message {
-	return loopd.Message{Status: loopd.MessageStatus(m.Status), TargetKind: loopd.ActorKind(m.TargetKind), TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: loopd.ActorKind(m.Kind), Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: loopd.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+func visibleMessage(m model.Message) contract.Message {
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 
 func parseOutputEvent(data json.RawMessage) (agentueui.Event, error) {

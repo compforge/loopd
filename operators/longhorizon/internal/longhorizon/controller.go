@@ -11,10 +11,10 @@ import (
 	"time"
 
 	agentue "github.com/compforge/agentue/sdks/go/ui"
-	loopd "github.com/compforge/loopd"
 	lh "github.com/compforge/loopd/operators/longhorizon/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
-	convapi "github.com/compforge/loopd/runtime/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,12 +27,12 @@ import (
 )
 
 const (
-	OperatorKey                   = "longhorizon"
-	ActorManager  loopd.ActorKind = "operator/longhorizon/manager"
-	ActorExecutor loopd.ActorKind = "operator/longhorizon/executor"
-	ActorAuditor  loopd.ActorKind = "operator/longhorizon/auditor"
-	ConvLabel                     = "longhorizon.loopd.compforge.io/conversation"
-	RunLabel                      = "longhorizon.loopd.compforge.io/run"
+	OperatorKey                      = "longhorizon"
+	ActorManager  contract.ActorKind = "operator/longhorizon/manager"
+	ActorExecutor contract.ActorKind = "operator/longhorizon/executor"
+	ActorAuditor  contract.ActorKind = "operator/longhorizon/auditor"
+	ConvLabel                        = "longhorizon.loopd.compforge.io/conversation"
+	RunLabel                         = "longhorizon.loopd.compforge.io/run"
 )
 
 type Config struct {
@@ -118,8 +118,8 @@ func Setup(mgr ctrl.Manager, loop loopruntime.Loop, config Config) error {
 func reference(obj client.Object) lh.Reference {
 	return lh.Reference{Name: obj.GetName(), UID: obj.GetUID()}
 }
-func actor(run *lh.Run, kind loopd.ActorKind) loopd.ActorRef {
-	return loopd.ActorRef{Kind: kind, Key: string(run.UID)}
+func actor(run *lh.Run, kind contract.ActorKind) contract.ActorRef {
+	return contract.ActorRef{Kind: kind, Key: string(run.UID)}
 }
 func stepKey(run *lh.Run, round int32, role string) string {
 	return fmt.Sprintf("%s/round/%d/%s", run.UID, round, role)
@@ -132,11 +132,11 @@ func clip(s string) string {
 	return s
 }
 
-func consumer() loopd.ActorRef {
-	return loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: OperatorKey}
+func consumer() contract.ActorRef {
+	return contract.ActorRef{Kind: contract.ActorKindOperator, Key: OperatorKey}
 }
-func recipient(run *lh.Run) loopd.ActorRef {
-	return loopd.ActorRef{Kind: loopd.ActorKindUser, Key: run.Spec.UserKey}
+func recipient(run *lh.Run) contract.ActorRef {
+	return contract.ActorRef{Kind: contract.ActorKindUser, Key: run.Spec.UserKey}
 }
 
 // live guards authoritative owner identities before issuing work.
@@ -182,7 +182,7 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 			return waiting()
 		}
 	}
-	polled, err := c.Loop.Conv.Poll(ctx, conv.Name, loopd.PollRequest{Actor: consumer(), Limit: 1})
+	polled, err := c.Loop.Conv.Poll(ctx, conv.Name, contract.PollRequest{Actor: consumer(), Limit: 1})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -190,8 +190,8 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 		return ctrl.Result{}, nil
 	}
 	message := polled.Messages[0]
-	if message.Kind != loopd.ActorKindUser || message.Purpose != "input" {
-		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, loopd.CommitRequest{Actor: consumer(), Through: polled.Position})
+	if message.Kind != contract.ActorKindUser || message.Purpose != "input" {
+		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
 	history, err := c.priorMessages(ctx, conv.Name, message.ID)
 	if err != nil {
@@ -199,11 +199,11 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 	}
 	goal := messageText(message)
 	if len(goal) == 0 || len(goal) > 16000 {
-		_, err := c.Loop.Conv.Speak(ctx, conv.Name, loopd.SpeakRequest{Key: message.ID + "/invalid", Actor: consumer(), Target: loopd.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, Content: reportContent(report{Text: "Goal must contain 1–16000 bytes of text."}, "Invalid goal", "manager")})
+		_, err := c.Loop.Conv.Speak(ctx, conv.Name, contract.SpeakRequest{Key: message.ID + "/invalid", Actor: consumer(), Target: contract.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, Content: reportContent(report{Text: "Goal must contain 1–16000 bytes of text."}, "Invalid goal", "manager")})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, loopd.CommitRequest{Actor: consumer(), Through: polled.Position})
+		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
 	workspace, err := c.Loop.Conv.Workspace(ctx, conv.Name, consumer())
 	if err != nil {
@@ -242,15 +242,15 @@ type report struct {
 	Error string
 }
 
-func messageText(m loopd.Message) string {
+func messageText(m contract.Message) string {
 	var model struct {
 		Blocks []struct {
-			Content string              `json:"content"`
-			Type    string              `json:"type"`
-			Value   string              `json:"value"`
-			Outcome string              `json:"outcome"`
-			Prompt  string              `json:"prompt"`
-			Choices []loopd.HumanChoice `json:"choices"`
+			Content string                 `json:"content"`
+			Type    string                 `json:"type"`
+			Value   string                 `json:"value"`
+			Outcome string                 `json:"outcome"`
+			Prompt  string                 `json:"prompt"`
+			Choices []contract.HumanChoice `json:"choices"`
 		} `json:"blocks"`
 	}
 	if json.Unmarshal(m.Content, &model) != nil {
@@ -272,7 +272,7 @@ func messageText(m loopd.Message) string {
 	}
 	return strings.Join(texts, "\n")
 }
-func reportFrom(m loopd.Message) (report, error) {
+func reportFrom(m contract.Message) (report, error) {
 	var model struct {
 		Blocks []struct {
 			ID      string `json:"id"`
@@ -307,7 +307,7 @@ func reportContent(value report, title, role string) json.RawMessage {
 
 // invoke records the full business result in one persisted message event before
 // its consumer updates a CRD. Execution recovery remains Adapter-owned.
-func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind loopd.ActorKind, target, prompt string, timeout time.Duration) (report, string, string, bool, error) {
+func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind contract.ActorKind, target, prompt string, timeout time.Duration) (report, string, string, bool, error) {
 	ref := reference(run)
 	if active, err := c.live(ctx, run.Namespace, run.Spec.Conversation, &ref); err != nil || !active {
 		return report{}, "", "", false, err
@@ -316,7 +316,7 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	role := strings.TrimPrefix(string(kind), "operator/longhorizon/")
 	key := stepKey(run, round, role)
 	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}, "blocks": []any{}})
-	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, loopd.SpeakRequest{Stream: true, Key: key + "/report", Actor: author, Target: recipient(run), Content: content})
+	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, contract.SpeakRequest{Stream: true, Key: key + "/report", Actor: author, Target: recipient(run), Content: content})
 	if err != nil {
 		return report{}, "", "", false, err
 	}
@@ -399,8 +399,8 @@ func (c *Controller) history(ctx context.Context, run *lh.Run) (string, error) {
 }
 
 // priorMessages selects a bounded stable tail before the input using shared Read.
-func (c *Controller) priorMessages(ctx context.Context, convID, before string) ([]loopd.Message, error) {
-	var history []loopd.Message
+func (c *Controller) priorMessages(ctx context.Context, convID, before string) ([]contract.Message, error) {
+	var history []contract.Message
 	after := ""
 	for {
 		page, err := c.Loop.Conv.Read(ctx, convID, after, 100)
@@ -430,27 +430,27 @@ func (c *Controller) priorMessages(ctx context.Context, convID, before string) (
 }
 
 // message resolves a saved reference without changing consumption or adding a Context verb.
-func (c *Controller) message(ctx context.Context, convID, id string) (loopd.Message, error) {
+func (c *Controller) message(ctx context.Context, convID, id string) (contract.Message, error) {
 	after := ""
 	for {
 		page, err := c.Loop.Conv.Read(ctx, convID, after, 100)
 		if err != nil {
-			return loopd.Message{}, err
+			return contract.Message{}, err
 		}
 		for _, m := range page {
 			if m.ID == id {
 				return m, nil
 			}
 			if m.ID > id {
-				return loopd.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
+				return contract.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
 			}
 		}
 		if len(page) < 100 {
-			return loopd.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
+			return contract.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
 		}
 		next := page[len(page)-1].ID
 		if next <= after {
-			return loopd.Message{}, errors.New("history pagination did not advance")
+			return contract.Message{}, errors.New("history pagination did not advance")
 		}
 		after = next
 	}

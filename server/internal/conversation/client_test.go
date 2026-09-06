@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	loopd "github.com/compforge/loopd"
-	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
+	"github.com/compforge/loopd/pkg/contract"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,7 +18,7 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	if err := conversationv1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	actor := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}
+	actor := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}
 	kube := fake.NewClientBuilder().WithScheme(scheme).
 		WithStatusSubresource(&conversationv1.Conversation{}).
 		WithObjects(&conversationv1.Conversation{
@@ -31,11 +31,11 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 			}},
 		}).Build()
 	c := NewClient(kube, "test", 0)
-	result, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
+	result, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]contract.Message, error) {
 		if after != "001" {
 			t.Fatalf("cursor = %q", after)
 		}
-		return []loopd.Message{{
+		return []contract.Message{{
 			ID: "002", ConversationID: "conv", TargetKind: actor.Kind, TargetKey: actor.Key,
 		}}, nil
 	})
@@ -54,7 +54,7 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	}
 	// A lost Poll response or restarted Operator replays the uncommitted range.
 	restarted := NewClient(kube, "test", 0)
-	replayed, err := restarted.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
+	replayed, err := restarted.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]contract.Message, error) {
 		if after != "001" {
 			t.Fatalf("replay starts at %q", after)
 		}
@@ -63,13 +63,13 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 	if err != nil || replayed.Position != "002" {
 		t.Fatalf("replay=%+v %v", replayed, err)
 	}
-	if err := restarted.Commit(ctx, "conv", loopd.CommitRequest{Actor: actor, Through: "003"}); err == nil {
+	if err := restarted.Commit(ctx, "conv", contract.CommitRequest{Actor: actor, Through: "003"}); err == nil {
 		t.Fatal("cannot commit beyond received position")
 	}
-	if err := c.Commit(ctx, "conv", loopd.CommitRequest{Actor: actor, Through: result.Position}); err != nil {
+	if err := c.Commit(ctx, "conv", contract.CommitRequest{Actor: actor, Through: result.Position}); err != nil {
 		t.Fatal(err)
 	}
-	empty, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]loopd.Message, error) {
+	empty, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]contract.Message, error) {
 		if after != "002" {
 			t.Fatalf("cursor = %q", after)
 		}
@@ -88,11 +88,11 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
 	c := NewClient(kube, "test", 0)
-	a := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "a"}
-	b := loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "b"}
+	a := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"}
+	b := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "b"}
 	for _, signal := range []struct {
 		id    string
-		actor loopd.ActorRef
+		actor contract.ActorRef
 	}{
 		{"001", a}, {"002", b}, {"000", a},
 	} {
@@ -108,7 +108,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 	if value.EndOffset("operator", "a") != "001" || value.EndOffset("operator", "b") != "002" {
 		t.Fatalf("signals = %+v", value.Spec)
 	}
-	if err := c.Signal(ctx, "conv", "003", loopd.ActorRef{}, 1); err != nil {
+	if err := c.Signal(ctx, "conv", "003", contract.ActorRef{}, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := kube.Get(ctx, key, value); err != nil {

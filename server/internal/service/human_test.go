@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 )
 
@@ -18,12 +18,12 @@ func TestHumanMaintenanceRecoversNotifications(t *testing.T) {
 	}
 	runner := &recordingChatRunner{}
 	chat := NewChatService(store, runner, nil, nil)
-	message, err := chat.Create(ctx, "conv", "alice", loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
+	message, err := chat.Create(ctx, "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	human := NewHumanService(store, nil)
-	q, err := human.Create(ctx, loopd.HumanRequest{ConversationID: message.ConversationID, Actor: loopd.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: loopd.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
+	q, err := human.Create(ctx, contract.HumanRequest{ConversationID: message.ConversationID, Actor: contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: contract.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestHumanMaintenanceRecoversNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := human.Get(ctx, q.Message.ID)
-	if err != nil || result.Status != loopd.HumanTimeout || result.Reply != nil {
+	if err != nil || result.Status != contract.HumanTimeout || result.Reply != nil {
 		t.Fatalf("timeout=%+v %v", result, err)
 	}
 	pending, err := store.HumanMaintenance(ctx)

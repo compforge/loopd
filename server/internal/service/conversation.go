@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/qiankunli/go-stdx/uuid"
@@ -14,26 +14,26 @@ import (
 
 type ConversationRepository interface {
 	repo.ConversationRepository
-	EnsureActorConversation(context.Context, string, loopd.ActorRef) (model.Conversation, error)
+	EnsureActorConversation(context.Context, string, contract.ActorRef) (model.Conversation, error)
 }
 
-func (service *ConversationService) ActorConversation(ctx context.Context, parentID string, actor loopd.ActorRef) (loopd.Conversation, error) {
+func (service *ConversationService) ActorConversation(ctx context.Context, parentID string, actor contract.ActorRef) (contract.Conversation, error) {
 	if !actor.ValidTarget() {
-		return loopd.Conversation{}, ErrInvalid
+		return contract.Conversation{}, ErrInvalid
 	}
 	value, err := service.repo.EnsureActorConversation(ctx, parentID, actor)
 	return conversationFromModel(value), err
 }
 
-func (service *ConversationService) FindActorConversation(ctx context.Context, parentID, kind, key string) ([]loopd.Conversation, error) {
+func (service *ConversationService) FindActorConversation(ctx context.Context, parentID string, kind contract.ActorKind, key string) ([]contract.Conversation, error) {
 	value, err := service.repo.FindActorConversation(ctx, parentID, kind, key)
 	if errors.Is(err, repo.ErrNotFound) {
-		return []loopd.Conversation{}, nil
+		return []contract.Conversation{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return []loopd.Conversation{conversationFromModel(value)}, nil
+	return []contract.Conversation{conversationFromModel(value)}, nil
 }
 
 type ConversationService struct {
@@ -49,13 +49,13 @@ func (service *ConversationService) CreateConversation(
 	ctx context.Context,
 	name string,
 	userKey string,
-) (loopd.Conversation, error) {
+) (contract.Conversation, error) {
 	conversation := model.Conversation{
 		ID: uuid.V7(), Name: strings.TrimSpace(name),
-		ActorKind: string(loopd.ActorKindUser), ActorKey: strings.TrimSpace(userKey),
+		ActorKind: contract.ActorKindUser, ActorKey: strings.TrimSpace(userKey),
 	}
 	if conversation.ActorKey == "" {
-		return loopd.Conversation{}, ErrInvalid
+		return contract.Conversation{}, ErrInvalid
 	}
 	conversation, err := service.repo.CreateConversation(ctx, conversation)
 	if err == nil {
@@ -67,7 +67,7 @@ func (service *ConversationService) CreateConversation(
 	return conversationFromModel(conversation), err
 }
 
-func (service *ConversationService) GetConversation(ctx context.Context, id string) (loopd.Conversation, error) {
+func (service *ConversationService) GetConversation(ctx context.Context, id string) (contract.Conversation, error) {
 	conversation, err := service.repo.GetConversation(ctx, id)
 	return conversationFromModel(conversation), err
 }
@@ -76,23 +76,23 @@ func (service *ConversationService) ListConversations(
 	ctx context.Context,
 	before string,
 	limit int,
-) ([]loopd.Conversation, error) {
+) ([]contract.Conversation, error) {
 	conversations, err := service.repo.ListConversations(ctx, before, pageSize(limit))
 	if err != nil {
 		return nil, err
 	}
-	result := make([]loopd.Conversation, len(conversations))
+	result := make([]contract.Conversation, len(conversations))
 	for index := range conversations {
 		result[index] = conversationFromModel(conversations[index])
 	}
 	return result, nil
 }
 
-func conversationFromModel(value model.Conversation) loopd.Conversation {
-	result := loopd.Conversation{
+func conversationFromModel(value model.Conversation) contract.Conversation {
+	result := contract.Conversation{
 		ID: value.ID, Name: value.Name,
-		ActorKind: loopd.ActorKind(value.ActorKind), ActorKey: value.ActorKey,
-		Timestamped: loopd.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
+		ActorKind: value.ActorKind, ActorKey: value.ActorKey,
+		Timestamped: contract.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 	if value.ParentID != nil {
 		result.ParentID = *value.ParentID

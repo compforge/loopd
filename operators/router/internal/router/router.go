@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	loopd "github.com/compforge/loopd"
+	"github.com/compforge/loopd/pkg/contract"
+	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
-	conversationv1 "github.com/compforge/loopd/runtime/api/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -81,12 +81,12 @@ func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurren
 		Complete(reconciler)
 }
 
-var routerActor = loopd.ActorRef{Kind: loopd.ActorKindOperator, Key: OperatorKey}
+var routerActor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: OperatorKey}
 
 func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	// Receive one initial input. Further inputs join this execution only at the
 	// boundary after its current Harness batch, rather than starting another task.
-	inbox, err := reconciler.loop.Conv.Poll(ctx, request.Name, loopd.PollRequest{Actor: routerActor, Limit: 1})
+	inbox, err := reconciler.loop.Conv.Poll(ctx, request.Name, contract.PollRequest{Actor: routerActor, Limit: 1})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -94,9 +94,9 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind != loopd.ActorKindUser {
+	if message.Kind != contract.ActorKindUser {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
-			loopd.CommitRequest{Actor: routerActor, Through: inbox.Position})
+			contract.CommitRequest{Actor: routerActor, Through: inbox.Position})
 	}
 	history, err := reconciler.readHistory(ctx, request.Name, message.ID)
 	if err != nil {
@@ -110,9 +110,9 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 
 // readHistory is Router policy, not a runtime context model. Keep a bounded
 // tail before the polled input; later messages must enter through Poll instead.
-func (reconciler *Reconciler) readHistory(ctx context.Context, convID, before string) ([]loopd.Message, error) {
+func (reconciler *Reconciler) readHistory(ctx context.Context, convID, before string) ([]contract.Message, error) {
 	const limit = 100
-	var history []loopd.Message
+	var history []contract.Message
 	after := ""
 	for {
 		page, err := reconciler.loop.Conv.Read(ctx, convID, after, limit)
@@ -216,7 +216,7 @@ func modelText(content json.RawMessage) (string, error) {
 	return strings.Join(values, "\n"), nil
 }
 
-func conversationText(history []loopd.Message) string {
+func conversationText(history []contract.Message) string {
 	var lines []string
 	for _, message := range history {
 		value, err := modelText(message.Content)
