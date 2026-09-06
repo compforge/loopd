@@ -34,7 +34,7 @@ func NewClient(kube client.Client, namespace string, timeout time.Duration) *Cli
 
 // Signal records a committed message's recipient. An empty target is an
 // explicit broadcast to existing participants; it never registers all Operators.
-func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target contract.ActorRef, revision uint64) error {
+func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target contract.ActorRef, revision uint64, participantConversationID string) error {
 	if conversationID == "" || messageID == "" ||
 		(target != (contract.ActorRef{}) && !target.ValidTarget()) {
 		return errors.New("conversation, message and a valid target or broadcast are required")
@@ -70,6 +70,9 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 		for i := range value.Spec.Participants {
 			participant := &value.Spec.Participants[i]
 			if target == (contract.ActorRef{}) || (participant.Kind == target.Kind && participant.Key == target.Key) {
+				if target != (contract.ActorRef{}) && participantConversationID != "" && participant.ConversationID != participantConversationID {
+					participant.ConversationID, changed = participantConversationID, true
+				}
 				found = true
 				wake(participant.Kind, participant.Key)
 				if participant.EndOffset < messageID {
@@ -80,7 +83,7 @@ func (c *Client) Signal(ctx context.Context, conversationID, messageID string, t
 		if !found && target != (contract.ActorRef{}) {
 			wake(target.Kind, target.Key)
 			value.Spec.Participants = append(value.Spec.Participants, conversationv1.ConversationParticipant{
-				Kind: target.Kind, Key: target.Key, EndOffset: messageID,
+				Kind: target.Kind, Key: target.Key, EndOffset: messageID, ConversationID: participantConversationID,
 			})
 			changed = true
 		}

@@ -54,7 +54,6 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.POST("/v1/conversations/:conversation_id/poll", server.adapt(server.pollConversation))
 	engine.POST("/v1/conversations/:conversation_id/commit", server.adapt(server.commitConversation))
 	engine.POST("/v1/conversations/:conversation_id/speak", server.adapt(server.publishMessage))
-	engine.POST("/v1/conversations/:conversation_id/actors", server.adapt(server.actorConversation))
 	engine.POST("/v1/messages/:message_id/events", server.adapt(server.emitPublishedMessage))
 	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
 	engine.POST("/v1/conversations/:conversation_id/human", server.adapt(server.createHuman))

@@ -1,7 +1,7 @@
 # Conversation 消息消费
 
 Conversation 是参与者共享的交流空间，Message 是可见内容的事实来源。Conv CRD 保存参与者的
-唤醒信号与消费位置，不保存消息正文或 Operator 的领域状态。
+过程会话关联、唤醒信号与消费位置，不保存消息正文或 Operator 的领域状态。
 
 本文拥有持久消息的通知、拉取与提交协议。Actor 模型见 [Kernel](../../docs/kernel.md)，
 Verb 的调用方式见 [Runtime](../../docs/runtime.md)；这里不规定 Operator 何时处理补充输入。
@@ -30,6 +30,34 @@ Poll 遇到尚未 End 的收件消息即停止，不能越过它提交后面的�
 通知收件 Actor，即使已有更大的 EndOffset。写入者须完成或恢复自己的输出，runtime 不凭时间
 猜测其结束。希望先交付阶段结果时，可用独立的一次性 Speak，而不是让接收者消费半条消息。
 
+## 按 Actor 聚合的参与者
+
+主 Conv 按完整 kind/key 组织参与者，ActorKind 保持开放枚举。server 写入的关联和定向信号
+放在 spec，消费进度放在 status，保留 Kubernetes 的资源版本冲突重试与 status 子资源边界：
+
+```yaml
+spec:
+  participants:
+    - kind: operator
+      key: longhorizon
+      conversationID: <过程会话 ID>
+      endOffset: <最新通知的消息 ID>
+status:
+  consumers:
+    - kind: operator
+      key: longhorizon
+      position: <最高已拉取消息 ID>
+      committed: <最后安全消费消息 ID>
+```
+
+`conversationID` 是数据库 Conversation ID，不是独立工作单元；多个业务 Run 可共享这个过程
+会话。User 输入保留在主会话，Operator 通过此 ID 写入内部协作消息，页面可按父会话与 Actor
+查找它。通知将 ID 和 EndOffset 在同一次 CRD 更新中写入；重复通知、广播和其他 Actor 的更新
+不清空已有关联、不覆盖消费状态。EndOffset 保持最大值，较早消息的通知也可以补齐关联。
+
+runtime 的 `Participant` helper 只合并当前 Conv 快照中的 spec/status，不发请求。缺少关联时
+需要过程会话的 Operator 等待投影后再开始工作；已有 LongHorizon Run 沿用自己的 WorkspaceID。
+
 ## Poll 与 Commit
 
 消息消费参考 [Kafka Consumer](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
@@ -44,7 +72,7 @@ Poll 遇到尚未 End 的收件消息即停止，不能越过它提交后面的�
 
 位置值是 UUIDv7 Message ID，表示包含该消息的边界；不是 Kafka 数字 offset 的“下一条”约定。
 
-1. server 保存可消费 Message（流式输出为 End）时同事务记录待通知标记，提交后更新 CRD 的 EndOffset；失败由后台重试。
+1. server 保存可消费 Message（流式输出为 End）时同事务记录待通知标记，提交后将已分配的过程会话 ID 与 EndOffset 一起更新到 CRD；失败由后台重试。
 2. controller-runtime Watch 将参与者信号映射到 Reconcile；Watch 是 Controller 配置，不是 Verb。
 3. Poll 默认从 Committed 后读取定向或广播消息，并记录 Position，不自动 Commit。
 4. 同一次执行继续拉取时显式传上次结果 Position 作为 After；丢失响应时用相同 After 重试。
@@ -60,7 +88,7 @@ Poll 查询以数据库为准，不把 EndOffset 当作上限。Commit 单调推
 
 EndOffset 保持单调；Actor 专属的消息版本通知也能唤醒较早流式消息结束后的消费。
 Predicate 不因 Position 更新而触发空转；启动时未提交的消息、自己的新通知或仍有积压的 Commit
-会触发调谐。其他参与者的变化不唤醒当前 Actor。相同 Actor/Conv 的消费循环应由 Operator 保证
+会触发调谐；有积压时自身过程会话关联的补齐也触发调谐。其他参与者的变化不唤醒当前 Actor。相同 Actor/Conv 的消费循环应由 Operator 保证
 单一 owner；Kubernetes 资源版本解决状态更新冲突，不替代多副本执行互斥。
 
 UUIDv7 使用当前人类消息通常先后产生的时间有序假设，不宣称多节点数据库的全局提交顺序。

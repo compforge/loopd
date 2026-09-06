@@ -5,7 +5,6 @@ import (
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
@@ -23,21 +22,6 @@ func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext)
 		return err
 	}
 	r.JSON(200, views[0])
-	return nil
-}
-func (s *Server) actorConversation(ctx context.Context, r *hertzapp.RequestContext) error {
-	var actor contract.ActorRef
-	if err := decodeBody(r, &actor); err != nil {
-		return err
-	}
-	if !actor.ValidTarget() {
-		return service.ErrInvalid
-	}
-	conv, err := s.conversations.ActorConversation(ctx, r.Param("conversation_id"), actor)
-	if err != nil {
-		return err
-	}
-	r.JSON(200, conv)
 	return nil
 }
 func (s *Server) emitPublishedMessage(ctx context.Context, r *hertzapp.RequestContext) error {

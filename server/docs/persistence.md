@@ -17,8 +17,15 @@ Conversation 是一个对话框，actor_kind/actor_key 表达组织归属，不�
   多个 Harness 和其他 Actor 可以在其中发言，避免过程淹没主会话。
 
 两者是习惯用语，不是两套模型。Harness 组织的工作会话使用自身 actor_kind，不伪装成 Operator。
-Conv.Workspace 按 parent_id + actor_kind + actor_key 创建或复用内部会话，同一 Actor 跨多次输入
-共享详情。Conversation 不保存 task_id，也不依赖某条回答先存在。
+server 在主会话接收定向消息时，按 parent_id + actor_kind + actor_key 创建或复用内部会话，
+同一 Actor 跨多次输入共享详情。Chat、Speak（含流式首写）与 Human 答复均在消息事务内完成
+分配；先锁定父会话行，唯一关系在多个 server 实例间复用，任一步失败则消息与新会话一起回滚。
+广播、面向 User 的消息不分配过程会话；子会话中的消息不会递归创建新的过程会话。
+Conversation 不保存 task_id，也不依赖某条回答先存在。
+
+提交后 server 只读取已分配的子会话，将其 ID 与收件信号一起投影到主 Conv CRD，失败保留
+待通知标记重试。关联缺失视为写入契约未满足，通知不代为创建。Operator 无需创建会话的 Verb
+或 HTTP 接口。
 
 左侧导航只列主会话。选中消息后，按其会话与 Actor 查找内部会话；用户消息使用收件 Actor，
 其他消息使用发言 Actor。右侧显示该内部会话的消息，而不是按一次输入截出一份执行日志。

@@ -67,7 +67,7 @@ func newFixture(t *testing.T, history ...contract.Message) *fixture {
 	if err := convapi.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	conv := &convapi.Conversation{ObjectMeta: metav1.ObjectMeta{Name: "conv", Namespace: "default", UID: "conv-uid"}}
+	conv := &convapi.Conversation{ObjectMeta: metav1.ObjectMeta{Name: "conv", Namespace: "default", UID: "conv-uid"}, Spec: convapi.ConversationSpec{Participants: []convapi.ConversationParticipant{{Kind: consumer().Kind, Key: consumer().Key, ConversationID: "workspace"}}}}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&lh.Run{}, &lh.Execution{}, &lh.Audit{}).WithObjects(conv).WithInterceptorFuncs(interceptor.Funcs{Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 		if obj.GetUID() == "" {
 			obj.SetUID(types.UID(fmt.Sprintf("%T-%s", obj, obj.GetName())))
@@ -89,6 +89,9 @@ func newFixture(t *testing.T, history ...contract.Message) *fixture {
 	f.c = &Controller{Client: kube, Reader: kube, Loop: r.Loop, Config: (Config{}).defaults()}
 	if _, err := f.c.Ingress(context.Background(), request("conv")); err != nil {
 		t.Fatal(err)
+	}
+	if run := f.run(); run.Spec.WorkspaceID != "workspace" {
+		t.Fatalf("Run did not adopt projected conversation: %+v", run.Spec)
 	}
 	return f
 }
@@ -177,8 +180,6 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.committed = in.Through
 		}
 		w.WriteHeader(204)
-	case strings.HasSuffix(r.URL.Path, "/actors"):
-		write(contract.Conversation{ID: "workspace"})
 	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/messages"):
 		convID := strings.Split(r.URL.Path, "/")[3]
 		after := r.URL.Query().Get("after")
@@ -731,5 +732,28 @@ func TestHistoryPaginationBoundaries(t *testing.T) {
 	refs := f.run().Spec.ContextMessages
 	if len(refs) != 20 || refs[0].MessageID != "a205" || refs[19].MessageID != "a224" {
 		t.Fatalf("refs=%+v", refs)
+	}
+}
+
+func TestIngressWaitsForProjectedDetail(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := convapi.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := lh.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	conv := &convapi.Conversation{ObjectMeta: metav1.ObjectMeta{Name: "conv", Namespace: "default"}, Spec: convapi.ConversationSpec{Participants: []convapi.ConversationParticipant{{Kind: consumer().Kind, Key: consumer().Key, EndOffset: "input"}}}}
+	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(conv).Build()
+	// No HTTP runtime: waiting must happen before any Poll/Commit or Run creation.
+	c := Controller{Client: kube, Reader: kube, Config: (Config{}).defaults()}
+	result, err := c.Ingress(ctx, request("conv"))
+	if err != nil || result.RequeueAfter == 0 {
+		t.Fatalf("missing binding did not wait: %+v %v", result, err)
+	}
+	var runs lh.RunList
+	if err := kube.List(ctx, &runs); err != nil || len(runs.Items) != 0 {
+		t.Fatalf("premature run: %+v %v", runs, err)
 	}
 }

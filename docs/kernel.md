@@ -19,7 +19,7 @@ Actor 模型也容纳直接面向用户的 Harness。角色描述身份，不表
 | 载体 | 责任 | 不承担 |
 |---|---|---|
 | DB | 保存 Conversation 与 Message，作为可查询、可重复消费的消息记录 | Operator 领域进度、完整执行轨迹 |
-| Conv CRD | 保存参与者消费进度与定向信号，通过 Watch 触发 Reconcile | 消息正文、业务工作完成判定 |
+| Conv CRD | 保存参与者过程会话关联、消费进度与定向信号，通过 Watch 触发 Reconcile | 消息正文、业务工作完成判定 |
 | Redis | 传递页面增量，支持跨 server 实例重连与 replay | 参与者消费进度、业务执行恢复 |
 
 可以把 DB 理解成协作 queue，但消费不会删除消息，也不争抢一个全局消费位置；参与者各自
@@ -67,7 +67,9 @@ Conversation 是一个对话框。习惯上称用户的主会话为 **User conv*
 
 User conv 不绑定固定执行者，每次发言可以选择不同 Operator/Harness。定向发给 A 的消息只唤醒 A；
 其他参与者可以主动 Read 历史，自行决定是否参与，而不是被隐式广播调度。
-工作会话按父会话与组织 Actor 复用，跨多次发言持续存在；不绑定一次页面交付。
+工作会话由 server 在主会话接收定向消息时按父会话与组织 Actor 分配或复用，跨多次发言
+持续存在；不绑定一次页面交付。server 将其 ID 投影到主 Conv CRD 的对应参与者，Operator
+直接读取关联，无需创建工作会话的 Verb。工作会话只组织消息，不拥有独立执行生命周期。
 
 ## Loop、Reconcile 与 Verb
 

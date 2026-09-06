@@ -22,6 +22,7 @@ import (
 	loopruntime "github.com/compforge/loopd/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -41,6 +42,7 @@ type Config struct {
 
 // Reconciler receives messages and runs the Router conversation loop.
 type Reconciler struct {
+	reader        client.Reader
 	loop          loopruntime.Loop
 	harnessTarget string
 	maxSubtasks   int
@@ -74,6 +76,7 @@ func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurren
 	if err := conversationv1.AddToScheme(mgr.GetScheme()); err != nil {
 		return err
 	}
+	reconciler.reader = mgr.GetAPIReader()
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("router").
 		For(&conversationv1.Conversation{}, builder.WithPredicates(loopruntime.ConversationPredicate(routerActor))).
@@ -84,6 +87,20 @@ func (reconciler *Reconciler) SetupWithManager(mgr manager.Manager, maxConcurren
 var routerActor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: OperatorKey}
 
 func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+	var conv conversationv1.Conversation
+	if err := reconciler.reader.Get(ctx, request.NamespacedName, &conv); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if conv.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
+	}
+	participant, ok := loopruntime.Participant(&conv, routerActor)
+	if !ok {
+		return ctrl.Result{}, nil
+	}
+	if participant.ConversationID == "" {
+		return ctrl.Result{}, errors.New("Router detail conversation is not projected yet")
+	}
 	// Receive one initial input. Further inputs join this execution only at the
 	// boundary after its current Harness batch, rather than starting another task.
 	inbox, err := reconciler.loop.Conv.Poll(ctx, request.Name, contract.PollRequest{Actor: routerActor, Limit: 1})
@@ -105,7 +122,7 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 	if message.ConversationID != request.Name {
 		return ctrl.Result{}, errors.New("Router input belongs to another conversation")
 	}
-	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, message, history)
+	return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.run(ctx, message, history, participant.ConversationID)
 }
 
 // readHistory is Router policy, not a runtime context model. Keep a bounded

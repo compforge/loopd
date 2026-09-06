@@ -40,6 +40,9 @@ func (store *Store) Speak(ctx context.Context, convID string, request contract.S
 				return mapError(err)
 			}
 		}
+		if err := ensureParticipantConversation(tx, conv, request.Target); err != nil {
+			return err
+		}
 		status := contract.MessageStatusCompleted
 		if request.Stream {
 			status = contract.MessageStatusStreaming
@@ -49,29 +52,6 @@ func (store *Store) Speak(ctx context.Context, convID string, request contract.S
 			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: request.Content, Status: string(status),
 			DispatchPending: !request.Stream && request.Target.Kind != contract.ActorKindUser}
 		return mapError(store.saveMessage(tx, &result, true))
-	})
-	return
-}
-
-// EnsureActorConversation lazily allocates one workspace per parent and actor.
-// Parent locking serializes allocation across server replicas without a new table.
-func (store *Store) EnsureActorConversation(ctx context.Context, parentID string, actor contract.ActorRef) (result model.Conversation, err error) {
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var parent model.Conversation
-		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, "id = ?", parentID).Error; e != nil {
-			return mapError(e)
-		}
-		e := tx.Where("parent_id = ? AND actor_kind = ? AND actor_key = ?", parentID, actor.Kind, actor.Key).Order("id ASC").First(&result).Error
-		if e == nil {
-			return nil
-		}
-		if !errors.Is(e, gorm.ErrRecordNotFound) {
-			return e
-		}
-		result = model.Conversation{ID: uuid.V7(), Name: "处理详情", ParentID: &parentID, ActorKind: actor.Kind, ActorKey: actor.Key}
-		return tx.Create(&result).Error
 	})
 	return
 }

@@ -130,10 +130,10 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 		}
 	}
 	// Deliberately lag the wake signals behind SQL. They must not limit Poll.
-	if err := coordinator.Signal(ctx, "conv", "001", a, 1); err != nil {
+	if err := coordinator.Signal(ctx, "conv", "001", a, 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := coordinator.Signal(ctx, "conv", "002", b, 1); err != nil {
+	if err := coordinator.Signal(ctx, "conv", "002", b, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	result, err := poll.Poll(ctx, "conv", contract.PollRequest{Actor: a, Limit: 2})
@@ -174,14 +174,16 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 
 type interruptedCoordinator struct {
 	ConversationCoordinator
-	fail bool
+	fail     bool
+	detailID string
 }
 
-func (c *interruptedCoordinator) Signal(ctx context.Context, convID, messageID string, actor contract.ActorRef, revision uint64) error {
+func (c *interruptedCoordinator) Signal(ctx context.Context, convID, messageID string, actor contract.ActorRef, revision uint64, detailID string) error {
+	c.detailID = detailID
 	if c.fail {
 		return errors.New("simulated Kubernetes interruption")
 	}
-	return c.ConversationCoordinator.Signal(ctx, convID, messageID, actor, revision)
+	return c.ConversationCoordinator.Signal(ctx, convID, messageID, actor, revision, detailID)
 }
 
 func TestPollRetriesCommittedNotification(t *testing.T) {
@@ -204,6 +206,10 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 	if pending[0].Kind != "user" || pending[0].TargetKey != "router" {
 		t.Fatalf("pending message = %+v", pending[0])
 	}
+	detail, err := store.FindActorConversation(ctx, "conv", target.Kind, target.Key)
+	if err != nil || detail.ID == "" || coordinator.detailID != detail.ID {
+		t.Fatalf("detail must exist before failed notification: %+v %v", detail, err)
+	}
 	coordinator.fail = false
 	// A different service instance can finish the durable notification.
 	recovered := NewPollService(store, coordinator, nil)
@@ -212,6 +218,9 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 	}
 	if err := recovered.Maintain(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if coordinator.detailID != detail.ID {
+		t.Fatal("retry changed detail identity")
 	}
 	pending, err = store.PendingDispatches(ctx, 100)
 	if err != nil || len(pending) != 0 {

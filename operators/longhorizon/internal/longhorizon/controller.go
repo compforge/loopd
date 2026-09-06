@@ -185,6 +185,13 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 			return waiting()
 		}
 	}
+	participant, ok := loopruntime.Participant(&conv, consumer())
+	if !ok {
+		return ctrl.Result{}, nil
+	}
+	if participant.ConversationID == "" {
+		return waiting()
+	}
 	polled, err := c.Loop.Conv.Poll(ctx, conv.Name, contract.PollRequest{Actor: consumer(), Limit: 1})
 	if err != nil {
 		return ctrl.Result{}, err
@@ -208,11 +215,7 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 		}
 		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
-	workspace, err := c.Loop.Conv.Workspace(ctx, conv.Name, consumer())
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	run := &lh.Run{ObjectMeta: metav1.ObjectMeta{Name: message.ID, Namespace: conv.Namespace, Labels: map[string]string{ConvLabel: conv.Name}}, Spec: lh.RunSpec{Conversation: reference(&conv), WorkspaceID: workspace.ID, UserKey: message.Key, DeadlineAt: metav1.NewTime(time.Now().Add(c.Config.RunTimeout)), InputMessageID: message.ID, Goal: goal, MaxRounds: c.Config.MaxRounds}}
+	run := &lh.Run{ObjectMeta: metav1.ObjectMeta{Name: message.ID, Namespace: conv.Namespace, Labels: map[string]string{ConvLabel: conv.Name}}, Spec: lh.RunSpec{Conversation: reference(&conv), WorkspaceID: participant.ConversationID, UserKey: message.Key, DeadlineAt: metav1.NewTime(time.Now().Add(c.Config.RunTimeout)), InputMessageID: message.ID, Goal: goal, MaxRounds: c.Config.MaxRounds}}
 	for _, m := range history {
 		if m.ID == message.ID {
 			continue

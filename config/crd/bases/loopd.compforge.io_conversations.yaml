@@ -49,6 +49,10 @@ spec:
                     ConversationParticipant carries a recipient-specific wake signal. A signal
                     for B must not overwrite the signal for A when Kubernetes coalesces updates.
                   properties:
+                    conversationID:
+                      description: ConversationID is the server-allocated detail conversation
+                        for this root recipient.
+                      type: string
                     endOffset:
                       description: EndOffset is the newest database message notified
                         to this actor.

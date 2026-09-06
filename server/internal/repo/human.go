@@ -222,6 +222,13 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Blocks  []replyBlock   `json:"blocks"`
 		}{"1.1", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
 		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		var parent model.Conversation
+		if err := tx.First(&parent, "id = ?", conversationID).Error; err != nil {
+			return err
+		}
+		if err := ensureParticipantConversation(tx, parent, contract.ActorRef{Kind: reply.TargetKind, Key: reply.TargetKey}); err != nil {
+			return err
+		}
 		if err := store.saveMessage(tx, &reply, true); err != nil {
 			return err
 		}

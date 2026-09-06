@@ -88,14 +88,18 @@ func TestChatHTTPFlow(t *testing.T) {
 		t.Fatalf("history = %#v", result.Data)
 	}
 
-	childResponse := performJSON(t, engine, "POST", "/v1/conversations/"+conversation.ID+"/actors", `{"kind":"operator","key":"intent"}`)
+	childResponse := ut.PerformRequest(engine, "GET", "/v1/conversations?parent_id="+conversation.ID+"&actor_kind=operator&actor_key=intent", nil).Result()
 	if childResponse.StatusCode() != 200 {
 		t.Fatalf("create detail=%s", childResponse.Body())
 	}
-	var child contract.Conversation
-	if err := json.Unmarshal(childResponse.Body(), &child); err != nil {
+	var children view.Page[contract.Conversation]
+	if err := json.Unmarshal(childResponse.Body(), &children); err != nil {
 		t.Fatal(err)
 	}
+	if len(children.Data) != 1 {
+		t.Fatalf("automatic detail allocation: %+v", children)
+	}
+	child := children.Data[0]
 	if child.ParentID != conversation.ID || child.ActorKind != contract.ActorKindOperator || child.ActorKey != "intent" {
 		t.Fatalf("work conversation=%+v", child)
 	}
