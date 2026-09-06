@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -132,25 +131,6 @@ func TestConversationOwnershipAndTaskScope(t *testing.T) {
 type nopChatRunner struct{}
 
 type recordingChatRunner struct{}
-
-func (*recordingChatRunner) Stream(
-	context.Context,
-	string,
-	string,
-	string,
-	func(delivery.Event) error,
-) error {
-	return nil
-}
-func (nopChatRunner) Stream(
-	context.Context,
-	string,
-	string,
-	string,
-	func(delivery.Event) error,
-) error {
-	return nil
-}
 
 type failingCommitRepository struct{}
 

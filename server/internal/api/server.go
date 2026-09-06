@@ -11,12 +11,14 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
 )
 
 type Server struct {
+	Listen        func(context.Context, string, func(component.Event) error) error
 	Poll          *service.PollService
 	Human         *service.HumanService
 	HumanIdentity HumanIdentity
@@ -51,6 +53,7 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
+	engine.GET("/v1/conversations/:conversation_id/stream", server.adapt(server.streamConversation))
 	engine.POST("/v1/conversations/:conversation_id/poll", server.adapt(server.pollConversation))
 	engine.POST("/v1/conversations/:conversation_id/commit", server.adapt(server.commitConversation))
 	engine.POST("/v1/conversations/:conversation_id/speak", server.adapt(server.publishMessage))

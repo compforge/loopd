@@ -71,20 +71,22 @@ service 负责批量读取关联并组装富化结果，api 负责 HTTP 交付�
 
 ## 页面交付
 
-task_id 标识一次页面交付及 Redis 流，不是 Operator 的业务任务，server 不建立 tasks 表。
+task_id 是输入提交的交付标识，不是 Operator 的业务任务；server 不建立 tasks 表。
+页面订阅以 Conv 寻址，Redis 事件流以 Message 寻址。
 
 ### 提交与观察
 
-用户提交只创建真实 Message 和对应页面流，不预建空回答。Operator/Harness 发言、
+用户提交只创建真实 Message，不预建空回答。Operator/Harness 发言、
 Ask/Confirm 在实际发生时各自创建 Message。人可以连续追加，Operator 可以多次回应，
 输入与输出数量没有一对一约束。
 
 消息提交只依赖 DB，Redis 不进入输入事务。DB 接收后，即使页面桥暂时不可用，也不要求用户
 重新发送。Conv 通知用同事务保存的待通知标记在提交后重试；消费契约见 [Conversation](conversation.md)。
-首次提交在连接页面桥前返回已接受的消息与 task_id；随后断线按该身份重连，不另建输入。
+提交接口返回已接受的消息后结束响应。观察页面使用
+`GET /v1/conversations/:conversation_id/stream`，不需要先发送消息，也不需要 task_id。
+主对话和当前右侧详情分别订阅自身 Conv，不隐式订阅所有子会话；再次发言不替换订阅。
+HTTP/SSE 断开不取消执行。
 
-带 task_id 的请求只观察其所属会话，不创建输入或通知。一个页面订阅覆盖 User conv 及其直接
-内部会话，包括不同 task_id 或无 task_id 的后续发言。HTTP/SSE 断开不取消执行。
 Operator 通过 Poll 接收消息、Read 读取历史；不提供按 task_id 配对输入与回答的业务入口。
 
 ### 消息寻址与快照
@@ -102,33 +104,52 @@ Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批�
 桥连续时交付增量，发生版本缺口或乱序时发送最新快照。页面发现晚到的发言和内容，
 不依赖写入时命中了哪个 server 实例。
 
-### 聚合流与 replay
+### 聚合流与恢复
 
-- 有消息身份的事件用 message_id、message、event 外层寻址，客户端按 ID/revision 合并。
-- 没有消息身份的 start/ping 是 UI 连接控制事件，不创建气泡，也没有业务结束信号。
-- Last-Event-ID 是聚合控制流位置；各 Message 在重连时独立重放。
-- 一条 Message 的 end 不关闭 UI 流；已结束消息和 Human 卡片以 SQL 快照交付。
-- 页面仅保留所选会话的一条订阅；再次发言替换连接身份，但仍可收到旧输入对应的后续输出。
-- 切换会话／离开页面主动取消连接，正常 EOF 或断线按保存的 task_id 退避重连。
+页面先分页读取历史，每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流；每个事件仍用
+message_id、message、event 寻址，客户端按消息 ID/revision 合并。AgentUE seq 和 Redis cursor
+只在单条消息内有意义，不充当共享 Conv 游标。连接的 ping 不创建消息气泡。
 
-任一 server 实例都可观察同一交付。Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
+server 按 ID 定期增量发现该 Conv 的新消息。新的一次性发言直接交付，流式发言加入监听；
+状态检查只读取运行态消息的元数据，revision 变化或增量缺口才加载正文快照，不重复扫描终态历史。
+Ask/Confirm 已发送的卡片仍可能待答，因此其交互状态独立观察。
+
+一条 Message 的 end 移除自身监听，不关闭 Conv 连接。切换会话或离开页面主动取消连接；
+断线退避重连，从 SQL 恢复运行态快照再接 Redis。每次连接建立后，页面做一次有界的活跃消息
+revision 查询及新增消息查询，补偿首次加载的时间差和断线期间的变化，避免刚结束的消息被遗漏。
+连接期间的增量发现和状态校验由 Listener 承担；浏览器不另开常驻消息轮询。
+Listener 随请求取消，不放入全局注册表，也不负责消息 GC。
+
+任一 server 实例都可观察同一 Conv。Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
 但不会重新生成每个中间增量；AgentUE Bridge 负责事件协议和续接，server 负责消息寻址与快照。
 
 ### 消息结束与重试
 
+
 默认 Speak 在创建事务中保存完整正文与结束状态。流式 End 与内容事件使用同一顺序和重试契约：
 先原子推进 SQL Revision 与 Message.status，再尽力更新消息桥并标记终态。
 SQL 失败由句柄重试原事件，不另分配 seq；重复 End 幂等。
-普通 Speak 的内容和 Emit 不能更改消息终态；只有 End 可以结束流式消息。
+普通 Speak 的内容和 Emit 不能更改消息终态；写入者通过 End 结束流式消息，server 还会收口长期失活的输出。
 
 Message.status 表达单条消息的发送生命周期，独立于 AgentUE 内容：streaming 表示仍在输出，
-completed 表示发送完成，failed 表示输出失败，cancelled 表示输出被取消。
+completed 表示发送完成，failed 表示输出失败，cancelled 表示输出被取消，expired 表示长期未更新。
 End 默认 completed，也可显式传入 failed/cancelled；不同终态不能互相覆盖。
 更新请求将 status 与 AgentUE event 并列传入，AgentUE End 本身不携带状态；页面事件的 Message
 外层与历史 API 都返回持久化 status。Redis 丢失后也不会把已结束消息重新视为正在输出。
 主对话和详情只对 streaming 消息显示“生成中”，不把“连接在线”误标为“Operator 正在执行”。
 Ask/Confirm 卡片发送完成即 completed，但交互仍可等待答复；两种生命周期互不替代。
 
-没有 Delivery.Complete、输入关闭意图或通用页面收尾维护循环。页面拥有订阅生命周期；
+没有 Delivery.Complete 或输入关闭意图。页面拥有订阅生命周期；
 Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自动 Commit、不终止待答问题，
 也不禁止任何 Actor 用新 Key 再次发言。
+
+### 失活与 TTL
+
+`MESSAGE_TTL` 统一配置输出失活期限与 Redis 事件保留期限，默认 24h。
+Message GC 随 server 启停，即使没有页面连接也独立执行有界清理。
+它按 DB 的 `updated_at + TTL` 定期将 streaming 消息标记为 expired，并递增 revision；
+无需 expires_at 列。保留最后正文与最后活动时间，页面展示“已过期”，迟到写入不能恢复该消息。
+
+Redis 按自己的写入时间续期，DB 按 server 实际接受输出的时间续期；读取、心跳和重复事件
+不延长 DB 生命周期。两层允许短暂不一致，不根据 Redis key 是否存在推断消息状态。
+过期只结束页面消息，不取消 Harness 执行、不代替 Operator 判断业务完成；新发言使用新消息。

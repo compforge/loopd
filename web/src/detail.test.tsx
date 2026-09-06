@@ -31,15 +31,15 @@ it("does not invent an Operator for broadcasts from users or direct Harness mess
 });
 
 it("shows the selected Operator before a Message or workspace exists", () => {
-  const html = renderToStaticMarkup(<DetailPanel selection={{ parentID: "conv", organizer: { kind: "operator", key: "router" } }} running={false} />);
+  const html = renderToStaticMarkup(<DetailPanel selection={{ parentID: "conv", organizer: { kind: "operator", key: "router" } }} />);
   expect(html).toContain("处理详情 · router");
   expect(html).toContain("正在查找 router 的工作会话");
   expect(html).not.toContain("选择一条消息");
 });
 
 it("distinguishes no selection from a message with no related Operator", () => {
-  expect(renderToStaticMarkup(<DetailPanel running={false} />)).toContain("发送消息或选择历史消息");
-  expect(renderToStaticMarkup(<DetailPanel selection={{ parentID: "conv" }} running={false} />))
+  expect(renderToStaticMarkup(<DetailPanel />)).toContain("发送消息或选择历史消息");
+  expect(renderToStaticMarkup(<DetailPanel selection={{ parentID: "conv" }} />))
     .toContain("这条消息未关联 Operator 工作会话");
 });
 

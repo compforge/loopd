@@ -16,7 +16,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/cloudwego/hertz/pkg/route/param"
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/server/internal/delivery"
+	"github.com/compforge/loopd/server/internal/component"
+	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/compforge/loopd/server/internal/view"
@@ -143,10 +144,47 @@ func TestChatHTTPFlow(t *testing.T) {
 
 type completedChatRunner struct{}
 
-func (completedChatRunner) Initialize(context.Context, string, json.RawMessage) error { return nil }
-func (completedChatRunner) Delete(context.Context, string) error                      { return nil }
-func (completedChatRunner) Emit(context.Context, string, json.RawMessage) (string, error) {
-	return "", nil
+type convStreamRunner struct {
+	completedChatRunner
+	t      *testing.T
+	convID string
+}
+
+func (runner convStreamRunner) Listen(_ context.Context, convID string, deliver func(component.Event) error) error {
+	if convID != runner.convID {
+		runner.t.Fatalf("stream conv = %q", convID)
+	}
+	m := contract.Message{ID: "message", ConversationID: convID, Status: contract.MessageStatusStreaming, Kind: contract.ActorKindOperator, Key: "router", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
+	return deliver(component.Event{MessageID: m.ID, Message: &m, Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.1","biz":"chat","meta":{},"blocks":[]}}`)})
+}
+
+func TestConversationStreamHTTPWithoutUserInput(t *testing.T) {
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "stream.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.CreateConversation(context.Background(), model.Conversation{ID: "conv"}); err != nil {
+		t.Fatal(err)
+	}
+	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil),
+		service.NewChatService(store, completedChatRunner{}, nil, nil), nil)
+	server.Listen = (convStreamRunner{t: t, convID: "conv"}).Listen
+	engine := route.NewEngine(config.NewOptions(nil))
+	server.Register(engine)
+	request := hertzapp.NewContext(1)
+	request.Request.Header.SetMethod("GET")
+	request.Request.SetRequestURI("/v1/conversations/conv/stream")
+	writer := &streamWriter{}
+	request.Response.HijackWriter(writer)
+	engine.ServeHTTP(context.Background(), request)
+	if request.Response.StatusCode() != 200 || !strings.Contains(writer.String(), `"message_id":"message"`) || !strings.Contains(string(request.Response.Header.ContentType()), "text/event-stream") {
+		t.Fatalf("stream response: %d %s", request.Response.StatusCode(), writer.String())
+	}
+	missing := ut.PerformRequest(engine, "GET", "/v1/conversations/missing/stream", nil).Result()
+	if missing.StatusCode() != 404 {
+		t.Fatalf("missing conv status=%d", missing.StatusCode())
+	}
 }
 
 type streamWriter struct{ bytes.Buffer }
@@ -167,18 +205,6 @@ func performChat(t *testing.T, server *Server, conversationID, body string) (str
 	}
 	return string(request.Response.Header.Peek(taskIDHeader)), writer.String()
 }
-func (completedChatRunner) Stream(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	deliver func(delivery.Event) error,
-) error {
-	if err := deliver(delivery.Event{ID: "1-0", Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`), Persisted: true}); err != nil {
-		return err
-	}
-	return deliver(delivery.Event{ID: "2-0", Data: json.RawMessage(`{"op":"end","seq":2}`), Persisted: true})
-}
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {
 	t.Helper()
@@ -193,11 +219,7 @@ func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage,
 
 type unavailableChatRunner struct{ completedChatRunner }
 
-func (unavailableChatRunner) Stream(context.Context, string, string, string, func(delivery.Event) error) error {
-	return errors.New("page bridge unavailable")
-}
-
-// +case=`An accepted input returns its message and replay identity even when opening the page stream fails.`
+// +case=`An accepted input returns its message and receipt even when opening the page stream fails.`
 func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "chat.db")})
 	if err != nil {
@@ -206,6 +228,9 @@ func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	defer store.Close()
 	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil),
 		service.NewMessageService(store, nil), service.NewChatService(store, unavailableChatRunner{}, nil, nil), nil)
+	server.Listen = func(context.Context, string, func(component.Event) error) error {
+		return errors.New("page bridge unavailable")
+	}
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
 	created := performJSON(t, engine, "POST", "/v1/conversations", `{"name":"offline bridge"}`)

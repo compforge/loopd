@@ -45,9 +45,6 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	producer := New(agentuerunner.NewRedisEventBridge(clientA, options), store, nil)
 	consumer := New(agentuerunner.NewRedisEventBridge(clientB, options), store, nil)
 
-	if err := producer.Initialize(ctx, "task-1", initial); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +63,6 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 	if _, err := producer.EmitMessage(ctx, "message-2", appendEvent); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.EmitMessage(ctx, "message-2", marshalEvent(t, agentueui.End(4))); err != nil {
-		t.Fatal(err)
-	}
 
 	message, err := store.GetMessage(ctx, "message-2")
 	if err != nil {
@@ -83,41 +77,31 @@ func TestCoordinatorCompletesAndStreamsAcrossInstances(t *testing.T) {
 		t.Fatalf("persisted snapshot = %s", message.Content)
 	}
 
-	var delivered []Event
-	if err := consumer.Stream(ctx, "task-1", "conversation-1", "", func(event Event) error {
-		delivered = append(delivered, event)
-		if event.ID != "" {
+	seen := false
+	if err := listen(ctx, consumer, "conversation-1", func(event Event) error {
+		if event.MessageID != "message-2" {
+			return nil
+		}
+		patch, err := agentueui.Parse(event.Data)
+		if err != nil {
+			return err
+		}
+		if patch.Op == agentueui.OpStart && !seen {
+			seen = true
+			_, err = producer.EmitMessage(ctx, "message-2", marshalEvent(t, agentueui.End(4)))
+			return err
+		}
+		if patch.Op == agentueui.OpEnd {
+			if event.Message.Status != contract.MessageStatusCompleted {
+				t.Fatal("missing terminal status")
+			}
 			return errStop
 		}
 		return nil
 	}); !errors.Is(err, errStop) {
 		t.Fatal(err)
 	}
-	// Output event IDs belong to their Message; only the control stream
-	// supplies a Chat replay cursor.
-	var cursor string
-	foundOutput := false
-	for _, item := range delivered {
-		if item.MessageID == "message-2" {
-			foundOutput = true
-			if item.ID != "" {
-				t.Fatal("message cursor escaped into Chat transport")
-			}
-		} else if item.ID != "" && cursor == "" {
-			cursor = item.ID
-		}
-	}
-	if !foundOutput || cursor == "" {
-		t.Fatalf("missing snapshot/control: %+v", delivered)
-	}
-	if err := consumer.Stream(ctx, "task-1", "conversation-1", cursor, func(event Event) error {
-		if event.MessageID == "message-2" {
-			return errStop
-		}
-		return nil
-	}); !errors.Is(err, errStop) {
-		t.Fatalf("resume: %v", err)
-	}
+
 }
 
 var errStop = errors.New("page unsubscribed")
@@ -144,16 +128,13 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial})
+	_, err = store.CreateChatInput(ctx, model.Message{ID: "00000000-0000-7000-8000-000000000001", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
+	r := contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "00000000-0000-7000-8000-000000000001", EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Minute, AllowOther: true}
 	q, err := store.CreateHuman(ctx, r)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "answer"}); err != nil {
 		t.Fatal(err)
 	}
 	redisServer := miniredis.RunT(t)
@@ -162,7 +143,7 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	coordinator := New(agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond}), store, nil)
 	// No Redis stream exists. Observe must recover Human snapshots from Messages.
 	seen := map[string]bool{}
-	err = coordinator.Stream(ctx, "task", "conv", "", func(value Event) error {
+	err = listen(ctx, coordinator, "conv", func(value Event) error {
 		if value.MessageID != "" && value.Message == nil {
 			t.Fatal("missing Message envelope")
 		}
@@ -171,7 +152,13 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 			return err
 		}
 		if value.MessageID == q.Message.ID && event.Op == agentueui.OpStart {
-			seen["question"] = true
+			if !seen["question"] {
+				seen["question"] = true
+				_, err = store.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "answer"})
+				if err != nil {
+					return err
+				}
+			}
 		}
 		if value.Message != nil && value.Message.Purpose == "human_reply" {
 			seen["reply"] = true

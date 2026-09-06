@@ -2,36 +2,22 @@ import { ActorKind, isOperatorKind, operatorRole } from "./actor";
 import type { MessageContent } from "./content";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  PatchOp,
-} from "@compforge/agentue/ui";
-import {
   createConversation,
   listActors,
   listConversations,
-  listMessages,
   streamMessage,
   type Actor,
-  type ActorRef,
   type Conversation,
   type Message,
 } from "./api";
 import { MessageBody, ReplyReference } from "./MessageBody";
+import { MessagePoller } from "./message-poll";
 import { mergeMessage, applyMessageEvent, messageStatusLabel } from "./message";
 import { DetailPanel, detailOrganizer, type DetailSelection } from "./DetailPanel";
 
-import { readSubscriptions, writeSubscription, type StoredSubscription } from "./streams";
+import { useConversationStream } from "./streams";
 const selectedActorKey = "loopd.selected-actor";
 const selectedConversationKey = "loopd.selected-conversation";
-
-type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed";
-
-interface LiveSubscription {
-  messages?: Message[];
-  conversationID: string;
-  taskID: string;
-  lastEventID: string;
-  status: ConnectionStatus;
-}
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -41,17 +27,17 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedMessageID, setSelectedMessageID] = useState<string>();
   const [detailSelection, setDetailSelection] = useState<DetailSelection>();
-  const [liveSubscriptions, setLiveSubscriptions] = useState<Record<string, LiveSubscription>>({});
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const streams = useRef(new Map<string, AbortController>());
-  useEffect(() => () => { for (const controller of streams.current.values()) controller.abort(); }, []);
+  const messagePoller = useRef<{ conversationID: string; poller: MessagePoller } | undefined>(undefined);
+  useConversationStream(selectedConversationID, (delivery) => {
+    if (delivery.messageID) setMessages((current) => applyMessageEvent(current, delivery));
+  }, (signal) => refreshMessages(selectedConversationID!, signal, true));
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
   const selectedActor = actors.find((actor) => actorIdentity(actor) === selectedActorID);
-  const subscription = selectedConversationID ? liveSubscriptions[selectedConversationID] : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,26 +97,18 @@ export function App() {
       if (lastMessage) setDetailSelection((current) => current ?? {
         parentID: selectedConversationID, organizer: detailOrganizer(lastMessage),
       });
-      const stored = readSubscriptions()[selectedConversationID];
-      const input = items.findLast((message) => message.purpose === "input" && message.task_id);
-      if (!streams.current.has(selectedConversationID) && (stored || input)) {
-        void observeConversation(selectedConversationID, stored ?? { taskID: input!.task_id, lastEventID: "" });
-      }
     });
     return () => controller.abort();
   }, [selectedConversationID]);
 
-  useEffect(() => {
-    if (!selectedConversationID) return;
-    const controller = new AbortController();
-    // Actors may publish without an active user Chat; discover their snapshots too.
-    const timer = window.setInterval(() => { void refreshMessages(selectedConversationID, controller.signal); }, 2000);
-    return () => { window.clearInterval(timer); controller.abort(); };
-  }, [selectedConversationID]);
 
-  async function refreshMessages(conversationID: string, signal?: AbortSignal): Promise<Message[]> {
+  async function refreshMessages(conversationID: string, signal?: AbortSignal, sync = false): Promise<Message[]> {
     try {
-      const items = await listMessages(conversationID, signal);
+      if (messagePoller.current?.conversationID !== conversationID) {
+        messagePoller.current = { conversationID, poller: new MessagePoller(conversationID) };
+      }
+      const poller = messagePoller.current.poller;
+      const items = await (sync ? poller.sync(signal) : poller.poll(signal));
       if (signal?.aborted) return [];
       setMessages((current) => {
         // Equal message revisions may carry refreshed reference previews/cards.
@@ -147,10 +125,8 @@ export function App() {
 
   function selectConversation(conversationID: string) {
     if (conversationID === selectedConversationID) return;
-    for (const controller of streams.current.values()) controller.abort();
-    streams.current.clear();
+    messagePoller.current = undefined;
     setMessages([]);
-    setLiveSubscriptions({});
     setSelectedMessageID(undefined);
     setDetailSelection(undefined);
     setSelectedConversationID(conversationID);
@@ -158,11 +134,9 @@ export function App() {
   }
 
   function startConversation() {
-    for (const controller of streams.current.values()) controller.abort();
-    streams.current.clear();
+    messagePoller.current = undefined;
     setSelectedConversationID(undefined);
     setMessages([]);
-    setLiveSubscriptions({});
     setSelectedMessageID(undefined);
     setDetailSelection(undefined);
     setError(undefined);
@@ -214,81 +188,19 @@ export function App() {
         updated_at: new Date().toISOString(),
       },
     ]);
-    await observeConversation(conversationID, undefined, text, selectedActor);
-  }
-
-  async function observeConversation(
-    conversationID: string,
-    stored?: StoredSubscription,
-    text?: string,
-    requestedTarget?: ActorRef,
-  ) {
-    const slot = conversationID;
-    if (stored && streams.current.has(slot)) return;
-    streams.current.get(slot)?.abort();
-    const controller = new AbortController();
-    streams.current.set(slot, controller);
-    let taskID = stored?.taskID ?? "";
-    let lastEventID = stored?.lastEventID ?? "";
-    let awaitingID = text !== undefined;
-    let liveMessages: Message[] = [];
-    const target = requestedTarget;
-    const update = (status: ConnectionStatus) => {
-      if (controller.signal.aborted) return;
-      setLiveSubscriptions((current) => ({ ...current, [slot]: {
-        conversationID, taskID, lastEventID, status,
-        messages: [...liveMessages],
-      } }));
-    };
-    update("connecting");
     try {
-      for (;;) {
-        try {
-          await streamMessage({
-            conversationID, taskID: taskID || undefined, lastEventID: lastEventID || undefined,
-            text, target, signal: controller.signal,
-            onTaskID: (value) => {
-              if (controller.signal.aborted) return;
-              const first = !taskID;
-              taskID = value;
-              if (awaitingID) { setSubmitting(false); awaitingID = false; }
-              if (first) void refreshMessages(conversationID, controller.signal);
-              writeSubscription(conversationID, { taskID, lastEventID });
-              update("connected");
-            },
-            onEvent: (delivery) => {
-              if (controller.signal.aborted) return;
-              const { event: patch, eventId, messageID, message } = delivery;
-              if (messageID && message) {
-                liveMessages = applyMessageEvent(liveMessages, delivery);
-                if (message.conversation_id === conversationID) {
-                  const updated = liveMessages.find((item) => item.id === messageID)!;
-                  setMessages((current) => mergeMessage(current, updated));
-                }
-                // A Message's END closes only that Message.
-                update("connected");
-                return;
-              }
-              // Control events carry transport lifecycle only, never a bubble.
-              if (eventId) lastEventID = eventId;
-              if (patch.op === PatchOp.ERROR) setError(String(patch.meta.error.message ?? "连接错误"));
-              writeSubscription(conversationID, { taskID, lastEventID });
-              update("connected");
-            },
-          });
-          if (!taskID) throw new Error("chat stream closed before an ID was returned");
-        } catch (cause) {
-          if (isAbort(cause)) return;
-          if (!taskID) throw cause;
-        }
-        update("reconnecting");
-        await delay(1_500, controller.signal);
-      }
+      await streamMessage({
+        conversationID, text, target: selectedActor,
+        onTaskID: () => setSubmitting(false),
+        onEvent: (delivery) => {
+          if (!delivery.messageID) return;
+          setMessages((current) => applyMessageEvent(current.filter((m) => !m.id.startsWith("local-")), delivery));
+        },
+      });
     } catch (cause) {
-      if (!isAbort(cause)) { setError(errorMessage(cause)); update("failed"); }
+      if (!isAbort(cause)) setError(errorMessage(cause));
     } finally {
-      if (streams.current.get(slot) === controller) streams.current.delete(slot);
-      if (awaitingID) setSubmitting(false);
+      setSubmitting(false);
     }
   }
 
@@ -438,13 +350,13 @@ export function App() {
 
       <DetailPanel
         onReply={(result) => setMessages((current) => {
-          let next = mergeMessage(current, result.message);
-          if (result.reply) next = mergeMessage(next, result.reply);
+          let next = current;
+          for (const message of [result.message, result.reply]) {
+            if (message && message.conversation_id === selectedConversationID) next = mergeMessage(next, message);
+          }
           return next;
         })}
         selection={detailSelection?.parentID === selectedConversationID ? detailSelection : undefined}
-        liveMessages={subscription?.messages}
-        running={subscription?.status === "connected"}
       />
     </div>
   );
@@ -493,13 +405,4 @@ function errorMessage(cause: unknown): string {
 
 function isAbort(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === "AbortError";
-}
-
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) { reject(new DOMException("aborted", "AbortError")); return; }
-    const abort = () => { window.clearTimeout(timer); reject(new DOMException("aborted", "AbortError")); };
-    const timer = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, milliseconds);
-    signal.addEventListener("abort", abort, { once: true });
-  });
 }

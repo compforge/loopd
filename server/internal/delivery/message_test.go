@@ -80,21 +80,23 @@ func TestMessageTerminalStatuses(t *testing.T) {
 			if err := writer.events.Delete(ctx, "message/"+message.ID); err != nil {
 				t.Fatal(err)
 			}
-			stop := errors.New("observed terminal snapshot")
-			observeCtx, cancel := context.WithTimeout(ctx, time.Second)
-			defer cancel()
-			err = writer.Stream(observeCtx, "task", "root", "", func(event Event) error {
-				if event.MessageID == message.ID {
-					if event.Message.Status != status {
-						t.Fatalf("replay status=%s", event.Message.Status)
-					}
-					return stop
-				}
-				return nil
-			})
-			if !errors.Is(err, stop) {
-				t.Fatalf("restore terminal snapshot: %v", err)
+			rows, err := store.ListMessages(ctx, "root", "", 100)
+			if err != nil {
+				t.Fatal(err)
 			}
+			found := false
+			for _, row := range rows {
+				if row.ID == message.ID {
+					found = true
+					if row.Status != string(status) {
+						t.Fatal("lost terminal status")
+					}
+				}
+			}
+			if !found {
+				t.Fatal("terminal history missing")
+			}
+
 		})
 	}
 }
@@ -221,20 +223,11 @@ func TestEndRetriesProjectionAndSurvivesBridgeLoss(t *testing.T) {
 	if _, err := consumer.EmitMessage(ctx, message.ID, outputText(t, 4, "too late")); !errors.Is(err, ErrInvalidEvent) {
 		t.Fatalf("write after end=%v", err)
 	}
-	watchCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	err = consumer.Stream(watchCtx, "task", "root", "", func(event Event) error {
-		if event.MessageID == message.ID {
-			if !event.Message.Ended() || event.Message.Revision != 3 {
-				t.Fatalf("lost end on replay: %+v", event.Message)
-			}
-			return errStop
-		}
-		return nil
-	})
-	if !errors.Is(err, errStop) {
-		t.Fatal(err)
+	rows, err := store.ListMessages(ctx, "work", "", 100)
+	if err != nil || len(rows) != 1 || rows[0].Revision != 3 || !visibleMessage(rows[0]).Ended() {
+		t.Fatalf("history lost End: %+v %v", rows, err)
 	}
+
 }
 
 // +case=`A message End never ends the page subscription; other actors and other/no TaskIDs remain visible.`
@@ -249,7 +242,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 	seen := map[string]bool{}
 	sent, ended := false, false
 	var later, unsolicited string
-	err = consumer.Stream(ctx, "task", "root", "", func(event Event) error {
+	err = listen(ctx, consumer, "work", func(event Event) error {
 		patch, err := ui.Parse(event.Data)
 		if err != nil {
 			return err
@@ -277,7 +270,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 			request = outputRequest("unsolicited")
 			request.Stream = false
 			request.Actor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: "another"}
-			message, err = store.Speak(ctx, "root", request)
+			message, err = store.Speak(ctx, "work", request)
 			if err != nil {
 				return err
 			}

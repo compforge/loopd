@@ -18,7 +18,10 @@ server/
 │   └── harness.go          # Harness Registry
 ├── internal/view/          # API 与 service 共用的 View Model；按领域拆文件，仅定义数据结构
 ├── internal/domain/        # Human 消息的纯状态规则，不持有独立存储
-├── internal/delivery/      # Message 寻址与独立流、会话聚合交付及固化
+├── internal/component/     # 有生命周期的运行组件
+│   ├── message_gc.go       # 随 server 启停的全局 Message 失活回收
+│   └── conv_listener.go    # 随 stream 请求启停的单 Conv 监听
+├── internal/delivery/      # Message 输出固化与独立 Redis 流写入
 ├── internal/migrations/    # 已有数据库的 Schema 迁移
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
@@ -36,7 +39,7 @@ server/
 │   ├── message.go          # MessageService
 │   ├── message_enrichment.go # 页面消息富化；分页不变、直接引用与卡片投影
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
-│   ├── chat.go             # ChatService；输入提交与 UI 流交付
+│   ├── chat.go             # ChatService；输入提交与消息输出
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
 │   └── human.go            # Human 消息交互、持久到期与类型化答复
 └── docs/                   # 消息消费、可见事实持久化与用户交互的领域设计

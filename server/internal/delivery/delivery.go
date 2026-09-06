@@ -1,4 +1,4 @@
-// Package delivery multiplexes message-owned AgentUE streams for a conversation.
+// Package delivery projects message output and publishes it to the event bridge.
 package delivery
 
 import (
@@ -20,19 +20,10 @@ var ErrInvalidEvent = errors.New("invalid AgentUE event")
 
 type MessageRepository interface {
 	ProjectOutput(context.Context, string, agentueui.Event, ...contract.MessageStatus) error
-	GetDeliveryInput(context.Context, string) (model.Message, error)
-	ListDeliveryMessages(context.Context, string) ([]model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
 	GetMessageState(context.Context, string) (repo.MessageState, error)
 }
 
-type Event struct {
-	MessageID string
-	Message   *contract.Message
-	ID        string
-	Data      json.RawMessage
-	Persisted bool
-}
 type Coordinator struct {
 	events agentuerunner.EventBridge
 	repo   MessageRepository
@@ -44,20 +35,6 @@ func New(events agentuerunner.EventBridge, repository MessageRepository, logger 
 		logger = slog.Default()
 	}
 	return &Coordinator{events: events, repo: repository, logger: logger}
-}
-func (coordinator *Coordinator) Initialize(ctx context.Context, taskID string, content json.RawMessage) error {
-	start, err := agentueui.Start(content, 1)
-	if err != nil {
-		return err
-	}
-	data, err := start.Marshal()
-	if err != nil {
-		return err
-	}
-	return coordinator.events.Initialize(ctx, taskID, content, data, start.Seq)
-}
-func (coordinator *Coordinator) Delete(ctx context.Context, taskID string) error {
-	return coordinator.events.Delete(ctx, taskID)
 }
 
 // +spec=`Message ID 决定输出归属，block ID 与 seq 只在该 Message 内唯一；Human 状态只能经 typed action 写入`
@@ -161,14 +138,7 @@ func (coordinator *Coordinator) publish(ctx context.Context, message repo.Messag
 	return "", nil
 }
 
-// Only transport control owns the Chat cursor. Every actual Message has an
-// independent bridge key.
-func streamKey(message model.Message) string {
-	if message.Purpose == "transport" {
-		return message.TaskID
-	}
-	return "message/" + message.ID
-}
+func streamKey(message model.Message) string { return "message/" + message.ID }
 func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.Message) error {
 	key := streamKey(message)
 	if _, err := coordinator.events.State(ctx, key); err == nil {
@@ -176,12 +146,11 @@ func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.
 	} else if !errors.Is(err, agentuerunner.ErrNotFound) {
 		return err
 	}
-	if message.Purpose != "transport" {
-		var err error
-		message, err = coordinator.repo.GetMessage(ctx, message.ID)
-		if err != nil {
-			return err
-		}
+
+	var err error
+	message, err = coordinator.repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		return err
 	}
 	revision := message.Revision
 	if revision == 0 {
@@ -200,15 +169,6 @@ func (coordinator *Coordinator) ensureStream(ctx context.Context, message model.
 		return nil
 	}
 	return err
-}
-
-func (coordinator *Coordinator) input(ctx context.Context, taskID string) (model.Message, error) {
-	return coordinator.repo.GetDeliveryInput(ctx, taskID)
-}
-
-func transportMessage(input model.Message) model.Message {
-	return model.Message{TaskID: input.TaskID, ConversationID: input.ConversationID, Purpose: "transport", Revision: 1,
-		Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 }
 
 func visibleMessage(m model.Message) contract.Message {

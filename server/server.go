@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	serverapi "github.com/compforge/loopd/server/internal/api"
+	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -23,6 +24,7 @@ import (
 type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
 
 type Config struct {
+	MessageTTL    time.Duration
 	Conversations ConversationCoordinator
 	Database      DatabaseConfig
 	Redis         RedisConfig
@@ -44,15 +46,22 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
-	poll  *service.PollService
-	store *repo.Store
-	redis redis.UniversalClient
-	api   *serverapi.Server
-	human *service.HumanService
-	chat  *service.ChatService
+	messageGC *component.MessageGC
+	poll      *service.PollService
+	store     *repo.Store
+	redis     redis.UniversalClient
+	api       *serverapi.Server
+	human     *service.HumanService
+	chat      *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
+	if config.MessageTTL < 0 {
+		return nil, errors.New("message TTL must be positive")
+	}
+	if config.MessageTTL == 0 {
+		config.MessageTTL = DefaultMessageTTL
+	}
 	if config.Conversations == nil {
 		return nil, errors.New("conversation coordinator is required")
 	}
@@ -68,7 +77,7 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	events, redisClient, err := newEventBridge(config.Redis)
+	events, redisClient, err := newEventBridge(config.Redis, config.MessageTTL)
 	if err != nil {
 		_ = store.Close()
 		return nil, err
@@ -81,12 +90,16 @@ func New(config Config) (*Server, error) {
 	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
 	human := service.NewHumanService(store, config.Logger)
 	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
+	api.Listen = func(ctx context.Context, convID string, deliver func(component.Event) error) error {
+		return component.NewConvListener(events, store, convID).Run(ctx, deliver)
+	}
 	api.Human = human
 	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
-		poll:  poll,
-		human: human, chat: chat,
+		messageGC: component.NewMessageGC(store, config.MessageTTL, time.Second, 100, config.Logger),
+		poll:      poll,
+		human:     human, chat: chat,
 		store: store,
 		redis: redisClient,
 		api:   api,
@@ -98,13 +111,14 @@ func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.poll.Run(ctx) })
+	workers.Go(func() { server.messageGC.Run(ctx) })
 	workers.Wait()
 }
 func (server *Server) Close() error {
 	return errors.Join(server.redis.Close(), server.store.Close())
 }
 
-func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.UniversalClient, error) {
+func newEventBridge(config RedisConfig, ttl time.Duration) (agentuerunner.EventBridge, redis.UniversalClient, error) {
 	if config.Address == "" {
 		config.Address = "127.0.0.1:6379"
 	}
@@ -122,9 +136,6 @@ func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.Univer
 	}
 	if config.MinIdleConns < 0 {
 		config.MinIdleConns = 0
-	}
-	if config.TaskTTL <= 0 {
-		config.TaskTTL = 30 * 24 * time.Hour
 	}
 	if config.ReadBlock <= 0 {
 		config.ReadBlock = time.Second
@@ -147,7 +158,7 @@ func newEventBridge(config RedisConfig) (agentuerunner.EventBridge, redis.Univer
 		return nil, nil, fmt.Errorf("connect to loop-server Redis %q: %w", config.Address, err)
 	}
 	return agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{
-		KeyPrefix: config.KeyPrefix, TaskTTL: config.TaskTTL,
+		KeyPrefix: config.KeyPrefix, TaskTTL: ttl,
 		ReadBlock: config.ReadBlock, ReadCount: config.ReadCount,
 	}), client, nil
 }

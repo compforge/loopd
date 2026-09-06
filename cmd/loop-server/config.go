@@ -6,9 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/compforge/loopd/server"
 )
 
 type config struct {
+	messageTTL          time.Duration
 	messageInlineBlocks int
 	messageInlineBytes  int
 	messagePartBytes    int
@@ -55,6 +58,7 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("unsupported DATABASE_DRIVER %q", databaseDriver)
 	}
 	value := config{
+		messageTTL:        server.DefaultMessageTTL,
 		address:           envOr("SERVER_ADDRESS", ":8080"),
 		databaseDriver:    databaseDriver,
 		databaseDSN:       databaseDSN,
@@ -71,6 +75,7 @@ func loadConfig() (config, error) {
 		name  string
 		value *time.Duration
 	}{
+		{"MESSAGE_TTL", &value.messageTTL},
 		{"TASK_CLIENT_TIMEOUT", &value.taskClientTimeout},
 		{"HTTP_READ_TIMEOUT", &value.readTimeout},
 		{"HTTP_IDLE_TIMEOUT", &value.idleTimeout},

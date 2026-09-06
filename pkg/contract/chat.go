@@ -21,10 +21,11 @@ const (
 	MessageStatusCompleted MessageStatus = "completed"
 	MessageStatusFailed    MessageStatus = "failed"
 	MessageStatusCancelled MessageStatus = "cancelled"
+	MessageStatusExpired   MessageStatus = "expired"
 )
 
 func (status MessageStatus) Terminal() bool {
-	return status == MessageStatusCompleted || status == MessageStatusFailed || status == MessageStatusCancelled
+	return status == MessageStatusCompleted || status == MessageStatusFailed || status == MessageStatusCancelled || status == MessageStatusExpired
 }
 
 type Message struct {
