@@ -1,4 +1,4 @@
-package delivery
+package service
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func TestPartsStreamReadsBodyOnlyForSnapshotRepair(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := &countingSnapshots{Store: store}
-	writer := New(coordinator.events, counts, nil)
+	writer := NewMessageService(counts, coordinator.events, nil)
 	update := marshalEvent(t, ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "text", "content": " first"}})
 	if _, err := writer.EmitMessage(ctx, message.ID, update); err != nil {
 		t.Fatal(err)

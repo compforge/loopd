@@ -21,7 +21,6 @@ server/
 ├── internal/component/     # 有生命周期的运行组件
 │   ├── message_gc.go       # 随 server 启停的全局 Message 失活回收
 │   └── conv_listener.go    # 随 stream 请求启停的单 Conv 监听
-├── internal/delivery/      # Message 输出固化与独立 Redis 流写入
 ├── internal/migrations/    # 已有数据库的 Schema 迁移
 ├── internal/model/         # GORM model；一张表一个 Go 文件
 │   ├── conversation.go     # conversations
@@ -36,10 +35,10 @@ server/
 ├── internal/conversation/  # Conv CRD 定向唤醒与参与者接收游标
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
-│   ├── message.go          # MessageService
+│   ├── message.go          # MessageService；消息发布、输出固化与 Redis 流写入
 │   ├── message_enrichment.go # 页面消息富化；分页不变、直接引用与卡片投影
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
-│   ├── chat.go             # ChatService；输入提交与消息输出
+│   ├── chat.go             # ChatService；用户输入提交
 │   ├── poll.go             # DB 消息接收、提交后通知与重试
 │   └── human.go            # Human 消息交互、持久到期与类型化答复
 └── docs/                   # 消息消费、可见事实持久化与用户交互的领域设计

@@ -166,7 +166,7 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 		t.Fatalf("independent B = %+v, %v", other, err)
 	}
 	// Reading all messages remains independent of recipient filtering and cursors.
-	history, err := NewMessageService(store, nil).ListMessages(ctx, "conv", "", 100)
+	history, err := NewMessageService(store, nil, nil).ListMessages(ctx, "conv", "", 100)
 	if err != nil || len(history) != 6 {
 		t.Fatalf("history = %+v, %v", history, err)
 	}
@@ -194,7 +194,7 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 	}
 	coordinator := &interruptedCoordinator{ConversationCoordinator: testConversationCoordinator(t), fail: true}
 	poll := NewPollService(store, coordinator, nil)
-	chat := NewChatService(store, nopChatRunner{}, nil, poll)
+	chat := NewChatService(store, nil, poll)
 	target := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}
 	if _, err := chat.Create(ctx, "conv", "alice", target, textContent("hello")); err != nil {
 		t.Fatalf("notification failure must not ask the user to resend committed input: %v", err)

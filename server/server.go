@@ -14,7 +14,6 @@ import (
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/component"
-	"github.com/compforge/loopd/server/internal/delivery"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -84,10 +83,9 @@ func New(config Config) (*Server, error) {
 	}
 	conversations := service.NewConversationService(store, config.Logger)
 	actors := service.NewActorService(store, config.Logger)
-	messages := service.NewMessageService(store, config.Logger)
-	chatDelivery := delivery.New(events, store, config.Logger)
+	messages := service.NewMessageService(store, events, config.Logger)
 	poll := service.NewPollService(store, config.Conversations, config.Logger)
-	chat := service.NewChatService(store, chatDelivery, config.Logger, poll)
+	chat := service.NewChatService(store, config.Logger, poll)
 	human := service.NewHumanService(store, config.Logger)
 	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
 	api.Listen = func(ctx context.Context, convID string, deliver func(component.Event) error) error {

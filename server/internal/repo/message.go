@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
@@ -11,6 +12,8 @@ import (
 )
 
 type MessageRepository interface {
+	ProjectOutput(context.Context, string, ui.Event, ...contract.MessageStatus) error
+	GetMessageState(context.Context, string) (MessageState, error)
 	ExpireMessages(context.Context, time.Time, int) ([]string, error)
 	GetMessageStates(context.Context, string, []string) ([]MessageState, error)
 	GetMessages(context.Context, string, []string) ([]model.Message, error)

@@ -32,8 +32,8 @@ func TestChatHTTPFlow(t *testing.T) {
 	server := New(
 		service.NewActorService(store, nil),
 		service.NewConversationService(store, nil),
-		service.NewMessageService(store, nil),
-		service.NewChatService(store, completedChatRunner{}, nil, nil),
+		service.NewMessageService(store, nil, nil),
+		service.NewChatService(store, nil, nil),
 		nil,
 	)
 	engine := route.NewEngine(config.NewOptions(nil))
@@ -142,10 +142,7 @@ func TestChatHTTPFlow(t *testing.T) {
 	}
 }
 
-type completedChatRunner struct{}
-
 type convStreamRunner struct {
-	completedChatRunner
 	t      *testing.T
 	convID string
 }
@@ -167,8 +164,8 @@ func TestConversationStreamHTTPWithoutUserInput(t *testing.T) {
 	if _, err := store.CreateConversation(context.Background(), model.Conversation{ID: "conv"}); err != nil {
 		t.Fatal(err)
 	}
-	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil),
-		service.NewChatService(store, completedChatRunner{}, nil, nil), nil)
+	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil, nil),
+		service.NewChatService(store, nil, nil), nil)
 	server.Listen = (convStreamRunner{t: t, convID: "conv"}).Listen
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
@@ -213,12 +210,6 @@ func performJSON(t *testing.T, engine *route.Engine, method, path, value string)
 	).Result()
 }
 
-func (completedChatRunner) EmitMessage(context.Context, string, json.RawMessage, ...contract.MessageStatus) (string, error) {
-	return "", nil
-}
-
-type unavailableChatRunner struct{ completedChatRunner }
-
 // +case=`An accepted input returns its message and receipt even when opening the page stream fails.`
 func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "chat.db")})
@@ -227,7 +218,7 @@ func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	}
 	defer store.Close()
 	server := New(service.NewActorService(store, nil), service.NewConversationService(store, nil),
-		service.NewMessageService(store, nil), service.NewChatService(store, unavailableChatRunner{}, nil, nil), nil)
+		service.NewMessageService(store, nil, nil), service.NewChatService(store, nil, nil), nil)
 	server.Listen = func(context.Context, string, func(component.Event) error) error {
 		return errors.New("page bridge unavailable")
 	}

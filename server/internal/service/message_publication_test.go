@@ -1,4 +1,4 @@
-package delivery
+package service
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
+func outputFixture(t *testing.T) (*repo.Store, *MessageService, *MessageService) {
 	t.Helper()
 	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "output.db")})
 	if err != nil {
@@ -39,7 +39,7 @@ func outputFixture(t *testing.T) (*repo.Store, *Coordinator, *Coordinator) {
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	bridge := agentuerunner.NewRedisEventBridge(client, agentuerunner.BridgeOptions{ReadBlock: time.Millisecond})
-	producer, consumer := New(bridge, store, nil), New(bridge, store, nil)
+	producer, consumer := NewMessageService(store, bridge, nil), NewMessageService(store, bridge, nil)
 	return store, producer, consumer
 }
 func ptr(value string) *string { return &value }

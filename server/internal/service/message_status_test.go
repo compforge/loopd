@@ -1,4 +1,4 @@
-package delivery
+package service
 
 import (
 	"context"
@@ -23,14 +23,14 @@ func TestOneShotSpeakNeedsNoMessageStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !visibleMessage(message).Ended() {
+	if !messageFromModel(message).Ended() {
 		t.Fatal("one-shot message not ended")
 	}
 	same, err := store.Speak(ctx, "root", request)
 	if err != nil || same.ID != message.ID {
 		t.Fatalf("retry=%+v %v", same, err)
 	}
-	if _, err := producer.EmitMessage(ctx, message.ID, outputText(t, 2, "too late")); !errors.Is(err, ErrInvalidEvent) {
+	if _, err := producer.EmitMessage(ctx, message.ID, outputText(t, 2, "too late")); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("one-shot write=%v", err)
 	}
 	if _, err := producer.EmitMessage(ctx, message.ID, marshalEvent(t, ui.End(2))); err != nil {
@@ -54,7 +54,7 @@ func TestMessageTerminalStatuses(t *testing.T) {
 			if message.Status != "streaming" {
 				t.Fatalf("initial status=%s", message.Status)
 			}
-			if _, err := writer.EmitMessage(ctx, message.ID, outputText(t, 2, "partial"), status); !errors.Is(err, ErrInvalidEvent) {
+			if _, err := writer.EmitMessage(ctx, message.ID, outputText(t, 2, "partial"), status); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("non-End accepted status: %v", err)
 			}
 			end := marshalEvent(t, ui.End(2))
@@ -64,10 +64,10 @@ func TestMessageTerminalStatuses(t *testing.T) {
 				}
 			}
 			saved, err := store.GetMessage(ctx, message.ID)
-			if err != nil || saved.Status != string(status) || !visibleMessage(saved).Ended() || strings.Contains(string(saved.Content), `"ended"`) {
+			if err != nil || saved.Status != string(status) || !messageFromModel(saved).Ended() || strings.Contains(string(saved.Content), `"ended"`) {
 				t.Fatalf("saved=%+v err=%v", saved, err)
 			}
-			if _, err := writer.EmitMessage(ctx, message.ID, end, contract.MessageStatusStreaming); !errors.Is(err, ErrInvalidEvent) {
+			if _, err := writer.EmitMessage(ctx, message.ID, end, contract.MessageStatusStreaming); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("invalid terminal: %v", err)
 			}
 			other := contract.MessageStatusFailed
@@ -125,7 +125,7 @@ func TestMessagePublicationSurvivesBridgeFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := &interruptedBridge{EventBridge: producer.events, fail: true}
-	writer := New(bridge, store, nil)
+	writer := NewMessageService(store, bridge, nil)
 	update := outputText(t, 2, "accepted")
 	for i := 0; i < 2; i++ {
 		if _, err := writer.EmitMessage(ctx, message.ID, update); err != nil {
@@ -196,10 +196,10 @@ func TestEndRetriesProjectionAndSurvivesBridgeLoss(t *testing.T) {
 	if _, err := producer.EmitMessage(ctx, message.ID, outputText(t, 2, "hello")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.EmitMessage(ctx, message.ID, marshalEvent(t, ui.End(99))); !errors.Is(err, ErrInvalidEvent) {
+	if _, err := producer.EmitMessage(ctx, message.ID, marshalEvent(t, ui.End(99))); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("gap accepted: %v", err)
 	}
-	flaky := New(producer.events, &failingProjection{Store: store, fail: true}, nil)
+	flaky := NewMessageService(&failingProjection{Store: store, fail: true}, producer.events, nil)
 	end := marshalEvent(t, ui.End(3))
 	if _, err := flaky.EmitMessage(ctx, message.ID, end); err == nil {
 		t.Fatal("projection failure not reported")
@@ -211,7 +211,7 @@ func TestEndRetriesProjectionAndSurvivesBridgeLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved, err := store.GetMessage(ctx, message.ID)
-	if err != nil || saved.Revision != 3 || !visibleMessage(saved).Ended() {
+	if err != nil || saved.Revision != 3 || !messageFromModel(saved).Ended() {
 		t.Fatalf("snapshot=%+v %v", saved, err)
 	}
 	if err := producer.events.Delete(ctx, streamKey(message)); err != nil {
@@ -220,11 +220,11 @@ func TestEndRetriesProjectionAndSurvivesBridgeLoss(t *testing.T) {
 	if _, err := consumer.EmitMessage(ctx, message.ID, end); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := consumer.EmitMessage(ctx, message.ID, outputText(t, 4, "too late")); !errors.Is(err, ErrInvalidEvent) {
+	if _, err := consumer.EmitMessage(ctx, message.ID, outputText(t, 4, "too late")); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("write after end=%v", err)
 	}
 	rows, err := store.ListMessages(ctx, "work", "", 100)
-	if err != nil || len(rows) != 1 || rows[0].Revision != 3 || !visibleMessage(rows[0]).Ended() {
+	if err != nil || len(rows) != 1 || rows[0].Revision != 3 || !messageFromModel(rows[0]).Ended() {
 		t.Fatalf("history lost End: %+v %v", rows, err)
 	}
 
@@ -292,7 +292,7 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 func TestOutputMetadataCannotBeForged(t *testing.T) {
 	for _, mask := range []string{"meta.output.last_event", "meta.human.status"} {
 		data := marshalEvent(t, ui.Event{Op: ui.OpSet, Seq: 2, Mask: mask, Meta: map[string]any{"ended": true, "status": "success"}})
-		if _, err := parseOutputEvent(data); !errors.Is(err, ErrInvalidEvent) {
+		if _, err := parseOutputEvent(data); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("mask %s accepted: %v", mask, err)
 		}
 	}

@@ -40,7 +40,7 @@ func TestMessageEnrichmentAcrossPagesAndStorageParts(t *testing.T) {
 		}
 	}
 	lookup := &countedMessageLookup{Store: store}
-	service := NewMessageService(lookup, nil)
+	service := NewMessageService(lookup, nil, nil)
 	r := contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: "operator", Key: "interaction"}, Target: contract.ActorRef{Kind: "user", Key: "alice"}, Type: "ask", EffectKey: "scope", Title: "Choose scope", Prompt: "Pick one", Choices: []contract.HumanChoice{{Value: "brief", Label: "简要说明"}, {Value: "full", Label: "完整说明"}}, Timeout: time.Minute}
 	question, err := store.CreateHuman(ctx, r)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestEnrichmentBatchesReferencesWithoutFollowingChains(t *testing.T) {
 		}
 	}
 	lookup := &countedMessageLookup{Store: store}
-	service := NewMessageService(lookup, nil)
+	service := NewMessageService(lookup, nil, nil)
 	messages := []contract.Message{{ID: "one", ConversationID: "conv", ReplyToID: "parent", Content: textContent("one")}, {ID: "two", ConversationID: "conv", ReplyToID: "parent", Content: textContent("two")}}
 	views, err := service.EnrichMessages(ctx, messages)
 	if err != nil {
