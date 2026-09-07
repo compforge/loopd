@@ -11,19 +11,22 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/pkg/harness"
 	lr "github.com/compforge/loopd/runtime"
+	"github.com/compforge/loopd/server/testutil"
 )
 
 type streamedRole struct {
 	events chan harness.Event
 	err    error
 	starts int
+	id     string
 }
 
-func (role *streamedRole) Prompt(context.Context, harness.Request) (harness.Call, error) {
+func (role *streamedRole) Prompt(_ context.Context, request harness.Request) (harness.Call, error) {
 	role.starts++
+	role.id = request.CallID
 	return role, nil
 }
-func (role *streamedRole) ID() string                   { return "streamed-role" }
+func (role *streamedRole) ID() string                   { return role.id }
 func (role *streamedRole) Events() <-chan harness.Event { return role.events }
 func (role *streamedRole) Wait(context.Context) (harness.Result, error) {
 	return harness.Result{Text: "Final result"}, role.err
@@ -51,7 +54,8 @@ func TestRoleStreamsAndCheckpointsOneMessage(t *testing.T) {
 				}
 				role.events <- harness.Event{Data: data}
 			}
-			runtime, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client(), Harnesses: map[string]harness.Adapter{"executor": role}})
+			f.harnessClient = testutil.WithHarnesses(t, f.server.Client(), map[string]harness.Adapter{"executor": role}, f.publishHarness)
+			runtime, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.harnessClient})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -71,6 +75,10 @@ func TestRoleStreamsAndCheckpointsOneMessage(t *testing.T) {
 			}
 			deadline := time.Now().Add(5 * time.Second)
 			for {
+				_, _, _, _, err = f.c.invoke(ctx, run, 1, ActorExecutor, "executor", "execute", time.Minute)
+				if err != nil {
+					t.Fatal(err)
+				}
 				f.mu.Lock()
 				m := f.messages[id]
 				count := len(f.outputs)
@@ -110,7 +118,7 @@ func TestRoleStreamsAndCheckpointsOneMessage(t *testing.T) {
 				t.Fatalf("final output: count=%d message=%+v", count, m)
 			}
 			result, err := f.c.readReport(ctx, "workspace", id)
-			if err != nil || result.Text != "Final result" || (result.Error != "") != failed {
+			if err != nil || (!failed && result.Text != "Final result") || (result.Error != "") != failed {
 				t.Fatalf("report=%+v err=%v", result, err)
 			}
 			var content struct {
@@ -119,14 +127,14 @@ func TestRoleStreamsAndCheckpointsOneMessage(t *testing.T) {
 			if err := json.Unmarshal(m.Content, &content); err != nil {
 				t.Fatal(err)
 			}
-			if len(content.Blocks) != 2 || content.Blocks[0]["content"] != "Final result" || content.Blocks[1]["id"] != "tool" {
+			if content.Blocks[0]["content"] != "Partial result" || content.Blocks[1]["id"] != "tool" || (!failed && len(content.Blocks) != 3) || (failed && len(content.Blocks) != 2) {
 				t.Fatalf("answer duplicated or tool lost: %+v", content.Blocks)
 			}
 			if role.starts != 1 {
 				t.Fatalf("role started %d times", role.starts)
 			}
 			// Drop in-memory Calls: the sealed message remains the recovery source.
-			fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client()})
+			fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.harnessClient})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -16,11 +16,12 @@ const (
 	CallFailed       CallPhase = "failed"
 	CallCancelled    CallPhase = "cancelled"
 	CallUnknown      CallPhase = "unknown"
+	CallTimedOut     CallPhase = "timed_out"
 )
 
 func (phase CallPhase) Terminal() bool {
 	switch phase {
-	case CallSucceeded, CallFailed, CallCancelled, CallUnknown:
+	case CallSucceeded, CallFailed, CallCancelled, CallUnknown, CallTimedOut:
 		return true
 	default:
 		return false
@@ -34,12 +35,14 @@ type Tool struct {
 }
 
 type HarnessCall struct {
-	ID             string     `json:"id"`
-	EffectKey      string     `json:"effect_key"`
-	Target         string     `json:"target"`
-	Phase          CallPhase  `json:"phase"`
-	Result         string     `json:"result,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	ID             string         `json:"id"`
+	EffectKey      string         `json:"effect_key"`
+	Target         string         `json:"target"`
+	Phase          CallPhase      `json:"phase"`
+	Result         *HarnessResult `json:"result,omitempty"`
+	MessageID      string         `json:"message_id"`
+	DeadlineAt     time.Time      `json:"deadline_at"`
+	Error          string         `json:"error,omitempty"`
+	LastActivityAt *time.Time     `json:"last_activity_at,omitempty"`
 	Timestamped
 }

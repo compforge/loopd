@@ -19,6 +19,7 @@ import (
 
 type Server struct {
 	Listen        func(context.Context, string, func(component.Event) error) error
+	HarnessRuns   *service.HarnessRunService
 	Poll          *service.PollService
 	Human         *service.HumanService
 	HumanIdentity HumanIdentity
@@ -46,6 +47,10 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.GET("/healthz", func(_ context.Context, request *hertzapp.RequestContext) {
 		request.JSON(consts.StatusOK, map[string]bool{"ok": true})
 	})
+	engine.POST("/v1/harness/runs", server.adapt(server.submitHarnessRun))
+	engine.GET("/v1/harness/runs/:run_id", server.adapt(server.observeHarnessRun))
+	engine.GET("/v1/harness/runs/:run_id/stream", server.adapt(server.streamHarnessRun))
+	engine.POST("/v1/harness/runs/:run_id/cancel", server.adapt(server.cancelHarnessRun))
 	engine.GET("/v1/actors", server.adapt(server.listActors))
 	engine.PUT("/v1/operators/:key", server.adapt(server.registerOperator))
 	engine.PUT("/v1/harnesses/:key", server.adapt(server.registerHarness))

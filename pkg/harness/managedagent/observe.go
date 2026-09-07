@@ -3,6 +3,7 @@ package managedagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -11,7 +12,14 @@ import (
 	"github.com/compforge/loopd/pkg/harness"
 )
 
-func (adapter *Adapter) observe(ctx context.Context, call *call) (harness.Result, error) {
+func (adapter *Adapter) observe(ctx context.Context, call *call) (result harness.Result, err error) {
+	parent := ctx
+	defer func() {
+		var stop *StopError
+		if err != nil && !errors.As(err, &stop) && parent.Err() == nil {
+			err = &harness.ObservationError{Err: err}
+		}
+	}()
 	ctx, cancel := context.WithTimeout(ctx, adapter.config.StreamTimeout)
 	defer cancel()
 	state := &projection{sessionID: call.sessionID, seen: make(map[string]bool)}
@@ -25,7 +33,7 @@ func (adapter *Adapter) observe(ctx context.Context, call *call) (harness.Result
 	stream := adapter.client.Beta.Sessions.Events.StreamEvents(ctx, call.sessionID, params,
 		option.WithRequestTimeout(adapter.config.StreamTimeout))
 	defer stream.Close()
-	if err := stream.Err(); err != nil {
+	if err = stream.Err(); err != nil {
 		return harness.Result{}, fmt.Errorf("open managedagent stream: %w", err)
 	}
 	page := adapter.client.Beta.Sessions.Events.ListAutoPaging(ctx, call.sessionID,
@@ -47,7 +55,7 @@ func (adapter *Adapter) observe(ctx context.Context, call *call) (harness.Result
 			return harness.Result{Text: state.text}, err
 		}
 	}
-	err := stream.Err()
+	err = stream.Err()
 	if err == nil {
 		// An SSE disconnect is not evidence of remote execution completion.
 		err = io.ErrUnexpectedEOF

@@ -16,6 +16,7 @@ import (
 	"github.com/compforge/loopd/pkg/harness"
 	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
+	"github.com/compforge/loopd/server/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -66,7 +67,7 @@ func TestReconcileRoutesSimpleAndComplexTasks(t *testing.T) {
 			adapter := newScriptedAdapter(test.plan, test.results, workCount)
 			server := newLoopServer(t, "task-1")
 			runtime, err := loopruntime.New(server.URL, loopruntime.Options{
-				HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+				HTTPClient: testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -105,7 +106,7 @@ func TestReconcileCompletesInvalidPlanAsFailure(t *testing.T) {
 	adapter := newScriptedAdapter(`{"kind":"complex","tasks":["only one"]}`, nil, 0)
 	server := newLoopServer(t, "task-1")
 	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
-		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+		HTTPClient: testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +273,7 @@ func newScriptedAdapter(plan string, results map[string]string, wantWork int) *s
 }
 
 func (adapter *scriptedAdapter) Prompt(_ context.Context, request harness.Request) (harness.Call, error) {
-	effect := strings.TrimPrefix(request.IdempotencyKey, "message-2/")
+	effect := request.EffectKey
 	adapter.mu.Lock()
 	adapter.effects = append(adapter.effects, effect)
 	adapter.prompts[effect] = request.Prompt

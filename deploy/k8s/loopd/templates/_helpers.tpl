@@ -46,9 +46,6 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ include "loopd.fullname" . }}-router
 {{- end }}
 
-{{- define "loopd.routerConfigName" -}}
-{{ include "loopd.routerName" . }}-model
-{{- end }}
 
 {{- define "loopd.redisName" -}}
 {{ include "loopd.fullname" . }}-redis
@@ -60,8 +57,4 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else -}}
 {{ printf "%s:6379" (include "loopd.redisName" .) }}
 {{- end -}}
-{{- end }}
-
-{{- define "loopd.routerSecretName" -}}
-{{- default (printf "%s-model-secret" (include "loopd.routerName" .)) .Values.router.model.existingSecret -}}
 {{- end }}

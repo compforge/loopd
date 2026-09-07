@@ -19,6 +19,7 @@ import (
 	"github.com/compforge/loopd/pkg/harness"
 	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	lr "github.com/compforge/loopd/runtime"
+	"github.com/compforge/loopd/server/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,24 +32,25 @@ import (
 // The HTTP fixture enforces the public message seal boundary; Kubernetes's fake
 // client exercises separate status writers. Real admission and GC need Kubernetes.
 type fixture struct {
-	t            *testing.T
-	c            *Controller
-	runtime      *lr.Runtime
-	server       *httptest.Server
-	mu           sync.Mutex
-	messages     map[string]contract.Message
-	outputs      map[string]string
-	scripts      map[string][]string
-	calls        map[string]int
-	prompts      map[string][]string
-	human        contract.HumanResult
-	humanRequest contract.HumanRequest
-	failEnd      bool
-	failSeal     bool
-	commitError  bool
-	committed    string
-	pending      []contract.Message
-	history      []contract.Message
+	t             *testing.T
+	c             *Controller
+	runtime       *lr.Runtime
+	server        *httptest.Server
+	harnessClient *http.Client
+	mu            sync.Mutex
+	messages      map[string]contract.Message
+	outputs       map[string]string
+	scripts       map[string][]string
+	calls         map[string]int
+	prompts       map[string][]string
+	human         contract.HumanResult
+	humanRequest  contract.HumanRequest
+	failEnd       bool
+	failSeal      bool
+	commitError   bool
+	committed     string
+	pending       []contract.Message
+	history       []contract.Message
 }
 
 func newFixture(t *testing.T, history ...contract.Message) *fixture {
@@ -80,7 +82,8 @@ func newFixture(t *testing.T, history ...contract.Message) *fixture {
 	for _, role := range []string{"manager", "executor", "auditor"} {
 		adapters[role] = scriptAdapter{f, role}
 	}
-	r, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client(), Harnesses: adapters})
+	f.harnessClient = testutil.WithHarnesses(t, f.server.Client(), adapters, f.publishHarness)
+	r, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.harnessClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,52 +368,34 @@ func TestThreeRoleLoop(t *testing.T) {
 	}
 }
 
-// @case A sealed report survives a lost CRD status write and a fresh runtime;
-// downstream progress waits when the server cannot acknowledge durable sealing.
-func TestReportCheckpointAndPersistFailure(t *testing.T) {
+// A persisted result survives a lost child status write and a fresh toolkit.
+func TestReportCheckpointSurvivesOperatorRestart(t *testing.T) {
 	f := newFixture(t)
 	f.scripts["manager"] = []string{`{"next":"cli","summary":"start","plan":"create artifact"}`}
 	f.scripts["executor"] = []string{"Finished before crash"}
 	f.until(func() bool { return f.run().Status.Phase == "Executing" })
 	run := f.run()
-	e := lh.Execution{}
-	if err := f.c.Reader.Get(context.Background(), request(run.Status.Execution.Name).NamespacedName, &e); err != nil {
-		t.Fatal(err)
-	}
-	f.mu.Lock()
-	f.failSeal = true
-	f.mu.Unlock()
-	// Harness may have finished, but a failed DB acknowledgement cannot advance the child.
-	failed := false
-	for i := 0; i < 100; i++ {
-		_, err := f.c.Executor(context.Background(), request(e.Name))
-		if err != nil {
-			failed = true
+	var e lh.Execution
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := f.c.Executor(context.Background(), request(run.Status.Execution.Name)); err != nil {
+			t.Fatal(err)
+		}
+		_ = f.c.Reader.Get(context.Background(), request(run.Status.Execution.Name).NamespacedName, &e)
+		if e.Status.MessageID != "" {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("result not persisted")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if !failed {
-		t.Fatal("expected report persistence failure")
-	}
-	_ = f.c.Reader.Get(context.Background(), client.ObjectKeyFromObject(&e), &e)
-	if e.Status.MessageID != "" {
-		t.Fatal("unpersisted report consumed")
-	}
-	f.mu.Lock()
-	f.failSeal = false
-	f.mu.Unlock()
-	if _, err := f.c.Executor(context.Background(), request(e.Name)); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.c.Reader.Get(context.Background(), client.ObjectKeyFromObject(&e), &e)
 	saved := e.Status.MessageID
-	// Simulate a lost status write after the report was persisted, then lose runtime Calls.
 	e.Status = lh.WorkStatus{}
 	if err := f.c.Client.Status().Update(context.Background(), &e); err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client()})
+	fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.harnessClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,8 +405,13 @@ func TestReportCheckpointAndPersistFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = f.c.Reader.Get(context.Background(), client.ObjectKeyFromObject(&e), &e)
-	if saved == "" || e.Status.MessageID != saved || e.Status.Phase != "Completed" {
-		t.Fatalf("status=%+v", e.Status)
+	if e.Status.MessageID != saved || e.Status.Phase != "Completed" {
+		t.Fatalf("restored status=%+v", e.Status)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.calls["executor"] != 1 {
+		t.Fatalf("duplicate executor: %v", f.calls)
 	}
 }
 func TestHumanFallbackAndBudget(t *testing.T) {
@@ -618,7 +608,7 @@ func TestContinuousInputCheckpointAndMessageEndIndependence(t *testing.T) {
 		t.Fatal("new work started before checkpoint commit retry")
 	}
 	// Retry with a fresh process and no adapters: the checkpoint must commit first.
-	fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client()})
+	fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.harnessClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -683,44 +673,6 @@ func TestRunDeadlineAndRetention(t *testing.T) {
 }
 
 // +case=`End failure leaves a durable report; restart retries End without rerunning the Harness.`
-func TestReportEndRecovery(t *testing.T) {
-	f := newFixture(t)
-	f.scripts["executor"] = []string{"Persisted report"}
-	f.failEnd = true
-	run := f.run()
-	var id string
-	var err error
-	for i := 0; i < 100; i++ {
-		_, id, _, _, err = f.c.invoke(context.Background(), run, 1, ActorExecutor, "executor", "execute", time.Minute)
-		if err != nil {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
-	if err == nil || id == "" {
-		t.Fatal("expected report End failure")
-	}
-	if _, err := f.c.readReport(context.Background(), "workspace", id); err == nil {
-		t.Fatal("open report consumed")
-	}
-	f.mu.Lock()
-	f.failEnd = false
-	f.mu.Unlock()
-	fresh, err := lr.New(f.server.URL, lr.Options{HTTPClient: f.server.Client()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fresh.Close()
-	f.c.Loop = fresh.Loop
-	result, restored, _, done, err := f.c.invoke(context.Background(), run, 1, ActorExecutor, "executor", "execute", time.Minute)
-	if err != nil || !done || restored != id || result.Text != "Persisted report" {
-		t.Fatalf("result=%+v done=%v id=%s err=%v", result, done, restored, err)
-	}
-	if _, err := f.c.readReport(context.Background(), "workspace", id); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // +case=`Read selects the stable pre-input tail across pages without consuming later messages.`
 func TestHistoryPaginationBoundaries(t *testing.T) {
 	var history []contract.Message
@@ -756,4 +708,11 @@ func TestIngressWaitsForProjectedDetail(t *testing.T) {
 	if err := kube.List(ctx, &runs); err != nil || len(runs.Items) != 0 {
 		t.Fatalf("premature run: %+v %v", runs, err)
 	}
+}
+
+func (f *fixture) publishHarness(m contract.Message) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages[m.ID] = m
+	f.outputs["harness/"+m.ID] = m.ID
 }

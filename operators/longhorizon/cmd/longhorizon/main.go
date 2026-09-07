@@ -5,18 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
-	agent "github.com/compforge/agentgo"
-	"github.com/compforge/agentgo/llm"
-	"github.com/compforge/agentgo/tools"
 	lhapi "github.com/compforge/loopd/operators/longhorizon/api/v1alpha1"
 	lh "github.com/compforge/loopd/operators/longhorizon/internal/longhorizon"
-	"github.com/compforge/loopd/pkg/harness"
-	agentgoharness "github.com/compforge/loopd/pkg/harness/agentgo"
 	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
 	"github.com/go-logr/logr"
@@ -49,48 +42,7 @@ func run() error {
 			*dest = value
 		}
 	}
-	adapters := map[string]harness.Adapter{}
-	for _, role := range []string{"manager", "executor", "auditor"} {
-		options := []llm.ModelOption{llm.WithRequestTimeout(30 * time.Minute)}
-		if value := os.Getenv("LOOP_LH_API_KEY"); value != "" {
-			options = append(options, llm.WithAPIKey(value))
-		}
-		if value := os.Getenv("LOOP_LH_BASE_URL"); value != "" {
-			options = append(options, llm.WithBaseURL(value))
-		}
-		model, err := llm.NewModel(env("LOOP_LH_MODEL_PROVIDER", "openai"), env("LOOP_LH_MODEL", "gpt-5-mini"), options...)
-		if err != nil {
-			return err
-		}
-		adapter, err := agentgoharness.New(func(ctx context.Context, request harness.Request) (*agent.Agent, error) {
-			runID := strings.Split(request.IdempotencyKey, "/")[0]
-			if !filepath.IsLocal(runID) || filepath.Base(runID) != runID {
-				return nil, fmt.Errorf("invalid Run workspace identity")
-			}
-			dir := filepath.Join(env("LOOP_LH_WORKSPACE", "./workspaces"), runID)
-			dir, err := filepath.Abs(dir)
-			if err != nil {
-				return nil, err
-			}
-			if err := os.MkdirAll(dir, 0700); err != nil {
-				return nil, err
-			}
-			state := tools.NewFileReadState()
-			var toolset []agent.Tool
-			if role != "manager" {
-				toolset = []agent.Tool{tools.NewRead(dir, state), tools.NewLs(dir), tools.NewGlob(dir), tools.NewGrep(dir)}
-			}
-			if role == "executor" {
-				toolset = append(toolset, tools.NewBash(dir), tools.NewWrite(dir, state), tools.NewEdit(dir, state))
-			}
-			return agent.NewAgent(agent.WithModel(model), agent.WithTools(toolset...), agent.WithMaxTurns(32)), nil
-		})
-		if err != nil {
-			return err
-		}
-		adapters[role] = adapter
-	}
-	loop, err := loopruntime.New(env("LOOP_LH_SERVER_URL", "http://127.0.0.1:8080"), loopruntime.Options{Harnesses: adapters, Logger: logger})
+	loop, err := loopruntime.New(env("LOOP_LH_SERVER_URL", "http://127.0.0.1:8080"), loopruntime.Options{Logger: logger})
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	agentue "github.com/compforge/agentue/sdks/go/ui"
 	lh "github.com/compforge/loopd/operators/longhorizon/api/v1alpha1"
 	"github.com/compforge/loopd/pkg/contract"
 	convapi "github.com/compforge/loopd/pkg/k8s/v1alpha1"
@@ -279,6 +278,23 @@ func messageText(m contract.Message) string {
 	return strings.Join(texts, "\n")
 }
 func reportFrom(m contract.Message) (report, error) {
+	if m.Purpose == "harness" {
+		if !m.Ended() {
+			return report{}, errors.New("Harness output is incomplete")
+		}
+		result, err := contract.ExtractResult(m.Content)
+		if err != nil {
+			return report{}, err
+		}
+		if m.Status != contract.MessageStatusCompleted {
+			return report{Error: "Harness execution " + string(m.Status)}, nil
+		}
+		if result == nil {
+			return report{}, errors.New("Harness output has no result")
+		}
+		return report{Text: result.Text()}, nil
+	}
+
 	var model struct {
 		Blocks []struct {
 			Report  bool   `json:"longhorizon_report"`
@@ -311,8 +327,8 @@ func reportContent(value report, title, role string) json.RawMessage {
 	return content
 }
 
-// invoke records the full business result in one persisted message event before
-// its consumer updates a CRD. Execution recovery remains Adapter-owned.
+// invoke consumes the Server-owned result before its consumer updates a CRD.
+// Repeating the submission restores the same durable Call.
 func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind contract.ActorKind, target, prompt string, timeout time.Duration) (report, string, string, bool, error) {
 	ref := reference(run)
 	if active, err := c.live(ctx, run.Namespace, run.Spec.Conversation, &ref); err != nil || !active {
@@ -321,59 +337,18 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	author := actor(run, kind)
 	role := strings.TrimPrefix(string(kind), "operator/longhorizon/")
 	key := stepKey(run, round, role)
-	content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}, "blocks": []any{}})
-	m, err := c.Loop.Conv.Speak(ctx, run.Spec.WorkspaceID, contract.SpeakRequest{Stream: true, Key: key, Actor: author, Target: recipient(run), Content: content})
+	call, err := c.Loop.Harness.Prompt(ctx, loopruntime.Prompt{ConversationID: run.Spec.WorkspaceID, IdempotencyKey: key, EffectKey: fmt.Sprintf("round/%d/%s", round, role), Actor: &author, Recipient: recipient(run), Target: target, Text: prompt, Timeout: timeout, Meta: map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}})
 	if err != nil {
 		return report{}, "", "", false, err
 	}
-	if value, err := reportFrom(m.Value()); err == nil {
-		return value, m.ID(), "", true, m.End(ctx, reportStatus(value))
-	}
-	call, err := c.Loop.Harness.Prompt(ctx, loopruntime.Prompt{ConversationID: run.Spec.WorkspaceID, IdempotencyKey: key, EffectKey: fmt.Sprintf("round/%d/%s", round, role), Actor: &author, Target: target, Text: prompt, Timeout: timeout, Output: m})
+	value, err := call.Get(ctx)
 	if err != nil {
-		return report{}, "", "", false, err
+		return report{}, "", call.ID(), false, err
 	}
-	value := call.Value()
 	if !value.Phase.Terminal() {
-		return report{}, m.ID(), value.ID, false, nil
+		return report{}, value.MessageID, value.ID, false, nil
 	}
-	// The Harness has stopped writing. Seal the result in its existing answer
-	// block, preserving tool blocks and avoiding a second copy of the answer.
-	result := report{Text: value.Result, Error: value.Error}
-	block, err := reportBlock(m.Value(), result)
-	if err != nil {
-		return report{}, m.ID(), value.ID, false, err
-	}
-	err = m.Emit(ctx, agentue.Event{Op: agentue.OpSet, Block: block})
-	if err != nil {
-		return report{}, m.ID(), value.ID, false, err
-	}
-	if err := m.End(ctx, reportStatus(result)); err != nil {
-		return report{}, m.ID(), value.ID, false, err
-	}
-	return result, m.ID(), value.ID, true, nil
-}
-
-// reportBlock marks only the authoritative final result, never a partial token
-// stream. The marker and result are one event so a restart can retry End without
-// dispatching another Harness. Other blocks (including tools) stay untouched.
-func reportBlock(message contract.Message, result report) (map[string]any, error) {
-	var content struct {
-		Blocks []map[string]any `json:"blocks"`
-	}
-	if err := json.Unmarshal(message.Content, &content); err != nil {
-		return nil, fmt.Errorf("decode role output %s: %w", message.ID, err)
-	}
-	block := map[string]any{"id": "report", "type": "text"}
-	for _, candidate := range content.Blocks {
-		if candidate["type"] == "text" {
-			block = candidate
-		}
-	}
-	block["content"] = result.Text
-	block["error"] = result.Error
-	block["longhorizon_report"] = true
-	return block, nil
+	return report{Text: value.Result.Text(), Error: value.Error}, value.MessageID, value.ID, true, nil
 }
 
 func reportStatus(result report) contract.MessageStatus {

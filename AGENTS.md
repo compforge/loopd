@@ -3,7 +3,7 @@
 ## 项目定位与边界
 
 loopd 是 Actor 通过持久消息协作的平台，也是 “Loop is a CRD” 在编排层的实现。
-Actor 自行决定何时接收、回应和确认安全消费。DB 保存会话消息，
+Actor 自行决定何时接收、回应和确认安全消费。Server 是人、Operator、Harness 的协作平台，loop-runtime 是 Operator toolkit。DB 保存会话消息和可恢复的 Harness 调用记录，
 Conv CRD 保存消费进度并触发 Reconcile，Redis 服务页面流与重连。Operator 自行定义业务执行边界
 及领域 CRD，Harness 持有智能执行状态；loopd 不保存 Operator 领域表。稳定模型见 `docs/kernel.md`。
 
@@ -27,7 +27,7 @@ loopd/
 ├── pkg/harness/            # Harness Adapter 契约；agentgo 为进程内 demo，managedagent 接入远端 SDK API
 ├── pkg/k8s/v1alpha1/        # server 与 runtime 共享的 Conv CRD 契约
 ├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
-├── server/                 # Conversation、Message 与 HTTP 服务；细节见 server/AGENTS.md
+├── server/                 # 协作平台、Harness Runner 与 HTTP 服务；细节见 server/AGENTS.md
 └── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 ```
 
@@ -36,7 +36,7 @@ loopd/
 1. server 拥有跨参与者的可见聊天历史；Operator 拥有领域状态，Harness 拥有执行状态，AgentLedger
    承载完整轨迹。具体存储、交付和发现约束见各领域文档。
 2. Operator 通过 loop-runtime 公共契约接入，复用 controller-runtime 的资源控制循环；runtime 的
-   定位与协作能力统一见 `docs/runtime.md`，领域类型与 Harness provider 差异不进入 server。
+   定位与协作能力统一见 `docs/runtime.md`，领域类型不进入 server；Harness provider 差异封装在 Adapter，Server component 驱动公共契约。
 3. 修改 `pkg/k8s/` 或 `operators/longhorizon/api/` 下的 CRD 类型后运行 `make generate manifests`，提交 DeepCopy、基础 CRD
    YAML 与 Helm Chart 中同步的 CRD YAML。
 4. 根目录 `VERSION` 使用 SemVer；任何代码改动都必须在同一变更中递增版本。

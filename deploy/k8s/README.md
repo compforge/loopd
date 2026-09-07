@@ -9,22 +9,22 @@
 - Conversation CRD，以及 loop-server 和 Router 访问 Conversation 所需的 namespace RBAC。
 
 Quick Start 不依赖 StorageClass：未配置 MySQL 时，loop-server 使用临时 SQLite；内置 Redis 只保留
-内存数据。Pod 重建后聊天记录与运行中的事件都会丢失，因此该模式只用于体验。Chart v1 固定要求
-`server.replicaCount=1`。
+内存数据。Pod 重建后聊天记录与运行中的事件都会丢失，因此该模式只用于体验。
+SQLite 要求 `server.replicaCount=1`；共享 MySQL 与 Redis 时可配置多个 Server 副本。
 
-Router 通过 OpenAI-compatible API 访问模型。Chart 会把模型名称与 API URL 写入 ConfigMap，
-API key 则写入或引用 Secret，避免密钥出现在普通配置中。
+Router 委托 Server 的 Harness Runner 调用模型。Chart 将模型名称与 API URL 写入 ConfigMap，
+API key 引用已有 Secret，避免密钥出现在普通配置中。
 
 Quick Start 可以使用内置 Redis，并配置模型 URL 与密钥：
 
 ```bash
 helm upgrade --install loopd deploy/k8s/loopd \
   --namespace loopd --create-namespace \
-  --set-string router.model.baseURL="https://model.example.com/v1" \
-  --set-string router.model.apiKey="$MODEL_API_KEY"
+  --set-string server.harnesses.agentgo.base_url="https://model.example.com/v1" \
+  --set-string server.harnessAPISecret=loopd-model
 ```
 
-也可以通过 `router.model.existingSecret` 引用已有 Secret。生产环境通常关闭内置 Redis，并通过
+先创建 `loopd-model` Secret 的 `api-key` 字段；模型凭据只注入 Server。生产环境通常关闭内置 Redis，并通过
 `redis.address` 与 `redis.existingSecret` 接入独立运维的 Redis。
 
 需要持久化聊天记录时，配置外部 MySQL。Chart 不创建或管理 MySQL；生产环境应通过已有 Secret 提供
@@ -59,3 +59,12 @@ loop-server 支持 `MESSAGE_INLINE_BLOCKS`（默认 32）、`MESSAGE_INLINE_BYTE
 数据库 `message_parts`，读取时由 server 展开，页面与 Operator 接收完整正文。
 Part 大小为目标值，单个更大的 block 独占一个 Part。详见
 [持久化约定](../../server/docs/persistence.md#message-内容与-parts)。
+
+## Harness 配置
+
+`server.harnesses` 是 target → Adapter 配置映射，通过 ConfigMap 挂载为 HARNESS_CONFIG_FILE。
+Router 默认使用 agentgo；LongHorizon 使用 manager/executor/auditor。模型、凭据与文件工作目录
+属于 Server，Operator Pod 只保留编排配置。`server.workspace` 配置 demo 文件工具存储。
+
+AgentGo 仅用于单 Server demo，不具备跨进程执行恢复；多副本应配置可恢复的远端 Adapter。
+完整协议、Managed Agent 配置和回放边界见 [Harness](../../server/docs/harness.md)。

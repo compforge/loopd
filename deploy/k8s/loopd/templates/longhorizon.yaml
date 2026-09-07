@@ -84,21 +84,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: LOOP_LH_WORKSPACE
-              value: /workspace
-            - name: LOOP_LH_MODEL_PROVIDER
-              value: {{ .Values.longhorizon.model.provider | quote }}
-            - name: LOOP_LH_MODEL
-              value: {{ .Values.longhorizon.model.name | quote }}
-            - name: LOOP_LH_BASE_URL
-              value: {{ .Values.longhorizon.model.baseURL | quote }}
-            {{- if .Values.longhorizon.model.existingSecret }}
-            - name: LOOP_LH_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.longhorizon.model.existingSecret }}
-                  key: {{ .Values.longhorizon.model.existingSecretKey }}
-            {{- end }}
             - name: LOOP_LH_RUN_TIMEOUT
               value: {{ .Values.longhorizon.runTimeout | quote }}
             - name: LOOP_LH_RETENTION_TTL
@@ -124,19 +109,9 @@ spec:
           resources:
             {{- toYaml .Values.longhorizon.resources | nindent 12 }}
           volumeMounts:
-            - name: workspace
-              mountPath: /workspace
             - name: tmp
               mountPath: /tmp
       volumes:
-        - name: workspace
-          {{- if .Values.longhorizon.workspace.existingClaim }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.longhorizon.workspace.existingClaim }}
-          {{- else }}
-          emptyDir:
-            sizeLimit: {{ .Values.longhorizon.workspace.sizeLimit }}
-          {{- end }}
         - name: tmp
           emptyDir: {}
 {{- end }}

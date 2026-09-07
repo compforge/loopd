@@ -15,7 +15,6 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/model-config: {{ include (print $.Template.BasePath "/router-config.yaml") . | sha256sum }}
         {{- with .Values.router.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -42,32 +41,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: LOOP_ROUTER_MODEL_PROVIDER
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "loopd.routerConfigName" . }}
-                  key: provider
-            - name: LOOP_ROUTER_MODEL
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "loopd.routerConfigName" . }}
-                  key: model
-            - name: LOOP_ROUTER_BASE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "loopd.routerConfigName" . }}
-                  key: base-url
+            - name: LOOP_ROUTER_HARNESS_TARGET
+              value: {{ .Values.router.harnessTarget | quote }}
             - name: LOOP_ROUTER_MAX_SUBTASKS
               value: {{ .Values.router.maxSubtasks | quote }}
             - name: LOOP_ROUTER_CONCURRENCY
               value: {{ .Values.router.concurrency | quote }}
-            {{- if or .Values.router.model.apiKey .Values.router.model.existingSecret }}
-            - name: LOOP_ROUTER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "loopd.routerSecretName" . }}
-                  key: {{ .Values.router.model.existingSecretKey }}
-            {{- end }}
             {{- with .Values.router.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

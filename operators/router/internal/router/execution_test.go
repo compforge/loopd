@@ -10,6 +10,7 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/pkg/harness"
 	loopruntime "github.com/compforge/loopd/runtime"
+	"github.com/compforge/loopd/server/testutil"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -34,7 +35,7 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 			adapter.holdWork = release
 			server := newLoopServer(t, "task-1")
 			runtime, err := loopruntime.New(server.URL, loopruntime.Options{
-				HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+				HTTPClient: testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -120,7 +121,7 @@ func TestInputArrivingDuringSummaryDoesNotStarveCurrentAnswer(t *testing.T) {
 		ID: "new", Kind: contract.ActorKindUser, TaskID: "task-2", Content: semanticModel("A late constraint"),
 	}}}
 	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
-		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+		HTTPClient: testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +157,7 @@ func TestRouterConsumesMessageWithoutUIDelivery(t *testing.T) {
 	server := newLoopServer(t, "")
 	adapter := newScriptedAdapter(`{"kind":"simple","tasks":["Work"]}`, map[string]string{"work/0": "Evidence", "summarize": "Result"}, 1)
 	runtime, err := loopruntime.New(server.URL, loopruntime.Options{
-		HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"temporary": adapter},
+		HTTPClient: testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil),
 	})
 	if err != nil {
 		t.Fatal(err)

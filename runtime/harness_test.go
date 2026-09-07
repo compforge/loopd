@@ -4,217 +4,97 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"github.com/compforge/loopd/pkg/contract"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/pkg/harness"
+	"github.com/compforge/loopd/server/testutil"
 )
 
-func TestHarnessPromptPublishesEventsAndReusesEffect(t *testing.T) {
-	var (
-		publishedMu sync.Mutex
-		published   []agentueui.Event
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+type fakeHarnessAdapter struct{ release <-chan struct{} }
 
-		if request.URL.Path == "/v1/conversations/root/speak" {
-			_ = json.NewEncoder(response).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "operator-output", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
-			return
-		}
-		if request.URL.Path == "/v1/conversations/workspace/speak" {
-			var input contract.SpeakRequest
-			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
-				t.Error(err)
-			}
-			if input.Key != "input/route" || input.Actor.Kind != contract.ActorKindHarness || !input.Stream {
-				t.Errorf("output=%+v", input)
-			}
-			_ = json.NewEncoder(response).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "output-1", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
-			return
-		}
-		if request.Method != http.MethodPost || !strings.HasSuffix(request.URL.Path, "/events") {
-			http.NotFound(response, request)
-			return
-		}
-		var input struct {
-			Event json.RawMessage `json:"event"`
-		}
-		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
-			t.Error(err)
-			return
-		}
-		event, err := agentueui.Parse(input.Event)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		publishedMu.Lock()
-		published = append(published, event)
-		publishedMu.Unlock()
-		response.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(response, `{"id":%q}`, fmt.Sprintf("%d-0", event.Seq))
-	}))
-	t.Cleanup(server.Close)
-
-	adapter := &fakeHarnessAdapter{}
-	runtime, err := New(server.URL, Options{
-		HTTPClient: server.Client(),
-		Harnesses:  map[string]harness.Adapter{"demo": adapter},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = runtime.Close() })
-	stream, err := runtime.Loop.Conv.Speak(context.Background(), "root", contract.SpeakRequest{Stream: true, Key: "status"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = stream.Emit(context.Background(), agentueui.Event{
-		Op: agentueui.OpSet,
-		Block: map[string]any{
-			"id": "operator/status", "type": "text", "content": "routing",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "input/route", EffectKey: "route", Target: "demo", Text: "hello"}
-	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := call.Wait(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Result != "done" || result.Phase != "succeeded" {
-		t.Fatalf("Call = %#v", result)
-	}
-
-	callEvents, streamErrors := call.Stream(context.Background())
-	var observed []agentueui.Op
-	for event := range callEvents {
-		observed = append(observed, event.Op)
-	}
-	if err := <-streamErrors; err != nil {
-		t.Fatal(err)
-	}
-	if got, want := fmt.Sprint(observed), "[append append set]"; got != want {
-		t.Fatalf("observed operations = %s, want %s", got, want)
-	}
-	publishedMu.Lock()
-	if len(published) != 5 || published[0].Seq != 2 || published[1].Seq != 2 || published[2].Seq != 3 || published[3].Seq != 4 {
-		t.Fatalf("published events = %#v", published)
-	}
-	publishedMu.Unlock()
-	for _, event := range published[1:4] {
-		if event.Timestamp == nil || *event.Timestamp <= 0 {
-			t.Fatalf("Harness output omitted AgentUE activity timestamp: %#v", event)
-		}
-	}
-
-	again, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again != call || adapter.starts != 1 {
-		t.Fatalf("reused Call = %t, Adapter starts = %d", again == call, adapter.starts)
-	}
-	for _, end := range []int{3, 4} {
-		snapshot, err := agentueui.ApplyAll(map[string]any{"blocks": []any{}}, published[1:end])
-		if err != nil {
-			t.Fatal(err)
-		}
-		block := snapshot["blocks"].([]any)[0].(map[string]any)
-		if block["call_id"] != result.ID || block["effect_key"] != "route" || block["content"] != "hello" {
-			t.Fatalf("streaming/final Harness block = %#v", block)
-		}
-	}
-	changed := prompt
-	changed.Text = "different"
-	if _, err := runtime.Loop.Harness.Prompt(context.Background(), changed); !errors.Is(err, ErrCallConflict) {
-		t.Fatalf("changed prompt error = %v, want ErrCallConflict", err)
-	}
-}
-
-type fakeHarnessAdapter struct {
-	starts int
-}
-
-func (adapter *fakeHarnessAdapter) Prompt(_ context.Context, request harness.Request) (harness.Call, error) {
-	adapter.starts++
-	events := make(chan harness.Event, 3)
-	for _, event := range []agentueui.Event{
-		{Op: agentueui.OpAppend, Mask: "block.content", Block: map[string]any{"id": "answer", "type": "text", "content": "hel"}},
-		{Op: agentueui.OpAppend, Mask: "block.content", Block: map[string]any{"id": "answer", "content": "lo"}},
-		{Op: agentueui.OpSet, Block: map[string]any{"id": "answer", "type": "text", "content": "hello"}},
-	} {
-		data, err := event.Marshal()
-		if err != nil {
-			return nil, err
-		}
-		events <- harness.Event{Data: data}
-	}
+func (a *fakeHarnessAdapter) Prompt(ctx context.Context, r harness.Request) (harness.Call, error) {
+	events := make(chan harness.Event)
 	close(events)
-	return fakeHarnessCall{id: request.CallID, events: events}, nil
+	return fakeHarnessCall{id: r.CallID, release: a.release, events: events}, nil
 }
 
 type fakeHarnessCall struct {
-	id     string
-	events <-chan harness.Event
+	id      string
+	release <-chan struct{}
+	events  chan harness.Event
 }
 
-func (call fakeHarnessCall) ID() string                   { return call.id }
-func (call fakeHarnessCall) Events() <-chan harness.Event { return call.events }
-func (call fakeHarnessCall) Wait(context.Context) (harness.Result, error) {
-	return harness.Result{Text: "done"}, nil
-}
-
-// +case=`Custom output identity and execution timeout are part of Call idempotency, independent of UI delivery.`
-func TestCustomPromptIdentityAndTimeout(t *testing.T) {
-	var author contract.ActorRef
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/speak") {
-			var in contract.SpeakRequest
-			_ = json.NewDecoder(r.Body).Decode(&in)
-			author = in.Actor
-			_ = json.NewEncoder(w).Encode(contract.Message{Status: contract.MessageStatusStreaming, ID: "output", Revision: 1, Content: in.Content})
-			return
+func (c fakeHarnessCall) ID() string                   { return c.id }
+func (c fakeHarnessCall) Events() <-chan harness.Event { return c.events }
+func (c fakeHarnessCall) Wait(ctx context.Context) (harness.Result, error) {
+	if c.release != nil {
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return harness.Result{}, ctx.Err()
 		}
-		_, _ = w.Write([]byte(`{"id":"event"}`))
-	}))
-	defer server.Close()
-	adapter := &fakeHarnessAdapter{}
-	runtime, err := New(server.URL, Options{HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"demo": adapter}})
+	}
+	return harness.Result{JSON: json.RawMessage(`{"answer":42}`)}, nil
+}
+func TestHarnessRemoteIdentityAndRestoredResult(t *testing.T) {
+	base := httptest.NewServer(http.NotFoundHandler())
+	defer base.Close()
+	release := make(chan struct{})
+	adapter := &fakeHarnessAdapter{release: release}
+	client := testutil.WithHarnesses(t, base.Client(), map[string]harness.Adapter{"demo": adapter}, nil)
+	rt, _ := New(base.URL, Options{HTTPClient: client})
+	defer rt.Close()
+	prompt := Prompt{ConversationID: "conv", IdempotencyKey: "key", EffectKey: "plan", Target: "demo", Text: "hello", Timeout: time.Minute}
+	call, err := rt.Loop.Harness.Prompt(context.Background(), prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer runtime.Close()
-	role := contract.ActorRef{Kind: "operator/longhorizon/executor", Key: "run-uid"}
-	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "run/round/1/executor", EffectKey: "execute", Target: "demo", Text: "work", Actor: &role, Timeout: time.Minute}
-	call, err := runtime.Loop.Harness.Prompt(context.Background(), prompt)
+	same, err := rt.Loop.Harness.Prompt(context.Background(), prompt)
+	if err != nil || same.ID() != call.ID() {
+		t.Fatalf("identity: %v %v", same, err)
+	}
+	changed := prompt
+	changed.Text = "different"
+	if _, err := rt.Loop.Harness.Prompt(context.Background(), changed); !errors.Is(err, ErrCallConflict) {
+		t.Fatalf("conflict=%v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := call.Wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait=%v", err)
+	}
+	_ = rt.Close()
+	close(release)
+	restored, _ := New(base.URL, Options{HTTPClient: client})
+	defer restored.Close()
+	wait, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	result, err := restored.Loop.Harness.Call(call.ID()).Result(wait)
+	if err != nil || result.Format != "json" || result.Text() != `{"answer":42}` {
+		t.Fatalf("restored result=%+v err=%v", result, err)
+	}
+}
+func TestHarnessExplicitCancellation(t *testing.T) {
+	base := httptest.NewServer(http.NotFoundHandler())
+	defer base.Close()
+	client := testutil.WithHarnesses(t, base.Client(), map[string]harness.Adapter{"demo": &fakeHarnessAdapter{release: make(chan struct{})}}, nil)
+	rt, _ := New(base.URL, Options{HTTPClient: client})
+	defer rt.Close()
+	call, err := rt.Loop.Harness.Prompt(context.Background(), Prompt{ConversationID: "conv", IdempotencyKey: "cancel", EffectKey: "plan", Target: "demo", Text: "hello", Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call.Wait(context.Background()); err != nil {
+	if err := call.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if author != role {
-		t.Fatalf("author=%+v", author)
-	}
-	for _, change := range []func(*Prompt){func(p *Prompt) { p.Timeout = time.Second }, func(p *Prompt) { p.ConversationID = "other" }, func(p *Prompt) { p.Actor = &contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"} }} {
-		changed := prompt
-		change(&changed)
-		if _, err := runtime.Loop.Harness.Prompt(context.Background(), changed); !errors.Is(err, ErrCallConflict) {
-			t.Fatalf("changed identity accepted: %v", err)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	value, err := call.Wait(ctx)
+	if err == nil || value.Phase != contract.CallCancelled {
+		t.Fatalf("cancel=%+v %v", value, err)
 	}
 }

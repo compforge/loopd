@@ -17,10 +17,11 @@ import (
 )
 
 type Config struct {
-	APIKey        string
-	BaseURL       string // Empty uses the SDK's official endpoint.
-	AgentID       string
-	EnvironmentID string
+	IdempotentSubmission bool // Backend guarantees durable Idempotency-Key on Session creation.
+	APIKey               string
+	BaseURL              string // Empty uses the SDK's official endpoint.
+	AgentID              string
+	EnvironmentID        string
 	// ConfigureSession optionally selects versions, toolsets or other SDK session
 	// options per call. It must resolve Request.Tools when that list is non-empty;
 	// tool descriptors alone do not provide remote tool implementations.
@@ -86,7 +87,7 @@ func New(config Config) (*Adapter, error) {
 // Request.Timeout bounds submission and observation; cancelling Wait only stops
 // that waiter. Runtime consumes Events concurrently with Wait.
 //
-// +spec=`Remote execution belongs to the Managed Agents backend; this adapter does not resume calls across process restarts.`
+// +spec=`Remote execution belongs to the backend; recovery reattaches a stored Session or repeats an explicitly idempotent submission.`
 // +why=`Idempotency-Key support is backend-specific, not a guarantee of the SDK protocol.`
 func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (harness.Call, error) {
 	if request.CallID == "" || request.IdempotencyKey == "" || request.Prompt == "" {
@@ -122,10 +123,24 @@ func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (ha
 			}},
 		},
 	}}
-	session, err := adapter.client.Beta.Sessions.New(ctx, params)
+	var session anthropic.BetaManagedAgentsSession
+	var err error
+	if request.ExecutionRef != "" {
+		session.ID = request.ExecutionRef
+	} else {
+		opts := []option.RequestOption{}
+		if adapter.config.IdempotentSubmission {
+			opts = append(opts, option.WithHeader("Idempotency-Key", request.IdempotencyKey))
+		}
+		created, e := adapter.client.Beta.Sessions.New(ctx, params, opts...)
+		err = e
+		if created != nil {
+			session = *created
+		}
+	}
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("create managedagent session: %w", err)
+		return nil, &harness.ObservationError{Err: fmt.Errorf("create managedagent session: %w", err)}
 	}
 	call := &call{id: request.CallID, sessionID: session.ID, events: make(chan harness.Event, 128), done: make(chan struct{})}
 	adapter.config.Logger.InfoContext(ctx, "managedagent call submitted", "call_id", call.id, "session_id", session.ID)
@@ -167,3 +182,14 @@ func (call *call) Wait(ctx context.Context) (harness.Result, error) {
 }
 
 var _ harness.Adapter = (*Adapter)(nil)
+
+func (c *call) ExecutionRef() string { return c.sessionID }
+func (a *Adapter) Resume(ctx context.Context, r harness.Request) (harness.Call, error) {
+	if a.config.PreviewDeltas {
+		return nil, fmt.Errorf("%w: preview deltas cannot be stably replayed", harness.ErrRecoveryUnsupported)
+	}
+	if r.ExecutionRef == "" && !a.config.IdempotentSubmission {
+		return nil, harness.ErrRecoveryUnsupported
+	}
+	return a.Prompt(ctx, r)
+}

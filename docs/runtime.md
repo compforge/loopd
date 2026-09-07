@@ -16,7 +16,7 @@ Operator 持久化的领域 CRD；Harness 恢复由 Adapter 及执行端保证�
 Human 与 Operator 在持久会话中独立发言，不要求轮流说话或每条输入对应一条答案。
 Operator 可以持续工作，在自己选定的执行边界接收追加消息，并多次回应。
 
-Operator 入口组装 controller-runtime Manager 与 runtime，注入 Adapter，注册在线身份，
+Operator 入口组装 controller-runtime Manager 与 runtime，注册在线身份，
 用原生 Builder 监听 Conv CRD，再在 Reconcile 中调用 Verb。runtime 不启动第二套 Manager：
 
 ```go
@@ -30,8 +30,7 @@ Watch 是 Controller 配置，不是 Verb。ConversationPredicate 过滤其他 A
 拉取位置变化；消费契约见 [Conversation](../server/docs/conversation.md)。
 
 Operator 不导入 server 私有 model/repo，不直接写聊天数据库或 Redis。业务自有 API 与领域
-CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Operator 进程，
-server 不执行 Adapter。
+CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Server，由 component 内的 HarnessRunner 驱动。
 
 ActorKind 的内置常量为 ActorKindUser、ActorKindOperator、ActorKindHarness。Operator 可声明
 `operator/<operator-key>/<role>` 自定义 kind（最长 128 字节），如 LongHorizon Manager 以 Run UID
@@ -76,7 +75,7 @@ func Reconcile(conv) {
     question := Loop.Human.Ask(convID, "希望怎样处理？")     // 反问用户；handle.Get / Wait 获取选择
     approval := Loop.Human.Confirm(convID, "确认执行吗？")   // 请求确认；普通追加发言不等于同意
     call := Loop.Harness.Prompt(workspace, prompt, tools)   // 按选择与确认结果调用 Harness，立即取得句柄
-    progress := call.Value(); events := call.Stream()      // 查看执行状态或持续观察增量
+    progress, err := call.Get(ctx); events, errors := call.Stream(ctx)      // 查看执行状态或持续观察增量
     result := call.Wait()                                  // 需要结果时再等；也可以先返回，之后再调谐
     Loop.Conv.Speak(convID, result)                        // 已知完整内容，一次说完，无需 End
     stream := Loop.Conv.Speak(convID, Stream: true)         // 需要逐步输出时，取得消息句柄
@@ -86,9 +85,9 @@ func Reconcile(conv) {
 ```
 
 Ask/Confirm 得到有效结果后才进入依赖它们的步骤；取消、超时和拒绝由 Operator 决定如何收口。
-Harness 的可见输出由 runtime 自动交付，`call.Stream` 用于 Operator 自己观察，不必再转发一遍；
+Harness 的可见输出由 Server 自动持久化与交付，`call.Stream` 用于 Operator 自己观察，不必再转发一遍；
 `stream.Emit` 展示的是 Operator 自己逐步发言的能力，不是再转发一次 Harness 输出。追加消息何时再次 Poll，也由业务决定。
-若业务已用 Speak 创建角色消息，可用 `Prompt.Output` 绑定该句柄，避免 Harness 再创建一条消息。
+角色调用通过 Prompt.Actor 与 Meta 指定输出身份和展示信息，由 Server 创建独立 Message。
 
 `Loop.Operator.Register(...)` 与可选的 `Loop.Harness.Register(...)` 在启动时登记在线身份并续租，
 不在每次 Reconcile 里调用。Watch 属于 controller-runtime 的启动配置，不是 Verb。
@@ -141,62 +140,35 @@ Poll / Commit 参考 Kafka 的消费语义。Poll 不传 After 时从 Committed 
 何时接受补充、重做计划还是继续执行，属于 Operator 业务。runtime 不把普通消息自动映射成
 Harness steer/followup，也不规定一条消息就是一个新任务。Read 不改变消费位置。
 
-## Harness 执行与恢复
+## Harness：提交与观察
 
-Harness.Prompt 返回 Call handle。Operator 提供 prompt、tools、目标、输出 ConversationID 和
-稳定 IdempotencyKey；EffectKey 是业务步骤名。动作身份不能在每次 Reconcile 中随机变化。
-
-同一 runtime 内同身份同参数复用 Call，变化冲突。跨进程恢复依赖所选 Adapter 与后端的明确契约，
-不能从统一 Prompt 接口推导出幂等执行保证。远端 Harness 拥有执行与恢复，agentd 是可选实现之一；
-内置 agentgo 只是进程内 demo。
-
-Prompt.Actor 可指定合法非 user 作者，默认仍为 Harness/Call ID；Prompt.Timeout 交给 Adapter
-落实期限。Actor、Timeout 和 ConversationID 等参数参与同一 runtime 的幂等冲突检查。
-
-`Prompt.Output` 可绑定同一 Conversation 内已有的 streaming Message，输出作者沿用消息身份；
-若同时传 Actor，两者必须一致。绑定的 Message ID 参与 Call 幂等检查，其动态内容与 Revision 不参与。
-不传 Output 时，runtime 自动创建并结束 Harness 消息，原有调用方式不变。
-
-传入 Output 时，Call 运行期间只有 Harness 写入该句柄；Call 进入终态后写入权交回调用者，
-由调用者发布业务最终结果并 End（包括失败收尾）。终态表示执行和流事件转发已停止，不表示
-绑定消息已经完成。调用者必须检查 Call 错误，不能把部分输出当作成功结果，也不能在 Call
-运行期间抢先 End。此能力只组合消息发布，不改变 Adapter 的执行恢复责任。
-
-Call.Value 读取状态，Stream(ctx) 观察本地 AgentUE 增量（不需要页面游标），Wait 等待终态。耗时长不代表没有进展。Wait 的 context
-取消只结束等待；runtime 关闭会结束进程内执行，外部持久执行仍由 Harness 拥有。
-
-Wait 会占用 Reconcile 并发位。不等待时应安排 RequeueAfter 或自己的资源 Watch；Conv Watch
-不自动把 Harness 完成事件映射成调谐。Call 的本地事件缓冲不等于持久订阅。
-
-### Managed Agent Adapter
-
-`pkg/harness/managedagent` 使用官方 `anthropic-sdk-go` 的 Managed Agents API。
-API key、远端 Agent 与 Environment 由部署方提供；BaseURL 留空连接官方服务，也可指向 agentd
-等兼容后端。远端资源管理不进入 loopd 的公共协作模型。
-
-在 Operator 启动时组装并注入 Adapter，业务 Reconcile 继续使用 `Loop.Harness.Prompt`：
+Harness 执行由 Server 内部 HarnessRunner 驱动。loop-runtime 是 Operator toolkit，提交调用并
+返回可重建的远程句柄；不注入 Adapter、不持有完整事件数组，也不接管 Agent 内部执行状态。
 
 ```go
-adapter, err := managedagent.New(managedagent.Config{
-    APIKey: apiKey, AgentID: agentID, EnvironmentID: environmentID,
-    BaseURL: baseURL, // 可选的兼容 API 地址
+call, err := loop.Harness.Prompt(ctx, loopruntime.Prompt{
+    ConversationID: workspaceID,
+    IdempotencyKey: businessKey,
+    EffectKey: "plan",
+    Target: "managed",
+    Text: prompt,
+    Timeout: 30 * time.Minute,
 })
 if err != nil { return err }
-rt, err := loopruntime.New(serverURL, loopruntime.Options{
-    Harnesses: map[string]harness.Adapter{"managed": adapter},
-})
+result, err := call.Result(ctx) // result.Format + result.Content；Text() 提供文本视图
 ```
 
-每次 Adapter.Prompt 创建独立 Session，并以 initial user.message 提交 prompt，随后返回 Call。
-历史补读与实时事件共同转换为 AgentUE 输出；`PreviewDeltas` 可请求 token 预览，默认只读取
-持久事件。`end_turn` 表示本次成功结束；需要外部工具结果、确认或其他停止原因不冒充成功。
-Session 沿用远端 Agent 的工具配置；按请求选择工具时用 `ConfigureSession` 将通用工具描述解析为
-SDK Session 参数。未配置解析器的非空 tools 会明确报错，不会静默忽略；客户端 custom tool 执行
-与续接不在此 Adapter 的当前能力内。
+Call.Get(ctx) 读取状态，Wait(ctx) 等待终态，Stream(ctx) 通过 Server 的 Redis/SSE 观察 AgentUE。
+`loop.Harness.Call(runID)` 重建句柄，不重新提交。取消等待、关闭 toolkit 均不取消执行；显式
+Cancel(ctx) 请求停止 Server 驱动，远端是否中断由 Adapter 能力决定。
 
-本实现不做跨进程重新绑定、断流重连或提交重试，不假定兼容后端支持 `Idempotency-Key`。
-断流返回观察错误，不据此认定远端已经停止；超时或父 context 取消只停止本地观察，不发送
-interrupt 或删除远端 Session。可靠性扩展由 Adapter 与执行后端共同提供，不新增 loopd 执行表或 CRD。
+Server 在接收事务中创建输出 Message，调用者可以指定开放的 Actor kind/key、Recipient 和展示
+Meta。一个 Call 对应一条独立输出，不再接受调用者的 Output writer；Server 原子保存 result block
+和执行终态。Operator 读取 text/JSON 作决策，不接手 Emit/End；自己的总结等发言仍使用 Speak。
+
+调用 API、幂等、接管、租约、结果格式及 Adapter 配置统一见
+[Harness 调用与后台驱动](../server/docs/harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
+Get + RequeueAfter，完成不会自动映射成业务 CRD Watch。
 
 ## Human：Ask 与 Confirm
 
@@ -237,7 +209,7 @@ Operator 只调用 Speak、Emit、End，不接触 Delivery、task_id、Redis Eve
 Redis 暂时不可用不要求 Operator 重做业务；页面通过持久快照追上，详见 [UE](../server/docs/ue.md)。
 
 stream.Emit 接收 AgentUE set/append，忽略调用方的 Seq，由句柄串行分配序号并有界重试瞬时失败。
-同 Key 的 Speak 复用消息和本地句柄；重启后依据持久 Revision 恢复写入位置，不恢复 Go 调用栈。
+同 Key 的 Speak 复用消息并从 DB 重建句柄；重启后依据持久 Revision 恢复写入位置，不恢复 Go 调用栈。
 一条消息须由一个逻辑写入者拥有，多副本执行互斥仍由 Operator 配置。
 
 重试耗尽仍返回错误，未确认的更新不能被下一条内容越过；调用方可重试同一更新，或结束本轮执行

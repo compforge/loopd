@@ -69,6 +69,9 @@ service 负责批量读取关联并组装富化结果，api 负责 HTTP 交付�
 按消息 ID/revision 合并；断线恢复或只加载答复所在页时仍能独立还原选项和选中态。主会话与
 右侧详情共用卡片组件，页面只处理渲染和本地提交状态，正式结果由 server 决定。
 
+DB 合并快照与 Redis append-only 事件流的存储区别、写入顺序和恢复边界，统一见
+[持久化约定](persistence.md#agentue-快照与实时事件流)。
+
 ## 页面交付
 
 task_id 是输入提交的交付标识，不是 Operator 的业务任务；server 不建立 tasks 表。
@@ -147,7 +150,8 @@ Operator 只表达自己何时说完一条消息。End 不删除 Conv、不自�
 
 `MESSAGE_TTL` 统一配置输出失活期限与 Redis 事件保留期限，默认 24h。
 Message GC 随 server 启停，即使没有页面连接也独立执行有界清理。
-它按 DB 的 `updated_at + TTL` 定期将 streaming 消息标记为 expired，并递增 revision；
+它按 DB 的 `updated_at + TTL` 定期将普通 streaming 消息标记为 expired，并递增 revision；
+Harness Run 的输出由 Run deadline 和租约驱动者收口，不参加普通 Message GC，避免仍活跃的执行失去结果写入入口。
 无需 expires_at 列。保留最后正文与最后活动时间，页面展示“已过期”，迟到写入不能恢复该消息。
 
 Redis 按自己的写入时间续期，DB 按 server 实际接受输出的时间续期；读取、心跳和重复事件
