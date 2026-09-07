@@ -17,11 +17,7 @@ func (s *Server) publishMessage(ctx context.Context, r *hertzapp.RequestContext)
 	if err != nil {
 		return err
 	}
-	views, err := s.messages.EnrichMessages(ctx, []contract.Message{message})
-	if err != nil {
-		return err
-	}
-	r.JSON(200, views[0])
+	r.JSON(200, message)
 	return nil
 }
 func (s *Server) emitPublishedMessage(ctx context.Context, r *hertzapp.RequestContext) error {

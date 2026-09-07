@@ -17,7 +17,6 @@ type MessageRepository interface {
 	ExpireMessages(context.Context, time.Time, int) ([]string, error)
 	GetMessageStates(context.Context, string, []string) ([]MessageState, error)
 	GetMessages(context.Context, string, []string) ([]model.Message, error)
-	ListHumanReplies(context.Context, string, []string) ([]model.Message, error)
 	Speak(context.Context, string, contract.SpeakRequest) (model.Message, error)
 	CreateMessage(context.Context, model.Message) (model.Message, error)
 	GetMessage(context.Context, string) (model.Message, error)
@@ -162,18 +161,6 @@ func (store *Store) GetMessages(ctx context.Context, conversationID string, ids 
 	defer cancel()
 	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
 		return tx.Where("conversation_id = ? AND id IN ?", conversationID, ids)
-	})
-}
-
-// ListHumanReplies finds typed answers without expanding a reply chain.
-func (store *Store) ListHumanReplies(ctx context.Context, conversationID string, questionIDs []string) ([]model.Message, error) {
-	if len(questionIDs) == 0 {
-		return nil, nil
-	}
-	ctx, cancel := store.withTimeout(ctx)
-	defer cancel()
-	return store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
-		return tx.Where("conversation_id = ? AND reply_to_id IN ? AND purpose = ?", conversationID, questionIDs, "human_reply").Order("id ASC")
 	})
 }
 

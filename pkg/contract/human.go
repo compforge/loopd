@@ -110,17 +110,28 @@ func (r HumanRequest) ValidateReply(reply HumanReply) error {
 
 // HumanBlock is a loopd block extension; it introduces no AgentUE operations.
 type HumanBlock struct {
-	ID           string        `json:"id"`
-	Type         string        `json:"type"`
-	Title        string        `json:"title"`
-	Prompt       string        `json:"prompt"`
-	Choices      []HumanChoice `json:"choices,omitempty"`
-	AllowOther   bool          `json:"allow_other,omitempty"`
-	ConfirmLabel string        `json:"confirm_label,omitempty"`
-	DeclineLabel string        `json:"decline_label,omitempty"`
-	Status       HumanStatus   `json:"status"`
-	Deadline     time.Time     `json:"deadline"`
-	Reason       string        `json:"reason,omitempty"`
+	ID            string        `json:"id"`
+	Type          string        `json:"type"`
+	Title         string        `json:"title"`
+	Prompt        string        `json:"prompt"`
+	Choices       []HumanChoice `json:"choices,omitempty"`
+	AllowOther    bool          `json:"allow_other,omitempty"`
+	ConfirmLabel  string        `json:"confirm_label,omitempty"`
+	DeclineLabel  string        `json:"decline_label,omitempty"`
+	Status        HumanStatus   `json:"status"`
+	Deadline      time.Time     `json:"deadline"`
+	Reason        string        `json:"reason,omitempty"`
+	SelectedValue *string       `json:"selected_value,omitempty"`
+}
+
+// HumanReplyBlock retains the accepted question snapshot so a reply can be
+// rendered without loading its parent message. ReplyToID remains the relation.
+type HumanReplyBlock struct {
+	ID       string      `json:"id"`
+	Type     string      `json:"type"`
+	Outcome  HumanStatus `json:"outcome"`
+	Value    string      `json:"value,omitempty"`
+	Question HumanBlock  `json:"question"`
 }
 
 type HumanResult struct {

@@ -2,8 +2,10 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +34,85 @@ func humanStore(t *testing.T) *Store {
 }
 func question(key string) contract.HumanRequest {
 	return contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "operator"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []contract.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
+}
+
+// +case=`Ask/Confirm 的问题和答复独立持久化展示数据；重试不改变快照或创建新答复。`
+func TestHumanMessageSnapshots(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, value string
+		outcome           contract.HumanStatus
+	}{
+		{"choice", "ask", "small", contract.HumanSuccess},
+		{"free-text", "ask", "custom answer", contract.HumanSuccess},
+		{"confirm", "confirm", "declined", contract.HumanSuccess},
+		{"cancel", "ask", "", contract.HumanDismissed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := humanStore(t)
+			ctx := context.Background()
+			request := question(tc.name)
+			request.Type = tc.kind
+			if tc.kind == "confirm" {
+				request.Choices = nil
+				request.ConfirmLabel, request.DeclineLabel = "Deploy", "Skip"
+			} else {
+				request.AllowOther = true
+			}
+			created, err := s.CreateHuman(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply := contract.HumanReply{ReplyToID: created.Message.ID, Outcome: tc.outcome, Value: tc.value}
+			accepted, err := s.ReplyHuman(ctx, "conv", "alice", reply)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Read each message in isolation, not through GetHuman's result lookup.
+			read := func(id string) model.Message {
+				t.Helper()
+				rows, err := s.GetMessages(ctx, "conv", []string{id})
+				if err != nil || len(rows) != 1 {
+					t.Fatalf("read %s: %v, %d rows", id, err, len(rows))
+				}
+				return rows[0]
+			}
+			original := read(created.Message.ID)
+			content, err := decodeHuman(original)
+			if err != nil {
+				t.Fatal(err)
+			}
+			answer := read(accepted.Reply.ID)
+			var body struct {
+				Blocks []contract.HumanReplyBlock `json:"blocks"`
+			}
+			if err := json.Unmarshal(answer.Content, &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Blocks) != 1 {
+				t.Fatalf("reply content: %s", answer.Content)
+			}
+			b := body.Blocks[0]
+			if b.Outcome != tc.outcome || b.Value != tc.value || !reflect.DeepEqual(b.Question, content.Blocks[0]) {
+				t.Fatalf("question/reply mismatch: %+v / %+v", content.Blocks[0], b)
+			}
+			q := b.Question
+			if q.Status != tc.outcome || q.Title != request.Title || q.Prompt != request.Prompt ||
+				!reflect.DeepEqual(q.Choices, request.Choices) || q.ConfirmLabel != request.ConfirmLabel || q.DeclineLabel != request.DeclineLabel {
+				t.Fatalf("incomplete question snapshot: %+v", q)
+			}
+			if tc.outcome == contract.HumanSuccess {
+				if q.SelectedValue == nil || *q.SelectedValue != tc.value {
+					t.Fatalf("missing selection: %+v", q)
+				}
+			} else if q.SelectedValue != nil {
+				t.Fatalf("cancel must not select a value: %+v", q)
+			}
+			again, err := s.ReplyHuman(ctx, "conv", "alice", reply)
+			if err != nil || again.Reply.ID != answer.ID || string(again.Reply.Content) != string(answer.Content) {
+				t.Fatalf("retry changed snapshot: %+v %v", again, err)
+			}
+		})
+	}
 }
 
 // +case=`两个并行问题按相反顺序答复，只按引用收口且 输入消息保持原身份`

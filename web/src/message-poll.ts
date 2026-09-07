@@ -41,8 +41,6 @@ export class MessagePoller {
 function isActive(message: Message): boolean {
   if (message.status === "streaming") return true;
   if (message.purpose !== "human_request") return false;
-  if (message.card?.type === "ask" || message.card?.type === "confirm") return message.card.question.status === "pending";
-  // The content model remains valid without a server-enriched card.
   return parseMessageContent(message.content).blocks.some((block) =>
     (block.type === "ask" || block.type === "confirm") && block.status === "pending");
 }

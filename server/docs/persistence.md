@@ -58,6 +58,9 @@ task_id 仅保存在真实用户 input 上作为提交交付标识，其他 Acto
 受控 meta.output 只保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
 
+Human 答复接受事务同时保存问题的最终选择，以及答复自身所需的问题快照；两条 Message
+各自可独立呈现，不新增卡片表或读取时关联富化。具体内容契约见 [交互卡片](ue.md#自包含的消息呈现)。
+
 ## Message 内容与 Parts
 
 AgentUE 1.1 的 `blocks` 可以混合内联 `{id, type, ...}` 与引用 `{id, ref}`。

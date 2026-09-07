@@ -33,11 +33,7 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 	if err != nil {
 		return err
 	}
-	views, err := server.messages.EnrichMessages(ctx, messages)
-	if err != nil {
-		return err
-	}
-	request.JSON(consts.StatusOK, view.Page[view.Message]{Data: views})
+	request.JSON(consts.StatusOK, view.Page[contract.Message]{Data: messages})
 	return nil
 }
 
