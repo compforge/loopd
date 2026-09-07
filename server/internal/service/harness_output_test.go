@@ -17,7 +17,7 @@ import (
 func TestHarnessRedisKeepsAppendEventsWhileSQLKeepsMergedSnapshot(t *testing.T) {
 	store, producer, _ := outputFixture(t)
 	ctx := context.Background()
-	run, err := store.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "work", IdempotencyKey: "stream", EffectKey: "plan", Target: "test", Text: "hello", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Minute, Meta: map[string]any{}})
+	run, err := store.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "work", IdempotencyKey: "stream", EffectKey: "plan", Target: "test", Text: "hello", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Minute, Meta: map[string]any{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestHarnessOutputObservedByRunAndConvListeners(t *testing.T) {
 	store, producer, _ := outputFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
-	run, err := store.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "work", IdempotencyKey: "both", EffectKey: "plan", Target: "test", Text: "hello", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Minute, Meta: map[string]any{}})
+	run, err := store.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "work", IdempotencyKey: "both", EffectKey: "plan", Target: "test", Text: "hello", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Minute, Meta: map[string]any{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func runFixture(t *testing.T) (*Store, model.HarnessRun, lock.Token) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := s.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "conv", IdempotencyKey: "key", EffectKey: "work", Target: "test", Text: "do work", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Hour, Meta: map[string]any{}})
+	run, err := s.CreateHarnessRun(ctx, contract.HarnessRunRequest{ConversationID: "conv", IdempotencyKey: "key", EffectKey: "work", Target: "test", Text: "do work", Actor: &contract.ActorRef{Kind: contract.ActorKindHarness, Key: "test"}, Timeout: time.Hour, Meta: map[string]any{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,5 +221,39 @@ func TestMessageGCLeavesHarnessOutputToRunDeadline(t *testing.T) {
 	message, err := s.GetMessage(ctx, run.MessageID)
 	if err != nil || message.Status != "completed" {
 		t.Fatalf("final=%+v err=%v", message, err)
+	}
+}
+
+func TestDueHarnessRunsIgnoreRetryBackoffButRespectLeases(t *testing.T) {
+	s, run, token := runFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := s.db.Model(&model.HarnessRun{}).Where("id = ?", run.ID).Updates(map[string]any{"next_attempt_at": now.Add(time.Hour), "deadline_at": now.Add(-time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.ListDueHarnessRuns(ctx, 10)
+	if err != nil || len(due) != 0 {
+		t.Fatalf("live lease selected: %v %v", due, err)
+	}
+	if err := s.db.Model(&model.ResourceLock{}).Where("resource = ?", token.Resource).Update("expires_at", now.Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	due, err = s.ListDueHarnessRuns(ctx, 10)
+	if err != nil || len(due) != 1 || due[0].ID != run.ID {
+		t.Fatalf("expired recovery hidden by backoff: %v %v", due, err)
+	}
+	if err := s.db.Model(&model.HarnessRun{}).Where("id = ?", run.ID).Updates(map[string]any{"deadline_at": now.Add(time.Hour), "cancel_requested": true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	due, err = s.ListDueHarnessRuns(ctx, 10)
+	if err != nil || len(due) != 1 {
+		t.Fatalf("cancellation hidden by backoff: %v %v", due, err)
+	}
+	if err := s.db.Model(&model.HarnessRun{}).Where("id = ?", run.ID).Update("phase", "cancelled").Error; err != nil {
+		t.Fatal(err)
+	}
+	due, err = s.ListDueHarnessRuns(ctx, 10)
+	if err != nil || len(due) != 0 {
+		t.Fatalf("terminal run selected: %v %v", due, err)
 	}
 }

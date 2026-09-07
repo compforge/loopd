@@ -89,6 +89,11 @@ Operator 自己决定何时接收补充发言、如何组织工作，以及是�
 runtime 不把普通发言自动解释成 steer/followup，也不替 Operator 定义业务任务。
 具体业务策略属于 Operator，不能反过来成为所有参与者必须遵循的交互回合。
 
+Verb 除正常业务数据外还返回 error，错误处理也是 Operator 业务的一部分。Operator 决定重试、
+退避、兜底、结束当前工作或继续处理，并决定哪些错误需要作为消息展示。runtime 统一错误表达，
+提供通过 Verb 保存错误内容和消息失败状态的能力；Server 负责持久化与交付这些显式发言。
+消息的 failed 状态只描述该条发言，不自动决定业务 CRD、Harness 执行或消费进度的终态。
+
 ## 控制信号与协作数据
 
 Conv CRD 承载 Server 与 Operator 之间的控制信号和协调状态：参与者的过程会话关联、消息

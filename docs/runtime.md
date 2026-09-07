@@ -62,6 +62,36 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 read 表达观察意图；server 在读取 Human 状态时推进已到期问题，不等于调用者发起新工作。
 Effect 分类不增加额外的 Verbs 容器或独立 CRD。
 
+## Verb 的错误返回与保存
+
+Verb 在正常业务数据之外返回 error（没有业务返回值时只返回 error）；流式观察通过错误通道
+交付异步错误。错误定义和转换统一在 `runtime/errors.go`，通过 `errors.As` 读取 `runtime.Error`，
+通过 `errors.Is` 保留底层原因的判断。`Retryable` 是可重试提示，不是业务必须重试的指令。
+Human 的拒绝、忽略或超时等类型化正常结果，仍由业务返回值表达。
+
+对这些 error 的处理也是 Operator 业务的一部分。runtime Verb 支持错误返回和保存，Operator
+决定何时调用、发布什么错误信息，以及之后是否重试、兜底或 Commit。返回 error 本身不会自动
+创建错误消息、结束 Harness 或提交输入；保存错误的 Speak/Emit/End 也可能失败，其 error 同样
+交由 Operator 处理。
+
+当前 Router 采用简单策略：业务收到错误后发布错误消息，保存成功再 Commit 连续消费前缀。
+已知完整错误时，一次 Speak 原子保存 AgentUE `meta.error` 和 `status=failed`，无需开启流式消息：
+
+```go
+_, publishErr := loop.Conv.Speak(ctx, convID, contract.SpeakRequest{
+    Key: inputID + "/failure", Actor: self, Target: user, ReplyToID: inputID,
+    Status: contract.MessageStatusFailed,
+    Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{"error":{"code":"operator_failed","message":"处理失败，请重试。"}},"blocks":[]}`),
+})
+if publishErr != nil {
+    return publishErr // 保存失败，尚不能按已报告错误确认消费
+}
+```
+
+已有流式消息通过 Emit 写入 AgentUE `meta.error`，再调用 End(failed)。End 是 Message 句柄上的
+write Verb，只结束这一条消息；Operator 仍需处理 Emit/End 返回的 error。错误内容使用业务选择
+的公开说明，不自动序列化底层 Cause 或请求信息。
+
 ## 一个 Reconcile 能做什么
 
 下面是能力速览伪代码，不是可直接运行的 Go：省略 context、请求结构、稳定动作身份、错误处理
@@ -107,7 +137,9 @@ Conv.Speak 创建或复用一条 Actor-owned Message，稳定 Key 的范围是 C
 Speak 默认一次说完：Content 随消息原子保存并标记结束，不需要独立消息 Redis 流，也不需要 End。
 只有 `Stream: true` 才保持消息开放；可携带初始 Content，也可省略，之后用 `stream.Emit` 发布
 AgentUE set/append，最后 `stream.End`。两种模式返回同一 Go 句柄类型，ID/Value 可读取身份与快照。
-模式只在首次创建时生效，同 Key 重试不能把已结束消息重新打开。
+非流式 Speak 可指定终态 Status，默认 completed；失败说明用 failed，并在 Content 中携带
+AgentUE meta.error。Status 与 Stream=true 不能同时设置。模式、正文和 Status 只在首次创建时
+生效，同 Key 重试返回既有消息，不能覆写内容、改变终态或重新打开消息。
 
 `stream.End(ctx)` 默认将 Message.status 从 streaming 改为 completed；输出异常或明确取消时，
 可传 `stream.End(ctx, contract.MessageStatusFailed)` 或 `contract.MessageStatusCancelled`。
@@ -163,8 +195,14 @@ if err != nil { return err }
 result, err := call.Result(ctx) // result.Format + result.Content；Text() 提供文本视图
 ```
 
+Prompt 遇到 Server 容量不足时返回 nil Call 与统一 runtime Error，不创建新调用。用
+`IsHarnessCapacityExceeded(err)` 判断；`IsRetryable(err)` 为 true，表示 Operator 可以稍后重试，
+SDK 不自动重试容量拒绝。相同幂等 key 的既有调用不受新调用容量限制，详见
+[容量与拒绝](../server/docs/harness.md#容量与拒绝)。
+
 Call.Get(ctx) 通过 API 读取状态，Stream(ctx) 通过 Server 的 Run SSE 接口观察 AgentUE 增量，
-实时事件来源是 Redis。Wait(ctx) 消费流至结束，再读取一次持久终态；Result(ctx) 从中提取结果。
+实时事件来源是 Redis。Wait(ctx) 在流结束或中断时查询持久状态，可重试的中断重新连接同一
+Call，最多三次连接；Result(ctx) 从持久终态提取结果。正常流不轮询调用状态。
 `loop.Harness.Call(runID)` 重建句柄，不重新提交。取消等待、关闭 toolkit 均不取消执行；显式
 Cancel(ctx) 请求停止 Server 驱动，远端是否中断由 Adapter 能力决定。
 

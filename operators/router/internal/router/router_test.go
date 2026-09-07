@@ -191,6 +191,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			if content.Meta.Error != nil {
 				value.mu.Lock()
 				value.failure = content.Meta.Error
+				value.failureStatus = input.Status
 				value.mu.Unlock()
 			}
 			for _, block := range content.Blocks {
@@ -200,7 +201,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 					value.mu.Unlock()
 				}
 			}
-			_ = json.NewEncoder(response).Encode(contract.Message{ID: input.Key, Content: input.Content})
+			_ = json.NewEncoder(response).Encode(contract.Message{ID: input.Key, Content: input.Content, Status: input.Status})
 		case request.Method == http.MethodPost && request.URL.Path == "/v1/conversations/conversation-1/poll":
 			value.mu.Lock()
 			var messages []contract.Message

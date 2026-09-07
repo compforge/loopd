@@ -3,7 +3,6 @@ package runtime
 import (
 	"bufio"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -35,7 +34,7 @@ func (h Harness) Prompt(ctx context.Context, p Prompt) (*Call, error) {
 	var value contract.HarnessCall
 	if err := h.client.write(ctx, "/v1/harness/runs", p, &value); err != nil {
 		if IsConflict(err) {
-			return nil, errors.Join(ErrCallConflict, err)
+			return nil, harnessConflict(err)
 		}
 		return nil, err
 	}
@@ -78,7 +77,7 @@ func (c *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
 		value, err := c.Get(ctx)
 		if err == nil && value.Phase.Terminal() {
 			if value.Phase != contract.CallSucceeded {
-				return value, &Error{Message: value.Error}
+				return value, harnessFailure(value.Error)
 			}
 			return value, nil
 		}
@@ -86,7 +85,7 @@ func (c *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
 			observationErr = err
 		}
 		if observationErr == nil {
-			observationErr = &Error{Message: "Harness stream ended before durable terminal state", Retryable: true}
+			observationErr = errHarnessStreamIncomplete
 		}
 		if attempt == 2 || !IsRetryable(observationErr) {
 			return value, observationErr

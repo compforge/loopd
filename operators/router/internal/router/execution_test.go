@@ -219,3 +219,59 @@ func TestRouterConsumesMessageWithoutUIDelivery(t *testing.T) {
 		t.Fatalf("message work must not require a UI delivery: answer=%q completed=%v failure=%v", answer, completed, failure)
 	}
 }
+
+// +case=`Router owns capacity-error policy: report a failed message in one Speak, then Commit; a failed report leaves input uncommitted.`
+func TestRouterReportsCapacityError(t *testing.T) {
+	for _, failReport := range []bool{false, true} {
+		t.Run(fmt.Sprintf("report_failure_%t", failReport), func(t *testing.T) {
+			server := newLoopServer(t, "")
+			client := server.Client()
+			client.Transport = capacityTransport{base: client.Transport, failReport: failReport, t: t}
+			rt, err := loopruntime.New(server.URL, loopruntime.Options{HTTPClient: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			reconciler, err := New(rt.Loop, Config{HarnessTarget: "temporary"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconciler.reader = routerReader(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: objectKey("conversation-1")})
+			if !loopruntime.IsHarnessCapacityExceeded(err) {
+				t.Fatalf("expected capacity error, got %v", err)
+			}
+			answer, committed, failure := server.result()
+			if failReport {
+				if committed || failure != nil {
+					t.Fatalf("failed report committed=%v failure=%v", committed, failure)
+				}
+			} else if answer != "" || !committed || failure == nil || failure.Code != "router_failed" {
+				t.Fatalf("report: answer=%q committed=%v failure=%v", answer, committed, failure)
+			}
+		})
+	}
+}
+
+type capacityTransport struct {
+	base       http.RoundTripper
+	failReport bool
+	t          *testing.T
+}
+
+func (transport capacityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	status, body := 0, ""
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/harness/runs" {
+		status, body = http.StatusTooManyRequests, `{"error":{"type":"harness_capacity_exceeded","message":"Harness execution capacity exhausted"}}`
+	} else if transport.failReport && strings.HasSuffix(r.URL.Path, "/speak") {
+		status, body = http.StatusBadRequest, `{"error":{"type":"invalid","message":"cannot publish"}}`
+	} else if strings.HasSuffix(r.URL.Path, "/events") {
+		transport.t.Error("complete error report should not require Emit or End")
+	}
+	if status != 0 {
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	}
+	return transport.base.RoundTrip(r)
+}

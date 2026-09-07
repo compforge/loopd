@@ -14,16 +14,21 @@ import (
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
+type HarnessRunDriver interface {
+	Submit(context.Context, contract.HarnessRunRequest) (model.HarnessRun, error)
+	Wake()
+}
+
 type HarnessRunService struct {
 	Messages *MessageService
 	Listen   func(context.Context, string, func(ui.Event) error) error
 	store    *repo.Store
 	targets  map[string]harness.Adapter
-	wake     func()
+	driver   HarnessRunDriver
 }
 
-func NewHarnessRunService(store *repo.Store, targets map[string]harness.Adapter, wake func()) *HarnessRunService {
-	return &HarnessRunService{store: store, targets: maps.Clone(targets), wake: wake}
+func NewHarnessRunService(store *repo.Store, targets map[string]harness.Adapter, driver HarnessRunDriver) *HarnessRunService {
+	return &HarnessRunService{store: store, targets: maps.Clone(targets), driver: driver}
 }
 func (s *HarnessRunService) Submit(ctx context.Context, r contract.HarnessRunRequest) (contract.HarnessCall, error) {
 	if strings.TrimSpace(r.ConversationID) == "" || strings.TrimSpace(r.IdempotencyKey) == "" || r.EffectKey == "" || r.Target == "" || strings.TrimSpace(r.Text) == "" || r.Timeout < 0 {
@@ -49,7 +54,7 @@ func (s *HarnessRunService) Submit(ctx context.Context, r contract.HarnessRunReq
 			return contract.HarnessCall{}, ErrInvalid
 		}
 	}
-	run, err := s.store.CreateHarnessRun(ctx, r)
+	run, err := s.driver.Submit(ctx, r)
 	if err != nil {
 		return contract.HarnessCall{}, err
 	}
@@ -60,9 +65,7 @@ func (s *HarnessRunService) Submit(ctx context.Context, r contract.HarnessRunReq
 			s.Messages.logger.WarnContext(ctx, "Harness stream initialization deferred", "run_id", run.ID, "error", err)
 		}
 	}
-	if s.wake != nil {
-		s.wake()
-	}
+	s.driver.Wake()
 	return harnessCall(run), nil
 }
 func harnessCall(run model.HarnessRun) contract.HarnessCall {
@@ -93,9 +96,7 @@ func (s *HarnessRunService) Cancel(ctx context.Context, id string) error {
 	if err := s.store.CancelHarnessRun(ctx, id); err != nil {
 		return err
 	}
-	if s.wake != nil {
-		s.wake()
-	}
+	s.driver.Wake()
 	return nil
 }
 

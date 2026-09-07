@@ -43,7 +43,7 @@ type Loop struct {
 func New(baseURL string, options Options) (*Runtime, error) {
 	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, &Error{Message: fmt.Sprintf("invalid loop-server URL %q", baseURL)}
+		return nil, invalidServerURLError(baseURL)
 	}
 	if options.HTTPClient == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

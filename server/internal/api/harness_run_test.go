@@ -40,7 +40,7 @@ func TestHarnessHTTPAcceptsDurablyAndCancelSurvivesServiceRestart(t *testing.T) 
 	}
 	adapters := map[string]harness.Adapter{"demo": unstartedHarness{t}}
 	server := New(nil, nil, nil, nil, nil)
-	server.HarnessRuns = service.NewHarnessRunService(store, adapters, nil)
+	server.HarnessRuns = service.NewHarnessRunService(store, adapters, component.NewHarnessRunner(store, adapters, nil))
 	engine := route.NewEngine(config.NewOptions(nil))
 	server.Register(engine)
 	body := `{"conversation_id":"conv","idempotency_key":"once","effect_key":"work","target":"demo","text":"hello"}`
@@ -79,7 +79,7 @@ func TestHarnessHTTPAcceptsDurablyAndCancelSurvivesServiceRestart(t *testing.T) 
 	if err := runner.Drive(ctx, call.ID); err != nil {
 		t.Fatal(err)
 	}
-	server.HarnessRuns = service.NewHarnessRunService(store, adapters, nil)
+	server.HarnessRuns = service.NewHarnessRunService(store, adapters, component.NewHarnessRunner(store, adapters, nil))
 	// Terminal snapshot replay does not need Redis or the process that drove the run.
 	server.HarnessRuns.Listen = func(ctx context.Context, id string, deliver func(ui.Event) error) error {
 		return component.NewMessageListener(nil, store, id, nil).Run(ctx, deliver)
@@ -107,5 +107,55 @@ func TestHarnessHTTPAcceptsDurablyAndCancelSurvivesServiceRestart(t *testing.T) 
 	missing := performJSON(t, engine, "GET", "/v1/harness/runs/missing", "")
 	if missing.StatusCode() != 404 {
 		t.Fatalf("missing=%d", missing.StatusCode())
+	}
+}
+
+func TestHarnessHTTPRejectsCapacityWithoutCreatingOutput(t *testing.T) {
+	store, err := repo.Open(repo.Config{DSN: filepath.Join(t.TempDir(), "capacity.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: contract.ActorKindOperator, ActorKey: "op"}); err != nil {
+		t.Fatal(err)
+	}
+	adapters := map[string]harness.Adapter{"demo": unstartedHarness{t}}
+	runner := component.NewHarnessRunner(store, adapters, nil)
+	runner.Concurrency = 1
+	server := New(nil, nil, nil, nil, nil)
+	server.HarnessRuns = service.NewHarnessRunService(store, adapters, runner)
+	engine := route.NewEngine(config.NewOptions(nil))
+	server.Register(engine)
+	body := `{"conversation_id":"conv","idempotency_key":"one","effect_key":"work","target":"demo","text":"hello"}`
+	if response := performJSON(t, engine, "POST", "/v1/harness/runs", body); response.StatusCode() != 202 {
+		t.Fatalf("first=%s", response.Body())
+	}
+	full := performJSON(t, engine, "POST", "/v1/harness/runs", strings.Replace(body, `"one"`, `"two"`, 1))
+	if full.StatusCode() != 429 || !strings.Contains(string(full.Body()), `"type":"harness_capacity_exceeded"`) {
+		t.Fatalf("full=%d %s", full.StatusCode(), full.Body())
+	}
+	if response := performJSON(t, engine, "POST", "/v1/harness/runs", body); response.StatusCode() != 202 {
+		t.Fatalf("replay=%s", response.Body())
+	}
+	if response := performJSON(t, engine, "POST", "/v1/harness/runs", strings.Replace(body, "hello", "changed", 1)); response.StatusCode() != 409 {
+		t.Fatalf("changed=%s", response.Body())
+	}
+	messages, err := store.ListMessages(ctx, "conv", "", 100)
+	if err != nil || len(messages) != 1 {
+		t.Fatalf("messages=%d %v", len(messages), err)
+	}
+	pending, err := store.ListRunnableHarnessRuns(ctx, 100)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("runs=%d %v", len(pending), err)
+	}
+	// Another Server has its own budget; the shared Run's idempotency does not reserve its slot.
+	other := component.NewHarnessRunner(store, adapters, nil)
+	other.Concurrency = 1
+	server.HarnessRuns = service.NewHarnessRunService(store, adapters, other)
+	for _, value := range []string{body, strings.Replace(body, `"one"`, `"two"`, 1)} {
+		if response := performJSON(t, engine, "POST", "/v1/harness/runs", value); response.StatusCode() != 202 {
+			t.Fatalf("other replica=%s", response.Body())
+		}
 	}
 }

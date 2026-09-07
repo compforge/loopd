@@ -82,7 +82,7 @@ func TestRunnerReattachesAndRejectsChangedReplay(t *testing.T) {
 			}
 			adapter := &replayAdapter{changed: changed, lost: make(chan struct{})}
 			adapters := map[string]harness.Adapter{"test": adapter}
-			svc := service.NewHarnessRunService(store, adapters, nil)
+			svc := service.NewHarnessRunService(store, adapters, NewHarnessRunner(store, adapters, nil))
 			run, err := svc.Submit(ctx, contract.HarnessRunRequest{ConversationID: "conv", IdempotencyKey: "once", EffectKey: "work", Target: "test", Text: "go", Timeout: time.Minute})
 			if err != nil {
 				t.Fatal(err)
@@ -142,7 +142,7 @@ func TestAcceptedRunSurvivesWithoutAnyRunner(t *testing.T) {
 	ctx := context.Background()
 	_, _ = store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: contract.ActorKindOperator, ActorKey: "op"})
 	adapter := &replayAdapter{lost: make(chan struct{})}
-	svc := service.NewHarnessRunService(store, map[string]harness.Adapter{"test": adapter}, nil)
+	svc := service.NewHarnessRunService(store, map[string]harness.Adapter{"test": adapter}, NewHarnessRunner(store, map[string]harness.Adapter{"test": adapter}, nil))
 	request := contract.HarnessRunRequest{ConversationID: "conv", IdempotencyKey: "once", EffectKey: "work", Target: "test", Text: "go", Timeout: time.Minute}
 	first, err := svc.Submit(ctx, request)
 	if err != nil {

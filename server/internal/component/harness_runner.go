@@ -20,7 +20,14 @@ import (
 	"github.com/compforge/loopd/server/internal/repo"
 )
 
+const DefaultHarnessRunConcurrency = 50
+
+var ErrHarnessCapacity = errors.New("Harness execution capacity exhausted")
+
 type HarnessRunner struct {
+	mu sync.Mutex
+	// Entries reserve slots; true means committed and ready for local dispatch.
+	active       map[string]bool
 	Publish      func(context.Context, string, ui.Event)
 	store        *repo.Store
 	adapters     map[string]harness.Adapter
@@ -35,7 +42,7 @@ func NewHarnessRunner(store *repo.Store, adapters map[string]harness.Adapter, lo
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &HarnessRunner{store: store, adapters: maps.Clone(adapters), logger: logger, wake: make(chan struct{}, 1), Concurrency: 8, LeaseTTL: 30 * time.Second, ScanInterval: time.Second}
+	return &HarnessRunner{store: store, adapters: maps.Clone(adapters), logger: logger, wake: make(chan struct{}, 1), Concurrency: DefaultHarnessRunConcurrency, active: make(map[string]bool), LeaseTTL: 30 * time.Second, ScanInterval: time.Second}
 }
 func (r *HarnessRunner) Wake() {
 	select {
@@ -44,57 +51,165 @@ func (r *HarnessRunner) Wake() {
 	}
 }
 
-// Run bounds both active executions and pending goroutines; each lease belongs
-// to one Run, not a global leader or an Operator process.
+// Submit reserves capacity within the creation transaction. The reservation is
+// handed to Run only after commit; an accepted call survives process failure in DB.
+// +spec=`New submissions and recovered executions share a per-Server limit; full capacity rejects new work without creating a Run or Message, while idempotent replay remains available.`
+func (r *HarnessRunner) Submit(ctx context.Context, request contract.HarnessRunRequest) (model.HarnessRun, error) {
+	var reserved string
+	run, err := r.store.CreateHarnessRun(ctx, request, func(id string) error {
+		if !r.reserve(id) {
+			return ErrHarnessCapacity
+		}
+		reserved = id
+		return nil
+	})
+	if reserved != "" {
+		if err != nil {
+			r.release(reserved)
+		} else {
+			r.mu.Lock()
+			r.active[reserved] = true
+			r.mu.Unlock()
+			r.Wake()
+		}
+	}
+	return run, err
+}
+
+func (r *HarnessRunner) reserve(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.active[id]; exists || len(r.active) >= r.Concurrency {
+		return false
+	}
+	r.active[id] = false
+	return true
+}
+func (r *HarnessRunner) release(id string) {
+	r.mu.Lock()
+	delete(r.active, id)
+	r.mu.Unlock()
+	r.Wake()
+}
+func (r *HarnessRunner) available() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Concurrency - len(r.active)
+}
+func (r *HarnessRunner) ready() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var ids []string
+	for id, ready := range r.active {
+		if ready {
+			ids = append(ids, id)
+			r.active[id] = false
+		}
+	}
+	return ids
+}
+
+// Run bounds execution goroutines. Maintenance has its own loop and never
+// needs an execution slot or calls an Adapter.
 func (r *HarnessRunner) Run(ctx context.Context) {
 	ticker := time.NewTicker(r.ScanInterval)
 	defer ticker.Stop()
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	finished := make(chan string, r.Concurrency)
-	active := map[string]bool{}
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	workers.Go(func() {
+		tick := time.NewTicker(r.ScanInterval)
+		defer tick.Stop()
+		for {
+			if err := r.Maintain(ctx); err != nil && ctx.Err() == nil {
+				r.logger.WarnContext(ctx, "finish overdue Harness runs", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	})
+	launch := func(id string) {
+		workers.Go(func() {
+			defer r.release(id)
+			err := r.Drive(ctx, id)
+			if err != nil && !errors.Is(err, lock.ErrLocked) && !errors.Is(err, repo.ErrConflict) && !errors.Is(err, context.Canceled) {
+				r.logger.WarnContext(ctx, "drive Harness run", "run_id", id, "error", err)
+				timer := time.NewTimer(time.Second)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+				case <-timer.C:
+				}
+			}
+		})
+	}
 	r.Wake()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case id := <-finished:
-			delete(active, id)
-			r.Wake()
 		case <-ticker.C:
-			r.Wake()
 		case <-r.wake:
-			if len(active) >= r.Concurrency {
-				continue
-			}
-			runs, err := r.store.ListRunnableHarnessRuns(ctx, r.Concurrency)
-			if err != nil {
-				r.logger.ErrorContext(ctx, "scan Harness runs", "error", err)
-				continue
-			}
-			for _, run := range runs {
-				if active[run.ID] || len(active) >= r.Concurrency {
-					continue
-				}
-				active[run.ID] = true
-				wg.Add(1)
-				go func(run model.HarnessRun) {
-					defer wg.Done()
-					defer func() { finished <- run.ID }()
-					err := r.Drive(ctx, run.ID)
-					if err != nil && !errors.Is(err, lock.ErrLocked) && !errors.Is(err, context.Canceled) {
-						r.logger.WarnContext(ctx, "drive Harness run", "run_id", run.ID, "error", err)
-						timer := time.NewTimer(time.Second)
-						select {
-						case <-ctx.Done():
-							timer.Stop()
-						case <-timer.C:
-						}
-					}
-				}(run)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		for _, id := range r.ready() {
+			launch(id)
+		}
+		available := r.available()
+		if available <= 0 {
+			continue
+		}
+		runs, err := r.store.ListRunnableHarnessRuns(ctx, available)
+		if err != nil {
+			r.logger.ErrorContext(ctx, "scan Harness runs", "error", err)
+			continue
+		}
+		for _, run := range runs {
+			if r.reserve(run.ID) {
+				launch(run.ID)
 			}
 		}
 	}
+}
+
+// Maintain finalizes unowned expired/cancelled Runs, including calls awaiting
+// recovery. Live drivers retain their leases and handle their own cancellation.
+// +spec=`Deadline and cancellation maintenance runs even while all execution slots are occupied, and commits Run and Message terminal state under the existing fencing lease.`
+func (r *HarnessRunner) Maintain(ctx context.Context) error {
+	runs, err := r.store.ListDueHarnessRuns(ctx, 100)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, run := range runs {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := lock.WithLease(ctx, r.store, repo.HarnessResource(run.ID), r.LeaseTTL, func(owned context.Context, token lock.Token) error {
+			current, err := r.store.GetHarnessRunState(owned, run.ID)
+			if err != nil {
+				return err
+			}
+			if contract.CallPhase(current.Phase).Terminal() {
+				return nil
+			}
+			if current.CancelRequested {
+				return r.finish(owned, token, current, contract.CallCancelled, nil, "cancelled")
+			}
+			if !time.Now().Before(current.DeadlineAt) {
+				return r.finish(owned, token, current, contract.CallTimedOut, nil, "deadline exceeded")
+			}
+			return nil
+		})
+		if err != nil && !errors.Is(err, lock.ErrLocked) && !errors.Is(err, repo.ErrConflict) {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 func (r *HarnessRunner) Drive(ctx context.Context, id string) error {
 	return lock.WithLease(ctx, r.store, repo.HarnessResource(id), r.LeaseTTL, func(owned context.Context, token lock.Token) error {

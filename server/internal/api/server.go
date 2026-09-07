@@ -90,6 +90,8 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 		status, typeName = consts.StatusBadRequest, "invalid_request"
 	case errors.Is(err, service.ErrConflict), errors.Is(err, repo.ErrConflict):
 		status, typeName = consts.StatusConflict, "conflict"
+	case errors.Is(err, component.ErrHarnessCapacity):
+		status, typeName = consts.StatusTooManyRequests, "harness_capacity_exceeded"
 	case errors.Is(err, service.ErrUnavailable):
 		status, typeName = consts.StatusServiceUnavailable, "service_unavailable"
 		message = service.ErrUnavailable.Error()

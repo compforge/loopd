@@ -19,6 +19,9 @@ func TestNewConnectsConfiguredRedis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if server.harnessRunner.Concurrency != DefaultHarnessRunConcurrency {
+		t.Fatalf("default Harness concurrency = %d", server.harnessRunner.Concurrency)
+	}
 	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -34,3 +37,9 @@ func (testConversations) Poll(context.Context, string, contract.ActorRef, string
 }
 
 func (testConversations) Commit(context.Context, string, contract.CommitRequest) error { return nil }
+
+func TestNewRejectsInvalidHarnessConcurrency(t *testing.T) {
+	if _, err := New(Config{HarnessRunConcurrency: -1}); err == nil {
+		t.Fatal("accepted negative Harness concurrency")
+	}
+}

@@ -38,7 +38,8 @@ func (conv Conv) Read(ctx context.Context, conversationID, after string, limit i
 }
 
 // Speak is a write Verb creating or reusing an actor's message in a conversation.
-// Content is complete by default. With Stream=true, use the returned handle to
+// Content is complete by default; Status can mark a complete error message failed.
+// With Stream=true, use the returned handle to
 // Emit incremental content and End the message. Neither mode owns a UI connection.
 func (conv Conv) Speak(ctx context.Context, conversationID string, request contract.SpeakRequest) (*Message, error) {
 	var result contract.Message

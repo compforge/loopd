@@ -52,7 +52,8 @@ revision 表示可见快照版本，流式输出对应 AgentUE seq，Human 状�
 
 task_id 仅保存在真实用户 input 上作为提交交付标识，其他 Actor 发言不需要关联它；页面流不依赖该字段。
 不再保存页面关闭意图。Message.status 列记录 streaming/completed/failed/cancelled/expired，
-只表示这条消息的发送状态，不表示业务完成。默认 Speak、用户输入和 Human 卡片直接 completed；
+只表示这条消息的发送状态，不表示业务完成。默认 Speak、用户输入和 Human 卡片直接 completed；非流式 Speak 可指定终态 Status，
+错误发言将 AgentUE meta.error 和 failed 状态在创建事务中一同保存；
 流式输出从 streaming 开始，End 的终态与 Revision 一起保存；长期失活由 server 按 updated_at + TTL 收口为 expired。
 受控 meta.output 只保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
 output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
