@@ -81,21 +81,24 @@ Ask/Confirm 在实际发生时各自创建 Message。人可以连续追加，Ope
 
 消息提交只依赖 DB，Redis 不进入输入事务。DB 接收后，即使页面桥暂时不可用，也不要求用户
 重新发送。Conv 通知用同事务保存的待通知标记在提交后重试；消费契约见 [Conversation](conversation.md)。
-提交接口返回已接受的消息后结束响应。观察页面使用
+创建接口 `POST /v1/conversations/:conversation_id/messages` 是短请求，可带初始或完整正文，
+返回已接受的消息元信息后结束 JSON 响应。Speak 一次完成，Tell 以 streaming 状态创建，
+后续通过 `POST /v1/messages/:message_id/events` 写入 set/append/end。
+Server 不为两个 runtime Verb 区分 HTTP 入口。观察页面使用
 `GET /v1/conversations/:conversation_id/stream`，不需要先发送消息，也不需要 task_id。
 主对话和当前右侧详情分别订阅自身 Conv，不隐式订阅所有子会话；再次发言不替换订阅。
 HTTP/SSE 断开不取消执行。
 
-Operator 通过 Poll 接收消息、Read 读取历史；不提供按 task_id 配对输入与回答的业务入口。
+Operator 通过 Poll 接收消息，通过 Read/List 选择消息并按需读正文；不提供按 task_id 配对输入与回答的业务入口。
 
 ### 消息寻址与快照
 
 每条 Message 有独立的 AgentUE model、block ID 与 seq/revision。
-Conv.Speak 默认原子发布完整消息，不创建独立消息流；只有 Stream=true 时保持开放，
-返回的句柄通过 Emit/End 按 Message ID 更新消息；Operator 不传 task_id。
+Conv.Speak 原子发布完整消息并返回只读 Message；Conv.Tell 创建开放消息，
+返回的 Stream 句柄通过 Emit/End 按 Message ID 更新消息；Operator 不传 task_id。
 Human 问题与答复由 typed Verb 管理，普通流式写入不能伪造批准。
 
-MessageService 统一承接 Speak 和 EmitMessage：前者创建消息，后者先原子推进 SQL 可见快照，再尽力写 Redis。DB 接收即发送成功；桥故障只影响页面
+MessageService 统一承接消息创建和 EmitMessage：前者创建消息，后者先原子推进 SQL 可见快照，再尽力写 Redis。DB 接收即发送成功；桥故障只影响页面
 实时性，不改变 Actor 的协作结果。runtime 隐藏序号与瞬时重试，SQL 保存最后事件指纹，避免
 响应丢失后重复追加；同一序号不同内容会冲突。Message End 不代表 Actor 或整个 Conv 完成。
 
@@ -105,7 +108,8 @@ MessageService 统一承接 Speak 和 EmitMessage：前者创建消息，后者�
 
 ### 聚合流与恢复
 
-页面先分页读取历史，每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流。
+页面先分页发现消息元信息，再有界并发获取逻辑正文；列表不加载完整内容。
+每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流。
 AgentUE 的 `stream_id` 在这里取 Message ID，客户端先按它分流，再按各自的 seq/revision 合并。
 这是一条 SSE 连接上的逻辑多路复用，不是共享内容模型；AgentUE 本身不要求所有使用方提供
 `stream_id`。seq 和 Redis cursor 只在单条消息内有意义，不充当共享 Conv 游标。

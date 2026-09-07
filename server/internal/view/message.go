@@ -6,6 +6,11 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 )
 
+type CreateMessageRequest struct {
+	contract.SpeakRequest
+	UserKey string `json:"user_key,omitempty"`
+}
+
 type MessageEventRequest struct {
 	Event  json.RawMessage        `json:"event"`
 	Status contract.MessageStatus `json:"status,omitempty"`

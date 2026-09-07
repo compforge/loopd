@@ -2,16 +2,15 @@ package runtime
 
 import (
 	"context"
-	"github.com/compforge/loopd/pkg/contract"
 	"net/http"
 	"net/url"
-	"strconv"
+
+	"github.com/compforge/loopd/pkg/contract"
 )
 
 // Conv exposes the persistent collaboration boundary to Operators.
 type Conv struct {
-	client   *client
-	messages *messageHandles
+	client *client
 }
 
 // Poll is a write Verb recording receipt without committing consumption.
@@ -29,23 +28,34 @@ func (conv Conv) Commit(ctx context.Context, conversationID string, request cont
 	return conv.client.do(ctx, http.MethodPost, "/v1/conversations/"+url.PathEscape(conversationID)+"/commit", request, nil)
 }
 
-// Read is a read Verb; shared history neither changes consumption nor wakes actors.
-func (conv Conv) Read(ctx context.Context, conversationID, after string, limit int) ([]contract.Message, error) {
-	var result page[contract.Message]
-	path := "/v1/conversations/" + url.PathEscape(conversationID) + "/messages?after=" + url.QueryEscape(after) + "&limit=" + strconv.Itoa(limit)
-	err := conv.client.do(ctx, http.MethodGet, path, nil, &result)
-	return result.Data, err
-}
-
 // Speak is a write Verb creating or reusing an actor's message in a conversation.
-// Content is complete by default; Status can mark a complete error message failed.
-// With Stream=true, use the returned handle to
-// Emit incremental content and End the message. Neither mode owns a UI connection.
-func (conv Conv) Speak(ctx context.Context, conversationID string, request contract.SpeakRequest) (*Message, error) {
-	var result contract.Message
-	err := conv.client.write(ctx, "/v1/conversations/"+url.PathEscape(conversationID)+"/speak", request, &result)
+// Content is complete; Status may mark failure. Use Tell for incremental output.
+func (conv Conv) Speak(ctx context.Context, conversationID string, request contract.SpeakRequest) (Message, error) {
+	if request.Status == "" {
+		request.Status = contract.MessageStatusCompleted
+	}
+	if !request.Status.Terminal() {
+		return nil, errSpeakStatusInvalid
+	}
+	var result contract.MessageInfo
+	err := conv.client.write(ctx, "/v1/conversations/"+url.PathEscape(conversationID)+"/messages", request, &result)
 	if err != nil {
 		return nil, err
 	}
-	return conv.messages.handle(conv.client, result), nil
+	return conv.Read(conversationID, result.ID), nil
+}
+
+// Tell starts or restores one streaming message. Only its writer may Emit/End.
+func (conv Conv) Tell(ctx context.Context, conversationID string, request contract.SpeakRequest) (Stream, error) {
+	if request.Status != "" && request.Status != contract.MessageStatusStreaming {
+		return nil, errTellStatusInvalid
+	}
+	request.Status = contract.MessageStatusStreaming
+	var result contract.MessageInfo
+	err := conv.client.write(ctx, "/v1/conversations/"+url.PathEscape(conversationID)+"/messages", request, &result)
+	if err != nil {
+		return nil, err
+	}
+	result.ConversationID = conversationID
+	return newMessageStream(conv.client, result), nil
 }

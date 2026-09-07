@@ -116,14 +116,14 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(result)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/human/"):
 		_ = json.NewEncoder(w).Encode(f.results[strings.TrimPrefix(r.URL.Path, "/v1/human/")])
-	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/speak":
+	case r.Method == http.MethodPost && r.URL.Path == "/v1/conversations/conv/messages":
 		var request contract.SpeakRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			f.t.Error(err)
 			return
 		}
 		if request.Actor != actor || request.Target != (contract.ActorRef{Kind: contract.ActorKindUser, Key: "user"}) ||
-			request.Key != request.ReplyToID+"/summary" || request.Stream {
+			request.Key != request.ReplyToID+"/summary" {
 			f.t.Errorf("invalid summary identity: %+v", request)
 		}
 		if prior, exists := f.answers[request.Key]; exists && !reflect.DeepEqual(prior, request) {

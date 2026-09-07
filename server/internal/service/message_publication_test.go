@@ -44,7 +44,7 @@ func outputFixture(t *testing.T) (*repo.Store, *MessageService, *MessageService)
 }
 func ptr(value string) *string { return &value }
 func outputRequest(key string) contract.SpeakRequest {
-	return contract.SpeakRequest{Stream: true, Key: key, Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
+	return contract.SpeakRequest{Status: contract.MessageStatusStreaming, Key: key, Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "same-actor"}, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 }
 func outputText(t *testing.T, seq uint64, text string) json.RawMessage {
 	return marshalEvent(t, agentueui.Event{Op: agentueui.OpSet, Seq: seq, Block: map[string]any{"id": "text", "type": "text", "content": text}})

@@ -66,14 +66,21 @@ export async function createConversation(name: string, signal?: AbortSignal): Pr
   });
 }
 
+type MessageInfo = Omit<Message, "content">;
+
 export async function listMessages(conversationID: string, signal?: AbortSignal, after = ""): Promise<Message[]> {
   const messages: Message[] = [];
   for (;;) {
-    const page = await requestJSON<Page<Message>>(
+    const page = await requestJSON<Page<MessageInfo>>(
       `/v1/conversations/${encodeURIComponent(conversationID)}/messages?limit=100&after=${encodeURIComponent(after)}`,
       { signal },
     );
-    messages.push(...page.data);
+    // Bound body reads independently of metadata discovery.
+    for (let i = 0; i < page.data.length; i += 4) {
+      const batch = await Promise.all(page.data.slice(i, i + 4).map((m) =>
+        requestJSON<Message>(`/v1/conversations/${encodeURIComponent(conversationID)}/messages/${encodeURIComponent(m.id)}/content`,{signal})));
+      messages.push(...batch);
+    }
     if (page.data.length < 100) return messages;
     after = page.data[page.data.length - 1].id;
   }
@@ -92,7 +99,7 @@ export async function messageChanges(conversationID: string, revisions: Map<stri
   return messages;
 }
 
-export interface StreamRequest {
+export interface SubmitMessageRequest {
   conversationID: string;
   text?: string;
   target?: ActorRef;
@@ -101,14 +108,14 @@ export interface StreamRequest {
   onEvent(message: MessageEvent): void;
 }
 
-export async function streamMessage(request: StreamRequest): Promise<void> {
+export async function submitMessage(request: SubmitMessageRequest): Promise<void> {
   const body = {
     user_key: "web-user",
     target: request.target,
     content: textModel(request.text ?? ""),
   };
   const headers: Record<string, string> = {
-    Accept: "text/event-stream",
+    Accept: "application/json",
     "Content-Type": "application/json",
   };
   const response = await fetch(
@@ -116,12 +123,11 @@ export async function streamMessage(request: StreamRequest): Promise<void> {
     { method: "POST", headers, body: JSON.stringify(body), signal: request.signal },
   );
   if (!response.ok) throw await responseError(response);
-  if (!response.body) throw new Error("loop-server returned an empty event stream");
-  const taskID = response.headers.get("X-Loopd-Task-ID");
-  if (!taskID) throw new Error("loop-server response omitted task ID");
-  request.onTaskID(taskID);
+  const info = (await response.json()) as MessageInfo;
+  const message: Message = { ...info, content: body.content };
+  request.onTaskID(message.task_id);
+  request.onEvent({ message, event: { op: "start", seq: message.revision ?? 1, stream_id: message.id, model: body.content } });
 
-  await readMessageStream(response, request.onEvent);
 }
 
 export async function streamConversation(conversationID: string, signal: AbortSignal, onEvent: (event: MessageEvent) => void): Promise<void> {

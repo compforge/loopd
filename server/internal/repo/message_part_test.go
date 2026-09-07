@@ -17,6 +17,87 @@ import (
 	"gorm.io/gorm"
 )
 
+// +case=`Physical packing does not change logical snapshots, block order or cursors; metadata reads do not load Parts.`
+func TestLogicalMessageReadsIgnorePartLayout(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprint(external), func(t *testing.T) {
+			s := partsStore(t)
+			if !external {
+				s.messageInlineBlocks = 1000
+				s.messageInlineBytes = 1 << 20
+			}
+			ctx := context.Background()
+			m := speech(t, s, 105)
+			reads := 0
+			if err := s.db.Callback().Query().Before("gorm:query").Register("logical_part_reads", func(tx *gorm.DB) {
+				if tx.Statement.Table == "message_parts" {
+					reads++
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := s.QueryMessages(ctx, "conv", contract.MessageQuery{IDs: []string{m.ID}, Limit: 1})
+			if err != nil || len(rows) != 1 || len(rows[0].Content) != 0 || reads != 0 {
+				t.Fatalf("metadata rows=%d reads=%d err=%v", len(rows), reads, err)
+			}
+			if _, err := s.MessageInfo(ctx, "other", m.ID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-conv info=%v", err)
+			}
+			if _, err := s.MessageSnapshot(ctx, "other", m.ID); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-conv snapshot=%v", err)
+			}
+			if _, err := s.MessageBlocks(ctx, "other", m.ID, "b1", ""); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("cross-conv block=%v", err)
+			}
+			selected, err := s.MessageBlocks(ctx, "conv", m.ID, "b1", "")
+			expectedReads := 0
+			if external {
+				expectedReads = 1
+			}
+			if err != nil || len(selected.Data) != 1 || reads != expectedReads {
+				t.Fatalf("selected=%+v reads=%d err=%v", selected, reads, err)
+			}
+			page, err := s.MessageBlocks(ctx, "conv", m.ID, "", "")
+			if err != nil || len(page.Data) != 100 || page.Next != "1:100" {
+				t.Fatalf("page=%+v err=%v", page, err)
+			}
+			next, err := s.MessageBlocks(ctx, "conv", m.ID, "", page.Next)
+			if err != nil || len(next.Data) != 5 || next.Next != "" {
+				t.Fatalf("next=%+v err=%v", next, err)
+			}
+			blocks := append(page.Data, next.Data...)
+			snapshot, err := s.MessageSnapshot(ctx, "conv", m.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var full struct{ Blocks []json.RawMessage }
+			if err := json.Unmarshal(snapshot.Content, &full); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(blocks, full.Blocks) {
+				t.Fatal("block pages differ from full snapshot")
+			}
+			if _, err := s.MessageBlocks(ctx, "conv", m.ID, "missing", ""); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("missing block=%v", err)
+			}
+			if err := s.ProjectOutput(ctx, m.ID, ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b0", "content": "new"}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.MessageBlocks(ctx, "conv", m.ID, "", page.Next); !errors.Is(err, ErrConflict) {
+				t.Fatalf("mixed revisions accepted: %v", err)
+			}
+			if external {
+				if err := s.db.Where("message_id = ?", m.ID).Delete(&model.MessagePart{}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.MessageBlocks(ctx, "conv", m.ID, "b1", ""); err == nil || errors.Is(err, ErrNotFound) {
+					t.Fatalf("missing stored content must be a storage failure: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func partsStore(t *testing.T) *Store {
 	t.Helper()
 	s := humanStore(t)
@@ -73,7 +154,7 @@ func refAt(t *testing.T, s *Store, id string, index int) string {
 }
 func speech(t *testing.T, s *Store, n int) model.Message {
 	t.Helper()
-	m, err := s.Speak(context.Background(), "conv", contract.SpeakRequest{Key: "speech", Stream: true, Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "writer"}, Target: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "reader"}, Content: blocksContent(t, n)})
+	m, err := s.Speak(context.Background(), "conv", contract.SpeakRequest{Status: contract.MessageStatusStreaming, Key: "speech", Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "writer"}, Target: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "reader"}, Content: blocksContent(t, n)})
 	if err != nil {
 		t.Fatal(err)
 	}

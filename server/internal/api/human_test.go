@@ -93,6 +93,14 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if history.StatusCode() != 200 || len(onlyReply.Data) != 1 || onlyReply.Data[0].ID != result.Reply.ID || onlyReply.Data[0].ReplyToID != question.Message.ID {
 		t.Fatalf("page: %s", history.Body())
 	}
+	content := performJSON(t, engine, "GET", "/v1/conversations/"+conv.ID+"/messages/"+result.Reply.ID+"/content", "")
+	var snapshot contract.Message
+	if content.StatusCode() != 200 {
+		t.Fatalf("content: %s", content.Body())
+	}
+	if err := json.Unmarshal(content.Body(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
 	streamData, err := messageEventData(result.Reply, json.RawMessage(`{"op":"start","seq":1}`))
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +111,8 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err := json.Unmarshal(streamData, &stream); err != nil {
 		t.Fatal(err)
 	}
-	if string(stream.Message.Content) != string(onlyReply.Data[0].Content) || string(stream.Message.Content) != string(result.Reply.Content) {
-		t.Fatalf("history/live mismatch: %s / %s", stream.Message.Content, onlyReply.Data[0].Content)
+	if string(stream.Message.Content) != string(snapshot.Content) || string(stream.Message.Content) != string(result.Reply.Content) {
+		t.Fatalf("history/live mismatch: %s / %s", stream.Message.Content, snapshot.Content)
 	}
 	var rawPage struct {
 		Data []map[string]json.RawMessage `json:"data"`

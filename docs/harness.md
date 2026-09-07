@@ -105,8 +105,8 @@ phase、deadline_at 等），无需等待 Harness 启动。幂等范围是 Conve
 同请求复用 Run 和截止时间，参数变化返回 conflict。输出 Message 的 purpose 为 harness，
 内容与终态只能通过持有当前租约的 Run 驱动者更新，普通 Emit 不能写入。
 
-- `GET /v1/harness/runs/:run_id` 读取调用状态，成功时附带从 Message 提取的 result。
-  未完成时不加载完整 Message 内容。
+- `GET /v1/harness/runs/:run_id` 只读取调用状态与 Conversation/Message 引用，不加载输出正文。
+  runtime 在成功态通过逻辑 block 读取提取 result，不需要展开整个执行过程。
 - `GET /v1/harness/runs/:run_id/stream` 通过 Redis/SSE 观察 AgentUE。先发送当前快照，随后
   交付增量；低频 SQL Revision 检查仅在缺口时加载完整内容。重连重新读取快照，不依赖旧进程。
 - `POST /v1/harness/runs/:run_id/cancel` 请求停止本次 loopd 调用。Server 停止本地驱动，保存
@@ -190,7 +190,7 @@ PreviewDeltas 不具有稳定回放保证，启用后拒绝恢复；默认使用
 观察故障分开，观察故障可以在 deadline 内重新挂接。AgentGo 是非持久 demo，接管返回 unknown。
 
 Server 只保留有限数量的活跃驱动、连接和待写缓冲，不保留完整事件数组；Operator 句柄不保留
-后台 Call map。Message writer 由调用者持有，含未确认写入时须继续使用原句柄重试；再次 Speak
+后台 Call map。Message writer 由调用者持有，含未确认写入时须继续使用原句柄重试；再次 Tell
 是从 DB 重建句柄，不会恢复另一个句柄的未确认请求。并发写入同一 Message 不属于该能力。
 
 Run 保留幂等身份，不能靠短 TTL 删除后让同一个 key 重新执行。当前不自动回收 Run；需要删除

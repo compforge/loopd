@@ -183,6 +183,14 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.committed = in.Through
 		}
 		w.WriteHeader(204)
+	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/content"):
+		id := strings.Split(r.URL.Path, "/")[5]
+		m, ok := f.messages[id]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		write(m)
 	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/messages"):
 		convID := strings.Split(r.URL.Path, "/")[3]
 		after := r.URL.Query().Get("after")
@@ -197,16 +205,21 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			if include && m.ID > after {
+			if include && m.ID > after && (r.URL.Query().Get("before") == "" || m.ID < r.URL.Query().Get("before")) && m.Status != contract.MessageStatusStreaming {
 				messages = append(messages, m)
 			}
 		}
-		sort.Slice(messages, func(i, j int) bool { return messages[i].ID < messages[j].ID })
+		sort.Slice(messages, func(i, j int) bool {
+			if r.URL.Query().Get("order") == "desc" {
+				return messages[i].ID > messages[j].ID
+			}
+			return messages[i].ID < messages[j].ID
+		})
 		if len(messages) > limit {
 			messages = messages[:limit]
 		}
 		write(map[string]any{"data": messages})
-	case strings.HasSuffix(r.URL.Path, "/speak"):
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages"):
 		var in contract.SpeakRequest
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			f.t.Error(err)
@@ -221,7 +234,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 				content = json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 			}
 			status := contract.MessageStatusCompleted
-			if in.Stream {
+			if in.Status == contract.MessageStatusStreaming {
 				status = contract.MessageStatusStreaming
 			}
 			f.messages[id] = contract.Message{Status: status, ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Purpose: "output", Revision: 1, Content: content}
@@ -538,9 +551,9 @@ func TestHumanGuidanceAccumulatesAndInvalidatesAudit(t *testing.T) {
 	}
 }
 
-func TestHistoricalHumanReplyUsesExplicitQuestion(t *testing.T) {
+func TestHistoricalHumanReplyUsesQuestionSnapshot(t *testing.T) {
 	question := contract.Message{ID: "a-question", ConversationID: "previous", Kind: ActorManager, Purpose: "human_request", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}]}`)}
-	reply := contract.Message{ID: "a-reply", ConversationID: "previous", Kind: contract.ActorKindUser, Purpose: "human_reply", ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a"}]}`)}
+	reply := contract.Message{ID: "a-reply", ConversationID: "previous", Kind: contract.ActorKindUser, Purpose: "human_reply", ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a","question":{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}}]}`)}
 	f := newFixture(t, question, reply)
 	history, err := f.c.history(context.Background(), f.run())
 	if err != nil || !strings.Contains(history, "Which language?") || !strings.Contains(history, "a: Go") || !strings.Contains(history, "success a") {
@@ -568,7 +581,7 @@ func TestContinuousInputCheckpointAndMessageEndIndependence(t *testing.T) {
 	f.pending = append(f.pending, extra)
 	f.messages[extra.ID] = extra
 	f.mu.Unlock()
-	observation, err := f.c.Loop.Conv.Speak(context.Background(), "workspace", contract.SpeakRequest{Key: "independent-observation", Actor: actor(run, ActorManager), Stream: true})
+	observation, err := f.c.Loop.Conv.Tell(context.Background(), "workspace", contract.SpeakRequest{Key: "independent-observation", Actor: actor(run, ActorManager)})
 	if err != nil {
 		t.Fatal(err)
 	}

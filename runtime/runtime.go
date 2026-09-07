@@ -68,7 +68,7 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
-	loop.Conv = Conv{client: c, messages: &messageHandles{}}
+	loop.Conv = Conv{client: c}
 	loop.Human = Human{client: c}
 	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Logger)
 	loop.Operator = Operator{registry: newRegistry(

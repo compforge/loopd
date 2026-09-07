@@ -43,8 +43,8 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	}
 	event := `{"event":{"op":"set","seq":2,"block":{"id":"text","type":"text","content":"work"}}}`
 	// +case=`An actor can speak and stream independently of UI delivery, without a task ID.`
-	speech := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+	speech := performJSON(t, engine, "POST", "/v1/conversations/root/messages",
+		`{"status":"streaming","key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
 	if speech.StatusCode() != 200 {
 		t.Fatalf("speak=%d %s", speech.StatusCode(), speech.Body())
 	}
@@ -55,14 +55,14 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if spoken.TaskID != "" || spoken.ConversationID != "root" {
 		t.Fatalf("speech=%+v", spoken)
 	}
-	retry := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
+	retry := performJSON(t, engine, "POST", "/v1/conversations/root/messages",
+		`{"status":"streaming","key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"user","key":"alice"}}`)
 	var same contract.Message
 	if err := json.Unmarshal(retry.Body(), &same); err != nil || same.ID != spoken.ID {
 		t.Fatalf("speech retry=%s %v", retry.Body(), err)
 	}
-	changed := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
-		`{"stream":true,"key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"operator","key":"another"}}`)
+	changed := performJSON(t, engine, "POST", "/v1/conversations/root/messages",
+		`{"status":"streaming","key":"progress/1","actor":{"kind":"operator","key":"router"},"target":{"kind":"operator","key":"another"}}`)
 	if changed.StatusCode() != 409 {
 		t.Fatalf("changed recipient=%d", changed.StatusCode())
 	}
@@ -72,7 +72,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if forged.StatusCode() != 400 {
 		t.Fatalf("reference event=%d %s", forged.StatusCode(), forged.Body())
 	}
-	forged = performJSON(t, engine, "POST", "/v1/conversations/root/speak", `{"key":"forged","actor":{"kind":"operator","key":"router"},"content":{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","ref":"foreign-part"}]}}`)
+	forged = performJSON(t, engine, "POST", "/v1/conversations/root/messages", `{"key":"forged","actor":{"kind":"operator","key":"router"},"content":{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","ref":"foreign-part"}]}}`)
 	if forged.StatusCode() != 400 {
 		t.Fatalf("reference snapshot=%d %s", forged.StatusCode(), forged.Body())
 	}
@@ -105,7 +105,7 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 	if complete.StatusCode() != 404 {
 		t.Fatalf("removed Complete route=%d", complete.StatusCode())
 	}
-	once := performJSON(t, engine, "POST", "/v1/conversations/root/speak",
+	once := performJSON(t, engine, "POST", "/v1/conversations/root/messages",
 		`{"key":"once","actor":{"kind":"operator","key":"router"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"answer","type":"text","content":"done"}]}}`)
 	var final contract.Message
 	if err := json.Unmarshal(once.Body(), &final); err != nil || once.StatusCode() != 200 || !final.Ended() {
@@ -142,7 +142,7 @@ func TestSpeakTerminalStatus(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		response := performJSON(t, engine, "POST", "/v1/conversations/root/speak", string(body))
+		response := performJSON(t, engine, "POST", "/v1/conversations/root/messages", string(body))
 		var message contract.Message
 		if response.StatusCode() != 200 {
 			t.Fatalf("speak=%d %s", response.StatusCode(), response.Body())
@@ -162,20 +162,18 @@ func TestSpeakTerminalStatus(t *testing.T) {
 	}
 	request.Status = ""
 	request.Content = json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)
-	for _, stream := range []bool{false, true} {
-		request.Stream = stream
+	for range 2 {
 		retry := speak(request)
 		if retry.ID != first.ID || retry.Status != first.Status || string(retry.Content) != string(first.Content) {
 			t.Fatalf("retry changed error: %+v", retry)
 		}
 	}
 	for _, invalid := range []contract.SpeakRequest{
-		{Key: "invalid-stream", Actor: request.Actor, Stream: true, Status: contract.MessageStatusFailed},
-		{Key: "invalid-status", Actor: request.Actor, Status: contract.MessageStatusStreaming},
 		{Key: "unknown-status", Actor: request.Actor, Status: "unknown"},
 	} {
 		body, _ := json.Marshal(invalid)
-		response := performJSON(t, engine, "POST", "/v1/conversations/root/speak", string(body))
+		path := "/v1/conversations/root/messages"
+		response := performJSON(t, engine, "POST", path, string(body))
 		if response.StatusCode() != 400 {
 			t.Fatalf("invalid status=%d %s", response.StatusCode(), response.Body())
 		}
@@ -184,7 +182,7 @@ func TestSpeakTerminalStatus(t *testing.T) {
 	if err != nil || len(history) != 1 {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
-	request.Key, request.Stream = "completed", false
+	request.Key = "completed"
 	if completed := speak(request); completed.Status != contract.MessageStatusCompleted {
 		t.Fatalf("default=%+v", completed)
 	}

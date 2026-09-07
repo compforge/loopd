@@ -3,6 +3,7 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -38,19 +39,57 @@ func (h Harness) Prompt(ctx context.Context, p Prompt) (*Call, error) {
 		}
 		return nil, err
 	}
-	return h.Call(value.ID), nil
+	return &Call{client: h.client, id: value.ID, message: &remoteMessage{client: h.client, convID: p.ConversationID, id: value.MessageID}}, nil
 }
 
 // Call reconstructs a remote handle from a persisted run ID without starting work.
 func (h Harness) Call(id string) *Call { return &Call{client: h.client, id: id} }
 
 type Call struct {
-	client *client
-	id     string
+	message Message
+	client  *client
+	id      string
 }
 
+// Message resolves the output reference. A restored Call knows only its Run ID,
+// so its first resolution reads Run metadata; no message body is loaded.
+func (c *Call) Message(ctx context.Context) (Message, error) {
+	if c.message != nil {
+		return c.message, nil
+	}
+	value, err := c.info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteMessage{client: c.client, convID: value.ConversationID, id: value.MessageID}, nil
+}
 func (c *Call) ID() string { return c.id }
 func (c *Call) Get(ctx context.Context) (contract.HarnessCall, error) {
+	value, err := c.info(ctx)
+	if err != nil || value.Phase != contract.CallSucceeded || value.Result != nil {
+		return value, err
+	}
+	message := &remoteMessage{client: c.client, convID: value.ConversationID, id: value.MessageID}
+	result, err := message.Block(ctx, "result")
+	if err != nil {
+		return value, err
+	}
+	data, err := json.Marshal(struct {
+		Blocks []json.RawMessage `json:"blocks"`
+	}{Blocks: []json.RawMessage{result.Block}})
+	if err != nil {
+		return value, wrapError(err)
+	}
+	value.Result, err = contract.ExtractResult(data)
+	if err != nil {
+		return value, wrapError(err)
+	}
+	if value.Result == nil {
+		return value, harnessFailure("completed Harness call has no result block")
+	}
+	return value, nil
+}
+func (c *Call) info(ctx context.Context) (contract.HarnessCall, error) {
 	var value contract.HarnessCall
 	err := c.client.do(ctx, http.MethodGet, "/v1/harness/runs/"+url.PathEscape(c.id), nil, &value)
 	return value, err

@@ -45,7 +45,11 @@ func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
 	c := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "c"}
 	say := func(key string, target contract.ActorRef, stream bool) model.Message {
 		t.Helper()
-		message, err := store.Speak(ctx, "conv", contract.SpeakRequest{Key: key, Actor: a, Target: target, Stream: stream, Content: textContent(key)})
+		status := contract.MessageStatusCompleted
+		if stream {
+			status = contract.MessageStatusStreaming
+		}
+		message, err := store.Speak(ctx, "conv", contract.SpeakRequest{Status: status, Key: key, Actor: a, Target: target, Content: textContent(key)})
 		if err != nil {
 			t.Fatal(err)
 		}

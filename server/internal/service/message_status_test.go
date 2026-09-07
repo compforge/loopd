@@ -18,7 +18,7 @@ func TestOneShotSpeakNeedsNoMessageStream(t *testing.T) {
 	store, producer, _ := outputFixture(t)
 	ctx := context.Background()
 	request := outputRequest("once")
-	request.Stream = false
+	request.Status = contract.MessageStatusCompleted
 	message, err := store.Speak(ctx, "root", request)
 	if err != nil {
 		t.Fatal(err)
@@ -261,14 +261,14 @@ func TestSubscriptionContinuesAfterMessageEnd(t *testing.T) {
 		if event.MessageID == first.ID && patch.Op == ui.OpEnd && !ended {
 			ended = true
 			request := outputRequest("later")
-			request.Stream = false
+			request.Status = contract.MessageStatusCompleted
 			message, err := store.Speak(ctx, "work", request)
 			if err != nil {
 				return err
 			}
 			later = message.ID
 			request = outputRequest("unsolicited")
-			request.Stream = false
+			request.Status = contract.MessageStatusCompleted
 			request.Actor = contract.ActorRef{Kind: contract.ActorKindOperator, Key: "another"}
 			message, err = store.Speak(ctx, "work", request)
 			if err != nil {

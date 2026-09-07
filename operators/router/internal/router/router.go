@@ -128,28 +128,19 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 // readHistory is Router policy, not a runtime context model. Keep a bounded
 // tail before the polled input; later messages must enter through Poll instead.
 func (reconciler *Reconciler) readHistory(ctx context.Context, convID, before string) ([]contract.Message, error) {
-	const limit = 100
-	var history []contract.Message
-	after := ""
-	for {
-		page, err := reconciler.loop.Conv.Read(ctx, convID, after, limit)
+	page, err := reconciler.loop.Conv.List(ctx, convID, loopruntime.MessageQuery{Before: before, Order: loopruntime.Desc, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	history := make([]contract.Message, 0, len(page.Messages))
+	for i := len(page.Messages) - 1; i >= 0; i-- {
+		m, err := page.Messages[i].Snapshot(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, message := range page {
-			if message.ID >= before {
-				return history, nil
-			}
-			history = append(history, message)
-			if len(history) > limit {
-				history = history[len(history)-limit:]
-			}
-		}
-		if len(page) < limit {
-			return history, nil
-		}
-		after = page[len(page)-1].ID
+		history = append(history, m)
 	}
+	return history, nil
 }
 
 type plan struct {

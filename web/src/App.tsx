@@ -5,7 +5,7 @@ import {
   createConversation,
   listActors,
   listConversations,
-  streamMessage,
+  submitMessage,
   type Actor,
   type Conversation,
   type Message,
@@ -189,7 +189,7 @@ export function App() {
       },
     ]);
     try {
-      await streamMessage({
+      await submitMessage({
         conversationID, text, target: selectedActor,
         onTaskID: () => setSubmitting(false),
         onEvent: (delivery) => {

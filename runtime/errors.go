@@ -32,6 +32,8 @@ func (err *Error) Unwrap() error { return err.Cause }
 var (
 	ErrCallConflict            = &Error{StatusCode: http.StatusConflict, Message: "Harness call conflicts with an existing submission"}
 	errRegistrationKeyRequired = &Error{Message: "registration key is required"}
+	errSpeakStatusInvalid      = &Error{Message: "Speak requires a terminal message status; use Tell for streaming"}
+	errTellStatusInvalid       = &Error{Message: "Tell starts a streaming message; pass terminal status to End"}
 	errMessageEnded            = &Error{Message: "message has ended"}
 	errInvalidEmit             = &Error{Message: "Emit requires set or append; use End to finish sending"}
 	errEndStatusCount          = &Error{Message: "End accepts at most one status"}
