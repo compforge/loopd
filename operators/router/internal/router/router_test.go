@@ -144,13 +144,14 @@ type testFailure struct {
 
 type loopServer struct {
 	*httptest.Server
-	mu           sync.Mutex
-	answer       string
-	completed    bool
-	failure      *testFailure
-	polls        int
-	inbox        [][]contract.Message
-	completedIDs []string
+	mu            sync.Mutex
+	answer        string
+	completed     bool
+	failure       *testFailure
+	failureStatus contract.MessageStatus
+	polls         int
+	inbox         [][]contract.Message
+	completedIDs  []string
 }
 
 func newLoopServer(t *testing.T, taskID string) *loopServer {
@@ -162,6 +163,9 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			var input contract.CommitRequest
 			_ = json.NewDecoder(request.Body).Decode(&input)
 			value.mu.Lock()
+			if value.failure != nil && value.failureStatus != contract.MessageStatusFailed {
+				t.Error("failure message must have failed status before Commit")
+			}
 			value.completed = true
 			value.completedIDs = append(value.completedIDs, input.Through)
 			value.mu.Unlock()
@@ -223,7 +227,8 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			})
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):
 			var input struct {
-				Event json.RawMessage `json:"event"`
+				Event  json.RawMessage        `json:"event"`
+				Status contract.MessageStatus `json:"status"`
 			}
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
@@ -235,6 +240,11 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 				t.Error(err)
 				response.WriteHeader(http.StatusBadRequest)
 				return
+			}
+			if event.Op == agentueui.OpEnd && input.Status == contract.MessageStatusFailed {
+				value.mu.Lock()
+				value.failureStatus = input.Status
+				value.mu.Unlock()
 			}
 			if event.Block["id"] == "answer" {
 				value.mu.Lock()

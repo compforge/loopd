@@ -2,9 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
-	"io"
-	"net"
 	"net/http"
 	"time"
 )
@@ -16,7 +13,7 @@ func (c *client) write(ctx context.Context, path string, input, output any) erro
 	defer cancel()
 	for attempt := 0; ; attempt++ {
 		err := c.do(ctx, http.MethodPost, path, input, output)
-		if err == nil || attempt == 2 || ctx.Err() != nil || !transientWrite(err) {
+		if err == nil || attempt == 2 || ctx.Err() != nil || !IsRetryable(err) {
 			return err
 		}
 		c.logger.WarnContext(ctx, "retry message publication", "path", path, "attempt", attempt+1)
@@ -24,17 +21,8 @@ func (c *client) write(ctx context.Context, path string, input, output any) erro
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ctx.Err()
+			return wrapError(ctx.Err())
 		case <-timer.C:
 		}
 	}
-}
-
-func transientWrite(err error) bool {
-	var response *Error
-	if errors.As(err, &response) {
-		return response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500
-	}
-	var network net.Error
-	return errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }

@@ -2,7 +2,10 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,44 @@ import (
 	"github.com/compforge/loopd/server/testutil"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
+
+func TestRouterReportsAndCommitsReturnedError(t *testing.T) {
+	server := newLoopServer(t, "")
+	adapter := newScriptedAdapter(`{"kind":"simple","tasks":["Work"]}`, nil, 0)
+	client := testutil.WithHarnesses(t, server.Client(), map[string]harness.Adapter{"temporary": adapter}, nil)
+	transport := client.Transport
+	client.Transport = observationTransport{base: transport}
+	rt, err := loopruntime.New(server.URL, loopruntime.Options{HTTPClient: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	reconciler, err := New(rt.Loop, Config{HarnessTarget: "temporary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciler.reader = routerReader(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: objectKey("conversation-1")})
+	var runtimeErr *loopruntime.Error
+	if !errors.As(err, &runtimeErr) || runtimeErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected observation failure, got %v", err)
+	}
+	answer, committed, failure := server.result()
+	if answer != "" || !committed || failure == nil {
+		t.Fatalf("error must be reported and committed: answer=%q committed=%v failure=%v", answer, committed, failure)
+	}
+}
+
+type observationTransport struct{ base http.RoundTripper }
+
+func (t observationTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/harness/runs/") {
+		return &http.Response{StatusCode: http.StatusForbidden, Status: "403 Forbidden", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	}
+	return t.base.RoundTrip(r)
+}
 
 // +case=`执行期间的新输入在当前批次完成后重新 plan；可先发阶段结果，再汇总或继续分派`
 func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {

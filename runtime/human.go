@@ -52,7 +52,7 @@ func (h Human) Confirm(ctx context.Context, r ConfirmRequest) (*HumanHandle, err
 }
 func (h Human) create(ctx context.Context, r contract.HumanRequest) (*HumanHandle, error) {
 	if err := r.Validate(); err != nil {
-		return nil, err
+		return nil, wrapError(err)
 	}
 	var result contract.HumanResult
 	path := "/v1/conversations/" + url.PathEscape(r.ConversationID) + "/human"
@@ -80,7 +80,7 @@ func (h *HumanHandle) Wait(ctx context.Context) (contract.HumanResult, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return contract.HumanResult{}, ctx.Err()
+			return contract.HumanResult{}, wrapError(ctx.Err())
 		case <-timer.C:
 		}
 	}
