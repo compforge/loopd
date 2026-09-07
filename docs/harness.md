@@ -82,6 +82,18 @@ loopd 不要求 Harness 原生返回 AgentUE，也不从过程文本的最后一
 支持接管的 Adapter 实现 Recoverable.Resume，保证挂接同一次执行和稳定回放；无法保证时明确
 报告不支持恢复。具体回放与观察故障处理见 [恢复与内存](#恢复与内存)。
 
+### HTTP 连接管理
+
+HTTP Adapter 可复用 `pkg/harness/internal/httpclient`：每个 Adapter 实例持有一个 Client，
+内部为短请求和流式请求分别维护独立的连接池，通过 DoShort、DoStream 选择。Managed Agent
+的 Session 创建与历史查询走短请求池，SSE 走流式请求池，避免长连接占满后阻塞历史补读。
+MaxConnections 是每个 host、每个池的连接上限，与 Engine 的 Run 并发额度分别配置。
+
+HTTPTimeout 限制短请求全过程（含响应体），也限制两类连接的建立与响应头等待；流式响应体
+的生命周期由请求 context 控制，Managed Agent 另外使用 StreamTimeout 限制观察时长。
+连接池随 Adapter 复用，响应体由调用方关闭；CloseIdleConnections 释放两个池的空闲连接，
+不打断活跃调用。鉴权、协议、重试与恢复策略仍归 Adapter。
+
 ## Run：提交、驱动与观察
 
 一次调用的主流程是：
