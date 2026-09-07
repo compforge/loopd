@@ -69,7 +69,7 @@ func (s *HarnessRunService) Submit(ctx context.Context, r contract.HarnessRunReq
 	return harnessCall(run), nil
 }
 func harnessCall(run model.HarnessRun) contract.HarnessCall {
-	return contract.HarnessCall{ID: run.ID, MessageID: run.MessageID, EffectKey: run.EffectKey, Target: run.Target, Phase: contract.CallPhase(run.Phase), Error: run.Error, DeadlineAt: run.DeadlineAt, Timestamped: contract.Timestamped{CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt}}
+	return contract.HarnessCall{ID: run.ID, ConversationID: run.ConversationID, MessageID: run.MessageID, EffectKey: run.EffectKey, Target: run.Target, Phase: contract.CallPhase(run.Phase), Error: run.Error, DeadlineAt: run.DeadlineAt, Timestamped: contract.Timestamped{CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt}}
 }
 func (s *HarnessRunService) Observe(ctx context.Context, id string) (contract.HarnessObservation, error) {
 	run, err := s.store.GetHarnessRunState(ctx, id)
@@ -110,24 +110,12 @@ func (s *HarnessRunService) Stream(ctx context.Context, id string, deliver func(
 	}
 	return s.Listen(ctx, run.MessageID, deliver)
 }
+
+// Get reads execution metadata; message bodies are resolved through Message reads.
 func (s *HarnessRunService) Get(ctx context.Context, id string) (contract.HarnessCall, error) {
 	run, err := s.store.GetHarnessRunState(ctx, id)
 	if err != nil {
 		return contract.HarnessCall{}, err
 	}
-	call := harnessCall(run)
-	if call.Phase == contract.CallSucceeded {
-		m, err := s.store.GetMessage(ctx, run.MessageID)
-		if err != nil {
-			return call, err
-		}
-		call.Result, err = contract.ExtractResult(m.Content)
-		if err != nil {
-			return call, err
-		}
-		if call.Result == nil {
-			return call, fmt.Errorf("completed Harness run %s has no result", id)
-		}
-	}
-	return call, nil
+	return harnessCall(run), nil
 }

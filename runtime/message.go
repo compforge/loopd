@@ -11,46 +11,30 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 )
 
-// Message is the writer returned by Speak. Repeating Speak with the same key
+// messageStream is the writer returned by Tell. Repeating Tell with the same key
 // restores the same message; one logical writer owns its event sequence.
-type Message struct {
+type messageStream struct {
+	Message
 	mu      sync.Mutex
 	client  *client
-	value   contract.Message
+	value   contract.MessageInfo
 	next    uint64
 	ended   bool
 	pending json.RawMessage
 }
 
 // Handles are caller-owned; Runtime never retains complete message snapshots.
-type messageHandles struct{}
-
-func (*messageHandles) handle(c *client, value contract.Message) *Message {
+func newMessageStream(c *client, value contract.MessageInfo) *messageStream {
 	next := value.Revision + 1
 	if next < 2 {
 		next = 2
 	}
-	return &Message{client: c, value: value, next: next, ended: value.Ended()}
-}
-
-func (message *Message) ID() string {
-	message.mu.Lock()
-	defer message.mu.Unlock()
-	return message.value.ID
-}
-
-// Value observes the last locally known snapshot, not a server read.
-func (message *Message) Value() contract.Message {
-	message.mu.Lock()
-	defer message.mu.Unlock()
-	value := message.value
-	value.Content = append(json.RawMessage(nil), value.Content...)
-	return value
+	return &messageStream{Message: &remoteMessage{client: c, convID: value.ConversationID, id: value.ID}, client: c, value: value, next: next, ended: value.Status.Terminal()}
 }
 
 // Emit updates this message (effect: write). The runtime assigns sequence numbers
 // and retries transient failures; event.Seq is ignored. No transport ID is returned.
-func (message *Message) Emit(ctx context.Context, event ui.Event) error {
+func (message *messageStream) Emit(ctx context.Context, event ui.Event) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	if message.ended {
@@ -64,8 +48,8 @@ func (message *Message) Emit(ctx context.Context, event ui.Event) error {
 
 // End finishes only this message (effect: write), not the Conv or UI subscription.
 // The optional terminal status defaults to completed. Repeating the same End,
-// including after restoring the handle with Speak, is safe.
-func (message *Message) End(ctx context.Context, statuses ...contract.MessageStatus) error {
+// including after restoring the handle with Tell, is safe.
+func (message *messageStream) End(ctx context.Context, statuses ...contract.MessageStatus) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	status := contract.MessageStatusCompleted
@@ -91,7 +75,7 @@ func (message *Message) End(ctx context.Context, statuses ...contract.MessageSta
 	return nil
 }
 
-func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...contract.MessageStatus) error {
+func (message *messageStream) emit(ctx context.Context, event ui.Event, statuses ...contract.MessageStatus) error {
 	event.Seq = message.next
 	data, err := event.Marshal()
 	if err != nil {
@@ -120,12 +104,6 @@ func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...co
 		message.next = event.Seq + 1
 		if event.Op == ui.OpEnd {
 			message.value.Status = request.Status
-		}
-		var snapshot map[string]any
-		if json.Unmarshal(message.value.Content, &snapshot) == nil {
-			if next, err := ui.Apply(snapshot, event); err == nil {
-				message.value.Content, _ = ui.MarshalSnapshot(next)
-			}
 		}
 		message.value.Revision = event.Seq
 	}

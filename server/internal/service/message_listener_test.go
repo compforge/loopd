@@ -50,7 +50,7 @@ func TestConversationStreamOnlyChecksActiveMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := outputRequest("ended")
-	old.Stream = false
+	old.Status = contract.MessageStatusCompleted
 	if _, err := store.Speak(ctx, "root", old); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	old := outputRequest("old")
-	old.Stream = false
+	old.Status = contract.MessageStatusCompleted
 	history, err := store.Speak(ctx, "root", old)
 	if err != nil {
 		t.Fatal(err)

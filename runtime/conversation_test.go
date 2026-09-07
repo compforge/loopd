@@ -79,8 +79,9 @@ func TestConversationReadAndPollUseDifferentVerbs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	messages, err := runtime.Loop.Conv.Read(context.Background(), "conv", "001", 10)
-	if err != nil || len(messages) != 1 || messages[0].ID != "002" {
+	page, err := runtime.Loop.Conv.List(context.Background(), "conv", MessageQuery{After: "001", Limit: 10})
+	messages := page.Messages
+	if err != nil || len(messages) != 1 || messages[0].ID() != "002" {
 		t.Fatalf("Read = %+v, %v", messages, err)
 	}
 	result, err := runtime.Loop.Conv.Poll(context.Background(), "conv", contract.PollRequest{

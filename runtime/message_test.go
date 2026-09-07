@@ -22,10 +22,10 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	fail := true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/conversations/conv/speak":
+		case "/v1/conversations/conv/messages":
 			var input contract.SpeakRequest
 			_ = json.NewDecoder(r.Body).Decode(&input)
-			if !input.Stream {
+			if input.Status != contract.MessageStatusStreaming {
 				_ = json.NewEncoder(w).Encode(contract.Message{Status: contract.MessageStatusCompleted, ID: "once", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)})
 			} else {
 				_ = json.NewEncoder(w).Encode(value)
@@ -56,21 +56,19 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	}
 	defer runtime.Close()
 	once, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Key: "once"})
-	if err != nil || !once.Value().Ended() {
+	if err != nil || once.ID() != "once" {
 		t.Fatalf("once=%v err=%v", once, err)
 	}
-	if err := once.End(ctx); err != nil {
-		t.Fatal(err)
+	if _, ok := once.(Stream); ok {
+		t.Fatal("Speak returned write capability")
 	}
 	event := ui.Event{Seq: 999, Op: ui.OpSet, Block: map[string]any{"id": "text", "type": "text", "content": "hello"}}
-	if err := once.Emit(ctx, event); err == nil {
-		t.Fatal("one-shot message stayed writable")
-	}
-	stream, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
+
+	stream, err := runtime.Loop.Conv.Tell(ctx, "conv", contract.SpeakRequest{Key: "stream"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
+	again, err := runtime.Loop.Conv.Tell(ctx, "conv", contract.SpeakRequest{Key: "stream"})
 	if err != nil || again.ID() != stream.ID() {
 		t.Fatalf("handle not shared: %v", err)
 	}
@@ -94,8 +92,8 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	stream, err = restored.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
-	if err != nil || stream.ID() != "output" || !stream.Value().Ended() {
+	stream, err = restored.Loop.Conv.Tell(ctx, "conv", contract.SpeakRequest{Key: "stream"})
+	if err != nil || stream.ID() != "output" || !stream.(*messageStream).value.Status.Terminal() {
 		t.Fatalf("restore: %v", err)
 	}
 	if err := stream.End(ctx); err != nil || len(seqs) != 3 {
@@ -109,7 +107,7 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 	value := contract.Message{Status: contract.MessageStatusStreaming, ID: "stream", Revision: 1, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)}
 	attempts, fail := 0, true
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/conversations/conv/speak" {
+		if r.URL.Path == "/v1/conversations/conv/messages" {
 			_ = json.NewEncoder(w).Encode(value)
 			return
 		}
@@ -132,8 +130,8 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	request := contract.SpeakRequest{Key: "step", Stream: true}
-	stream, err := rt.Loop.Conv.Speak(ctx, "conv", request)
+	request := contract.SpeakRequest{Key: "step"}
+	stream, err := rt.Loop.Conv.Tell(ctx, "conv", request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +159,7 @@ func TestMessageEndStatus(t *testing.T) {
 			value := contract.Message{ID: "stream", Status: contract.MessageStatusStreaming, Revision: 1, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 			writes := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/v1/conversations/conv/speak" {
+				if r.URL.Path == "/v1/conversations/conv/messages" {
 					_ = json.NewEncoder(w).Encode(value)
 					return
 				}
@@ -187,7 +185,7 @@ func TestMessageEndStatus(t *testing.T) {
 			}
 			defer rt.Close()
 			ctx := context.Background()
-			stream, err := rt.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Key: "step", Stream: true})
+			stream, err := rt.Loop.Conv.Tell(ctx, "conv", contract.SpeakRequest{Key: "step"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,14 +197,11 @@ func TestMessageEndStatus(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if writes != 1 || stream.Value().Status != status {
-				t.Fatalf("writes=%d status=%s", writes, stream.Value().Status)
+			if writes != 1 || stream.(*messageStream).value.Status != status {
+				t.Fatalf("writes=%d status=%s", writes, stream.(*messageStream).value.Status)
 			}
 			if err := stream.End(ctx); err == nil {
 				t.Fatal("replaced failure/cancellation with success")
-			}
-			if string(stream.Value().Content) != `{"biz":"chat","blocks":[],"meta":{},"version":"1.1"}` {
-				t.Fatalf("status leaked into content: %s", stream.Value().Content)
 			}
 		})
 	}

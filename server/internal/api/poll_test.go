@@ -112,7 +112,7 @@ func testActorKindConversationConsumption(t *testing.T, kind contract.ActorKind)
 	messages := service.NewMessageService(store, nil, nil)
 	// Speak persistence queues the notification; Poll service reconciles it.
 	role := contract.ActorRef{Kind: kind, Key: "run-uid"}
-	message, err := messages.Speak(ctx, "conv", contract.SpeakRequest{Key: "audit-report", Actor: contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})
+	message, err := messages.Publish(ctx, "conv", contract.SpeakRequest{Key: "audit-report", Actor: contract.ActorRef{Kind: "operator/longhorizon/auditor", Key: "run-uid"}, Target: role})
 	if err != nil {
 		t.Fatal(err)
 	}

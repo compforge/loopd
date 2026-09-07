@@ -64,6 +64,7 @@ server/
 
 5. DB 保存 merge 后的 AgentUE 快照；Redis Stream append-only 保存实时事件。写入先 DB 再 Redis，
    实时消费走 Redis/SSE，DB 快照用于历史和缺口恢复，详见 persistence.md。
+   Part 只属于 repo/model 的存储优化；service、API、runtime 和 Operator 不感知物理分片。
 
 ## References
 

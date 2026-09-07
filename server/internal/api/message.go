@@ -28,7 +28,19 @@ func (server *Server) listMessages(ctx context.Context, request *hertzapp.Reques
 		}
 		messages, err = server.messages.MessageChanges(ctx, request.Param("conversation_id"), revisions)
 	} else {
-		messages, err = server.messages.ListMessages(ctx, request.Param("conversation_id"), request.Query("after"), limit)
+		query := contract.MessageQuery{After: request.Query("after"), Before: request.Query("before"), Order: contract.MessageOrder(request.Query("order")), Limit: limit}
+		if ids := request.Query("ids"); ids != "" {
+			query.IDs = strings.Split(ids, ",")
+		}
+		for _, status := range request.QueryArgs().PeekAll("status") {
+			query.Statuses = append(query.Statuses, contract.MessageStatus(status))
+		}
+		page, queryErr := server.messages.QueryMessages(ctx, request.Param("conversation_id"), query)
+		if queryErr != nil {
+			return queryErr
+		}
+		request.JSON(consts.StatusOK, page)
+		return nil
 	}
 	if err != nil {
 		return err
@@ -66,4 +78,33 @@ func queryLimit(request *hertzapp.RequestContext) (int, error) {
 		return 0, fmt.Errorf("%w: limit must be a positive integer", service.ErrInvalid)
 	}
 	return limit, nil
+}
+
+func (s *Server) getMessageInfo(ctx context.Context, r *hertzapp.RequestContext) error {
+	value, err := s.messages.MessageInfo(ctx, r.Param("conversation_id"), r.Param("message_id"))
+	if err != nil {
+		return err
+	}
+	r.JSON(200, value)
+	return nil
+}
+func (s *Server) getMessageContent(ctx context.Context, r *hertzapp.RequestContext) error {
+	value, err := s.messages.MessageSnapshot(ctx, r.Param("conversation_id"), r.Param("message_id"))
+	if err != nil {
+		return err
+	}
+	r.JSON(200, value)
+	return nil
+}
+func (s *Server) getMessageBlocks(ctx context.Context, r *hertzapp.RequestContext) error {
+	page, err := s.messages.MessageBlocks(ctx, r.Param("conversation_id"), r.Param("message_id"), r.Param("block_id"), r.Query("cursor"))
+	if err != nil {
+		return err
+	}
+	if r.Param("block_id") != "" {
+		r.JSON(200, contract.BlockSnapshot{Revision: page.Revision, Block: page.Data[0]})
+	} else {
+		r.JSON(200, page)
+	}
+	return nil
 }

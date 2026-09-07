@@ -47,17 +47,18 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 
 | 分组 | Verb | Effect 与语义 |
 |---|---|---|
-| Conv | Read | read：分页读取共享消息历史 |
+| Conv | Read / List | read：创建单条惰性引用／分页发现消息元信息与句柄 |
 | Conv | Poll | write：拉取收件消息，记录 Position，不自动提交 |
 | Conv | Commit | write：确认连续安全消费前缀 |
-| Conv | Speak | write：一次说完，或开启流式消息并返回句柄 |
+| Conv | Speak / Tell | write：一次说完返回 Message／开启流式消息返回 Stream |
 | Human | Ask / Confirm | write：创建或复用独立问题 Message |
 | Human / Human handle | Get / Wait | read：观察问题的权威结果 |
 | Harness | Prompt | write：发起或复用有身份的执行，返回 Call |
 | Harness Call | Get / Stream / Wait / Result | read：观察已有执行、等待终态或提取结果 |
 | Harness Call | Cancel | write：请求停止 Server 驱动，远端取消取决于 Adapter 能力 |
-| Message handle | Emit / End | write：增量更新／结束这条消息，不管理页面连接 |
-| Message handle | ID / Value | read：观察消息身份／本地已知快照 |
+| Stream handle | Emit / End | write：增量更新／结束这条消息，不管理页面连接 |
+| Message handle | Info / Snapshot / Block / Blocks | read：显式获取元信息、完整内容、单块或逐页逻辑块 |
+| Message handle | ID / ConversationID | 本地读取身份，不发起网络请求 |
 | Operator / Harness | Register | write：注册与续租在线身份 |
 
 read 表达观察意图；server 在读取 Human 状态时推进已到期问题，不等于调用者发起新工作。
@@ -105,14 +106,15 @@ func Reconcile(conv) {
     if !ok || participant.ConversationID == "" { return }  // 尚未就绪，不启动工作
     workspace := participant.ConversationID                // server 随定向消息分配的过程会话
     inbox := Loop.Conv.Poll(convID)                         // 收到发给自己的消息，不代表处理完成
-    history := Loop.Conv.Read(convID)                       // 主动查看共享历史，不改变消费位置
+    history := Loop.Conv.List(convID, query)                // 只发现元信息与句柄，不加载所有正文
+    message := Loop.Conv.Read(convID, messageID)            // 不访问网络；需要时再 message.Snapshot(ctx)
     question := Loop.Human.Ask(convID, "希望怎样处理？")     // 反问用户；handle.Get / Wait 获取选择
     approval := Loop.Human.Confirm(convID, "确认执行吗？")   // 请求确认；普通追加发言不等于同意
     call := Loop.Harness.Prompt(workspace, prompt, tools)   // 按选择与确认结果调用 Harness，立即取得句柄
     progress, err := call.Get(ctx); events, errors := call.Stream(ctx)      // 查看执行状态或持续观察增量
     result := call.Wait()                                  // 需要结果时再等；也可以先返回，之后再调谐
     Loop.Conv.Speak(convID, result)                        // 已知完整内容，一次说完，无需 End
-    stream := Loop.Conv.Speak(convID, Stream: true)         // 需要逐步输出时，取得消息句柄
+    stream := Loop.Conv.Tell(convID)                       // 需要逐步输出时，取得流式句柄
     stream.Emit(event); stream.End()                       // 增量输出，最后结束这条消息；页面继续订阅
     Loop.Conv.Commit(convID, inbox.Position)               // 仅提交已经安全处理的连续消息前缀
 }
@@ -128,23 +130,36 @@ Harness 的可见输出由 Server 自动持久化与交付，`call.Stream` 用�
 
 ## 会话、消息与发言
 
-Poll 返回本次接收的消息，Conv.Read 分页读取会话历史，不递归合并内部会话，也不改变消费位置。
+Poll 返回本次接收的消息，Conv.List 分页发现会话消息，不递归合并内部会话，也不改变消费位置。
 Operator 自行选择历史范围并组装执行上下文，runtime 不定义独立的上下文模型或问答配对。
+
+Message 是只读接口，不是预先加载的正文。Conv.Read(convID, messageID) 只建立引用；
+ID/ConversationID 不访问网络，Info、Snapshot、Block、Blocks 在显式调用时读取 Server。
+List 支持 IDs、开区间边界 Before/After、正反序、状态与数量筛选，返回本次元信息和 Message 句柄；
+Before/After 的边界均不包含自身，可同时限定一个区间。Info 每次读取当前元信息，不复用 List 的旧值。
+读取始终限定在指定 Conversation 内，单条查询不靠扫描历史寻找 ID。
+
+Snapshot 返回同一版本的完整内容；Block 按逻辑 block ID 获取内容，Blocks 逐页遍历。
+分页期间消息版本改变会返回冲突，调用者丢弃部分结果后重读，不能混合不同版本。
+正文读取有大小上限，超过上限明确失败，不静默截断；长消息按需读取逻辑块。
+这些选择与底层如何存储无关：Part 只是 Server repo/model 的存储优化，不是外部协作概念，
+runtime、Operator 与 Harness 都不解析引用或感知 Part。细节见 [持久化](../server/docs/persistence.md#message-内容与-parts)。
 
 Conv.Speak 创建或复用一条 Actor-owned Message，稳定 Key 的范围是 Conv + Actor。
 同 key 重试返回既有消息，不覆盖已有正文；改变收件者或回复引用会冲突。需要新发言用新 key，
 流式更新通过返回的消息句柄发布。内容是 AgentUE model，不限于文字。
 
-Speak 默认一次说完：Content 随消息原子保存并标记结束，不需要独立消息 Redis 流，也不需要 End。
-只有 `Stream: true` 才保持消息开放；可携带初始 Content，也可省略，之后用 `stream.Emit` 发布
-AgentUE set/append，最后 `stream.End`。两种模式返回同一 Go 句柄类型，ID/Value 可读取身份与快照。
-非流式 Speak 可指定终态 Status，默认 completed；失败说明用 failed，并在 Content 中携带
-AgentUE meta.error。Status 与 Stream=true 不能同时设置。模式、正文和 Status 只在首次创建时
+Speak 一次说完：Content 随消息原子保存并标记结束，返回只读 Message，不需要 End。
+Tell 保持消息开放，可携带初始 Content，也可省略，返回 Stream；之后用 `stream.Emit` 发布
+AgentUE set/append，最后 `stream.End`。Stream 嵌入 Message 接口，共享相同的惰性读取能力，
+但读句柄不能获得写入权限，runtime 不保留随输出增长的正文副本。
+Speak 可指定终态 Status，默认 completed；失败说明用 failed，并在 Content 中携带
+AgentUE meta.error。Tell 创建 streaming 消息，终态通过 End 指定。正文和 Status 只在首次创建时
 生效，同 Key 重试返回既有消息，不能覆写内容、改变终态或重新打开消息。
 
 `stream.End(ctx)` 默认将 Message.status 从 streaming 改为 completed；输出异常或明确取消时，
 可传 `stream.End(ctx, contract.MessageStatusFailed)` 或 `contract.MessageStatusCancelled`。
-相同终态的 End 可重复调用，不同终态冲突，结束后不再接受 Emit；重新 Speak 同 Key 可取回状态与 Revision。
+相同终态的 End 可重复调用，不同终态冲突，结束后不再接受 Emit；重新 Tell 同 Key 可恢复写入句柄的状态与 Revision。
 句柄只属于一条消息，不关闭 Conv、不 Commit，也不结束其他 Actor 的工作或页面订阅。
 
 Speak 不依赖某次 user input 或页面连接。Target 可以是 User、其他 Operator，或留空向会话发言；
@@ -207,6 +222,10 @@ Call，最多三次连接；Result(ctx) 从持久终态提取结果。正常流�
 `loop.Harness.Call(runID)` 重建句柄，不重新提交。取消等待、关闭 toolkit 均不取消执行；显式
 Cancel(ctx) 请求停止 Server 驱动，远端是否中断由 Adapter 能力决定。
 
+Call.Message(ctx) 返回同一 Message 只读接口，不负责开始或结束执行。Prompt 返回时已经有消息引用；
+通过 Run ID 重建的 Call 则先读取 Run 元信息解析引用，不加载正文。Get 在成功态按需读取
+result block，不为提取最终结果展开整条执行消息。Call 生命周期与消息读写能力保持分离。
+
 Server 在接收事务中创建输出 Message，调用者可以指定开放的 Actor kind/key、Recipient 和展示
 Meta。一个 Call 对应一条独立输出，不再接受调用者的 Output writer；Server 原子保存 result block
 和执行终态。Operator 读取 text/JSON 作决策，不接手 Emit/End；自己的总结等发言仍使用 Speak。
@@ -249,12 +268,12 @@ Operator API 与历史读取仍是可信部署边界，不提供完整多租户 
 
 ## 消息发送与技术边界
 
-Operator 只调用 Speak、Emit、End，不接触 Delivery、task_id、Redis Event ID 或 SSE 连接。
+Operator 只调用 Speak、Tell、Emit、End，不接触 Delivery、task_id、Redis Event ID 或 SSE 连接。
 发送成功表示 DB 已接收可见消息；runtime/server 负责增量持久化、通知和间接送达页面。
 Redis 暂时不可用不要求 Operator 重做业务；页面通过持久快照追上，详见 [UE](../server/docs/ue.md)。
 
 stream.Emit 接收 AgentUE set/append，忽略调用方的 Seq，由句柄串行分配序号并有界重试瞬时失败。
-同 Key 的 Speak 复用消息并从 DB 重建句柄；重启后依据持久 Revision 恢复写入位置，不恢复 Go 调用栈。
+同 Key 的 Tell 复用消息并从 DB 重建句柄；重启后依据持久 Revision 恢复写入位置，不恢复 Go 调用栈。
 一条消息须由一个逻辑写入者拥有，多副本执行互斥仍由 Operator 配置。
 
 重试耗尽仍返回错误，未确认的更新不能被下一条内容越过；调用方可重试同一更新，或结束本轮执行
@@ -272,7 +291,7 @@ Harness 的配置 target、在线注册和输出 Actor 身份各有用途，统�
 
 ## Router 示例策略
 
-Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 Read 选取该输入之前的历史，
+Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 List 选取该输入之前的有限历史，
 执行 plan → 有界并行 Harness。当前批结束后再 Poll：有追加输入时先发阶段结果，再带累计证据
 重新 plan，决定继续分派或汇总。没有新输入则发出该输入快照的汇总结果。
 

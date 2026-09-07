@@ -67,8 +67,8 @@ func TestChatHTTPFlow(t *testing.T) {
 		"target":{"kind":"operator","key":"intent"},
 		"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}
 	}`)
-	if !strings.Contains(stream, `"op":"start"`) || !strings.Contains(stream, `"op":"end"`) {
-		t.Fatalf("send body=%s, want AgentUE start and end events", stream)
+	if !strings.Contains(stream, `"status":"completed"`) {
+		t.Fatalf("send body=%s, want a completed message acknowledgement", stream)
 	}
 	if taskID == "" {
 		t.Fatal("send response omitted task ID header")
@@ -134,7 +134,7 @@ func TestChatHTTPFlow(t *testing.T) {
 		}
 	}
 	childMessages := ut.PerformRequest(engine, "GET", "/v1/conversations/"+child.ID+"/messages", nil).Result()
-	if childMessages.StatusCode() != 200 || !strings.Contains(string(childMessages.Body()), "detail output") {
+	if childMessages.StatusCode() != 200 || strings.Contains(string(childMessages.Body()), `"content":`) {
 		t.Fatalf("child messages=%s", childMessages.Body())
 	}
 	if removed := performJSON(t, engine, "GET", "/v1/tasks/"+taskID, ""); removed.StatusCode() != 404 {
@@ -202,12 +202,14 @@ func performChat(t *testing.T, server *Server, conversationID, body string) (str
 	request.Params = param.Params{{Key: "conversation_id", Value: conversationID}}
 	request.Request.SetBodyString(body)
 	request.Request.Header.Set("Content-Type", "application/json")
-	writer := &streamWriter{}
-	request.Response.HijackWriter(writer)
-	if err := server.createChatMessages(context.Background(), request); err != nil {
+	if err := server.publishMessage(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	return string(request.Response.Header.Peek(taskIDHeader)), writer.String()
+	var info contract.MessageInfo
+	if err := json.Unmarshal(request.Response.Body(), &info); err != nil {
+		t.Fatal(err)
+	}
+	return info.TaskID, string(request.Response.Body())
 }
 
 func performJSON(t *testing.T, engine *route.Engine, method, path, value string) *protocol.Response {
@@ -238,7 +240,7 @@ func TestChatAcknowledgesInputBeforePageBridge(t *testing.T) {
 	}
 	id, body := performChat(t, server, conv.ID, `{"user_key":"alice","target":{"kind":"operator","key":"a"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`)
 	input, err := store.GetDeliveryInput(context.Background(), id)
-	if err != nil || !strings.Contains(body, input.ID) || !strings.Contains(body, `"op":"start"`) {
+	if err != nil || !strings.Contains(body, input.ID) || !strings.Contains(body, `"status":"completed"`) {
 		t.Fatalf("missing acceptance: task=%s body=%s err=%v", id, body, err)
 	}
 }

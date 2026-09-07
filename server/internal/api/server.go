@@ -57,13 +57,16 @@ func (server *Server) Register(engine *route.Engine) {
 	engine.POST("/v1/conversations", server.adapt(server.createConversation))
 	engine.GET("/v1/conversations", server.adapt(server.listConversations))
 	engine.GET("/v1/conversations/:conversation_id", server.adapt(server.getConversation))
+	engine.GET("/v1/conversations/:conversation_id/messages/:message_id", server.adapt(server.getMessageInfo))
+	engine.GET("/v1/conversations/:conversation_id/messages/:message_id/content", server.adapt(server.getMessageContent))
+	engine.GET("/v1/conversations/:conversation_id/messages/:message_id/blocks", server.adapt(server.getMessageBlocks))
+	engine.GET("/v1/conversations/:conversation_id/messages/:message_id/blocks/:block_id", server.adapt(server.getMessageBlocks))
 	engine.GET("/v1/conversations/:conversation_id/messages", server.adapt(server.listMessages))
 	engine.GET("/v1/conversations/:conversation_id/stream", server.adapt(server.streamConversation))
 	engine.POST("/v1/conversations/:conversation_id/poll", server.adapt(server.pollConversation))
 	engine.POST("/v1/conversations/:conversation_id/commit", server.adapt(server.commitConversation))
-	engine.POST("/v1/conversations/:conversation_id/speak", server.adapt(server.publishMessage))
+	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.publishMessage))
 	engine.POST("/v1/messages/:message_id/events", server.adapt(server.emitPublishedMessage))
-	engine.POST("/v1/conversations/:conversation_id/messages", server.adapt(server.createChatMessages))
 	engine.POST("/v1/conversations/:conversation_id/human", server.adapt(server.createHuman))
 	engine.POST("/v1/conversations/:conversation_id/replies", server.adapt(server.replyHuman))
 	engine.GET("/v1/human/:message_id", server.adapt(server.getHuman))
@@ -84,6 +87,8 @@ func (server *Server) writeError(request *hertzapp.RequestContext, err error) {
 	typeName := "internal_error"
 	message := err.Error()
 	switch {
+	case errors.Is(err, repo.ErrContentTooLarge):
+		status, typeName = consts.StatusRequestEntityTooLarge, "content_too_large"
 	case errors.Is(err, repo.ErrForbidden):
 		status, typeName = consts.StatusForbidden, "forbidden"
 	case errors.Is(err, service.ErrInvalid), errors.Is(err, repo.ErrInvalidContent):

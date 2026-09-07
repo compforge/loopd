@@ -1,0 +1,58 @@
+package contract
+
+import "encoding/json"
+
+type MessageOrder string
+
+const (
+	MessageAsc  MessageOrder = "asc"
+	MessageDesc MessageOrder = "desc"
+)
+
+// MessageQuery selects identities, not content revisions.
+type MessageQuery struct {
+	IDs      []string
+	Before   string
+	After    string
+	Order    MessageOrder
+	Limit    int
+	Statuses []MessageStatus
+}
+
+// MessageInfo is the lightweight, point-in-time description of a Message.
+type MessageInfo struct {
+	ID             string        `json:"id"`
+	ConversationID string        `json:"conversation_id"`
+	TaskID         string        `json:"task_id"`
+	Kind           ActorKind     `json:"kind"`
+	Key            string        `json:"key"`
+	TargetKind     ActorKind     `json:"target_kind,omitempty"`
+	TargetKey      string        `json:"target_key,omitempty"`
+	ReplyToID      string        `json:"reply_to_id,omitempty"`
+	Purpose        string        `json:"purpose,omitempty"`
+	Status         MessageStatus `json:"status"`
+	Revision       uint64        `json:"revision"`
+	Timestamped
+}
+
+func (m Message) Info() MessageInfo {
+	return MessageInfo{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.Key,
+		TargetKind: m.TargetKind, TargetKey: m.TargetKey, ReplyToID: m.ReplyToID, Purpose: m.Purpose,
+		Status: m.Status, Revision: m.Revision, Timestamped: m.Timestamped}
+}
+
+type MessagePage struct {
+	Data []MessageInfo `json:"data"`
+	Next string        `json:"next,omitempty"`
+}
+
+type BlockSnapshot struct {
+	Revision uint64          `json:"revision"`
+	Block    json.RawMessage `json:"block"`
+}
+
+type BlockPage struct {
+	Revision uint64            `json:"revision"`
+	Data     []json.RawMessage `json:"data"`
+	Next     string            `json:"next,omitempty"`
+}

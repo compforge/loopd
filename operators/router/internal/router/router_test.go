@@ -170,12 +170,12 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			value.completedIDs = append(value.completedIDs, input.Through)
 			value.mu.Unlock()
 			response.WriteHeader(http.StatusNoContent)
-		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/speak"):
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/messages"):
 			var input contract.SpeakRequest
 			if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 				t.Error(err)
 			}
-			if input.Actor.Kind == contract.ActorKindHarness && request.URL.Path != "/v1/conversations/workspace-1/speak" {
+			if input.Actor.Kind == contract.ActorKindHarness && request.URL.Path != "/v1/conversations/workspace-1/messages" {
 				t.Errorf("Harness output did not use projected conversation: %s", request.URL.Path)
 			}
 			var content struct {
@@ -218,12 +218,14 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 				position = messages[len(messages)-1].ID
 			}
 			_ = json.NewEncoder(response).Encode(contract.PollResult{Messages: messages, Position: position})
+		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/content"):
+			id := strings.Split(request.URL.Path, "/")[5]
+			_ = json.NewEncoder(response).Encode(contract.Message{ID: id, Kind: contract.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
 			response.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"data": []contract.Message{
 					{ID: "message-1", Kind: contract.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")},
-					{ID: "message-2", Kind: contract.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")},
 				},
 			})
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):

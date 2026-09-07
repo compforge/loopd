@@ -5,15 +5,111 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/qiankunli/go-stdx/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const maxBlockPageBytes = 1 << 20
+
+// MessageBlocks reads logical blocks at one revision, never exposing physical refs.
+// The cursor is a revision plus logical position, not a Part identity.
+// +spec=`Logical content and pagination are independent of physical Part layout; revision changes cannot silently mix pages.`
+func (s *Store) MessageBlocks(ctx context.Context, convID, id, blockID, cursor string) (contract.BlockPage, error) {
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	result := contract.BlockPage{Data: []json.RawMessage{}}
+	position := 0
+	var revision uint64
+	if cursor != "" {
+		a, b, ok := strings.Cut(cursor, ":")
+		var err error
+		revision, err = strconv.ParseUint(a, 10, 64)
+		if err != nil || !ok {
+			return result, ErrInvalidContent
+		}
+		position, err = strconv.Atoi(b)
+		if err != nil || position < 0 {
+			return result, ErrInvalidContent
+		}
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var m model.Message
+		if err := tx.Where("conversation_id = ? AND id = ?", convID, id).First(&m).Error; err != nil {
+			return err
+		}
+		result.Revision = m.Revision
+		if cursor != "" && revision != m.Revision {
+			return ErrConflict
+		}
+		c, err := openMessageContent(tx, m)
+		if err != nil {
+			return err
+		}
+		blocks := c.snapshot["blocks"].([]any)
+		if blockID != "" {
+			var ok bool
+			position, ok = c.positions[blockID]
+			if !ok {
+				return ErrNotFound
+			}
+		}
+		if position > len(blocks) {
+			return ErrInvalidContent
+		}
+		total := 0
+		for i := position; i < len(blocks); i++ {
+			block := blocks[i].(map[string]any)
+			id := block["id"].(string)
+			if ref, ok := block["ref"].(string); ok {
+				if _, loaded := c.parts[ref]; !loaded {
+					var row model.MessagePart
+					if err := tx.Where("message_id = ? AND id = ?", m.ID, ref).First(&row).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return fmt.Errorf("message %s has missing stored content", m.ID)
+						}
+						return err
+					}
+					p, err := decodePart(row)
+					if err != nil {
+						return err
+					}
+					c.parts[ref] = p
+				}
+				if err := c.materialize(id); err != nil {
+					return err
+				}
+			}
+			raw, err := json.Marshal(blocks[i])
+			if err != nil {
+				return err
+			}
+			if len(raw) > maxBlockPageBytes {
+				return ErrContentTooLarge
+			}
+			if len(result.Data) >= 100 || total+len(raw) > maxBlockPageBytes {
+				result.Next = strconv.FormatUint(m.Revision, 10) + ":" + strconv.Itoa(i)
+				break
+			}
+			result.Data = append(result.Data, raw)
+			total += len(raw)
+			if blockID != "" {
+				break
+			}
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return result, mapError(err)
+}
 
 const (
 	defaultMessageInlineBlocks = 32

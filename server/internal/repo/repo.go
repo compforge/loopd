@@ -20,9 +20,10 @@ import (
 const defaultOperationTimeout = 10 * time.Second
 
 var (
-	ErrNotFound       = errors.New("not found")
-	ErrConflict       = errors.New("conflict")
-	ErrInvalidContent = errors.New("invalid message content")
+	ErrNotFound        = errors.New("not found")
+	ErrConflict        = errors.New("conflict")
+	ErrContentTooLarge = errors.New("message content exceeds read size limit")
+	ErrInvalidContent  = errors.New("invalid message content")
 )
 
 type Config struct {

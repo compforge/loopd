@@ -21,6 +21,48 @@ const (
 	maxPageSize     = 500
 )
 
+func (s *MessageService) QueryMessages(ctx context.Context, convID string, q contract.MessageQuery) (contract.MessagePage, error) {
+	result := contract.MessagePage{Data: []contract.MessageInfo{}}
+	if len(q.IDs) > maxPageSize || (q.Order != "" && q.Order != contract.MessageAsc && q.Order != contract.MessageDesc) {
+		return result, ErrInvalid
+	}
+	for _, status := range q.Statuses {
+		if status != contract.MessageStatusStreaming && !status.Terminal() {
+			return result, ErrInvalid
+		}
+	}
+	limit := pageSize(q.Limit)
+	q.Limit = limit + 1
+	rows, err := s.repo.QueryMessages(ctx, convID, q)
+	if err != nil {
+		return result, err
+	}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		result.Next = rows[len(rows)-1].ID
+	}
+	for _, m := range rows {
+		result.Data = append(result.Data, messageFromModel(m).Info())
+	}
+	return result, nil
+}
+
+func (s *MessageService) MessageInfo(ctx context.Context, convID, id string) (contract.MessageInfo, error) {
+	m, err := s.repo.MessageInfo(ctx, convID, id)
+	return messageFromModel(m).Info(), err
+}
+func (s *MessageService) MessageSnapshot(ctx context.Context, convID, id string) (contract.Message, error) {
+	m, err := s.repo.MessageSnapshot(ctx, convID, id)
+	// Leave headroom for metadata below the runtime's bounded JSON response reader.
+	if err == nil && len(m.Content) > 8<<20 {
+		return contract.Message{}, repo.ErrContentTooLarge
+	}
+	return messageFromModel(m), err
+}
+func (s *MessageService) MessageBlocks(ctx context.Context, convID, id, blockID, cursor string) (contract.BlockPage, error) {
+	return s.repo.MessageBlocks(ctx, convID, id, blockID, cursor)
+}
+
 type MessageService struct {
 	events agentuerunner.EventBridge
 	repo   repo.MessageRepository
@@ -31,14 +73,14 @@ func NewMessageService(repository repo.MessageRepository, events agentuerunner.E
 	return &MessageService{repo: repository, events: events, logger: loggerOrDefault(logger)}
 }
 
-// Speak is independent of user input and transport completion. Notification
-// retries are carried by the message's existing dispatch marker.
-func (service *MessageService) Speak(ctx context.Context, convID string, request contract.SpeakRequest) (contract.Message, error) {
+// Publish creates one Message; streaming and terminal output share its identity.
+// +spec=`HTTP publication uses message status, not runtime verb names, to select the initial lifecycle.`
+func (service *MessageService) Publish(ctx context.Context, convID string, request contract.SpeakRequest) (contract.Message, error) {
 	if !request.Actor.ValidTarget() || strings.TrimSpace(request.Key) == "" ||
 		(request.Target != (contract.ActorRef{}) && (!request.Target.Kind.Valid() || request.Target.Key == "")) {
 		return contract.Message{}, ErrInvalid
 	}
-	if request.Status != "" && (request.Stream || !request.Status.Terminal()) {
+	if request.Status != "" && (request.Status != contract.MessageStatusStreaming && !request.Status.Terminal()) {
 		return contract.Message{}, ErrInvalid
 	}
 	if len(request.Content) == 0 {

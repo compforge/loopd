@@ -1,8 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeSse } from "@compforge/agentue/ui";
-import { findDetailConversation, listConversations, listMessages, SseFrameDecoder } from "./api";
+import { findDetailConversation, listConversations, listMessages, submitMessage, SseFrameDecoder } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("submits content with one short JSON request, separately from the conversation stream", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json({
+    id: "message", conversation_id: "conv", task_id: "receipt", status: "completed", revision: 1,
+  }));
+  vi.stubGlobal("fetch", fetch);
+  const onTaskID = vi.fn();
+  const onEvent = vi.fn();
+  await submitMessage({ conversationID: "conv", text: "hello", target: { kind: "operator", key: "router" }, onTaskID, onEvent });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const [path, request] = fetch.mock.calls[0];
+  expect(path).toBe("/v1/conversations/conv/messages");
+  expect(JSON.parse(request.body).content.blocks[0].content).toBe("hello");
+  expect(onTaskID).toHaveBeenCalledWith("receipt");
+  expect(onEvent.mock.calls[0][0].message.content.blocks[0].content).toBe("hello");
+});
 
 describe("Conversation navigation", () => {
   it("finds a reusable actor conversation by parent and actor", async () => {
@@ -22,11 +38,16 @@ describe("Conversation navigation", () => {
   });
   it("reads all child Messages rather than truncating long tasks to one page", async () => {
     const first = Array.from({ length: 100 }, (_, index) => ({ id: `m-${index}` }));
-    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: first }))
-      .mockResolvedValueOnce(Response.json({ data: [{ id: "m-100" }] }));
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith("/content")) return Response.json({ id: path.split("/").at(-2) });
+      return Response.json({ data: path.endsWith("after=") ? first : [{ id: "m-100" }] });
+    });
     vi.stubGlobal("fetch", fetch);
     expect(await listMessages("child")).toHaveLength(101);
-    expect(fetch.mock.calls[1][0]).toBe("/v1/conversations/child/messages?limit=100&after=m-99");
+    expect(fetch.mock.calls.filter(([path]) => !path.endsWith("/content")).map(([path]) => path)).toEqual([
+      "/v1/conversations/child/messages?limit=100&after=",
+      "/v1/conversations/child/messages?limit=100&after=m-99",
+    ]);
   });
 });
 

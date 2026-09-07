@@ -250,12 +250,13 @@ type report struct {
 func messageText(m contract.Message) string {
 	var model struct {
 		Blocks []struct {
-			Content string                 `json:"content"`
-			Type    string                 `json:"type"`
-			Value   string                 `json:"value"`
-			Outcome string                 `json:"outcome"`
-			Prompt  string                 `json:"prompt"`
-			Choices []contract.HumanChoice `json:"choices"`
+			Content  string                 `json:"content"`
+			Type     string                 `json:"type"`
+			Value    string                 `json:"value"`
+			Outcome  string                 `json:"outcome"`
+			Prompt   string                 `json:"prompt"`
+			Choices  []contract.HumanChoice `json:"choices"`
+			Question *contract.HumanBlock   `json:"question"`
 		} `json:"blocks"`
 	}
 	if json.Unmarshal(m.Content, &model) != nil {
@@ -272,6 +273,12 @@ func messageText(m contract.Message) string {
 			}
 			texts = append(texts, question)
 		} else if b.Type == "human_reply" {
+			if b.Question != nil {
+				texts = append(texts, b.Question.Prompt)
+				for _, choice := range b.Question.Choices {
+					texts = append(texts, choice.Value+": "+choice.Label)
+				}
+			}
 			texts = append(texts, strings.TrimSpace(b.Outcome+" "+b.Value))
 		}
 	}
@@ -391,13 +398,6 @@ func (c *Controller) history(ctx context.Context, run *lh.Run) (string, error) {
 			return "", err
 		}
 		text := messageText(m)
-		if m.Purpose == "human_reply" && m.ReplyToID != "" {
-			question, err := c.message(ctx, ref.ConversationID, m.ReplyToID)
-			if err != nil {
-				return "", err
-			}
-			text = messageText(question) + "\nReply: " + text
-		}
 		if len(text) > remaining {
 			text = strings.ToValidUTF8(text[:remaining], "") + " [context truncated]"
 		}
@@ -415,58 +415,23 @@ func (c *Controller) history(ctx context.Context, run *lh.Run) (string, error) {
 
 // priorMessages selects a bounded stable tail before the input using shared Read.
 func (c *Controller) priorMessages(ctx context.Context, convID, before string) ([]contract.Message, error) {
-	var history []contract.Message
-	after := ""
-	for {
-		page, err := c.Loop.Conv.Read(ctx, convID, after, 100)
+	page, err := c.Loop.Conv.List(ctx, convID, loopruntime.MessageQuery{Before: before, Order: loopruntime.Desc, Limit: 20,
+		Statuses: []contract.MessageStatus{contract.MessageStatusCompleted, contract.MessageStatusFailed, contract.MessageStatusCancelled, contract.MessageStatusExpired}})
+	if err != nil {
+		return nil, err
+	}
+	history := make([]contract.Message, 0, len(page.Messages))
+	for i := len(page.Messages) - 1; i >= 0; i-- {
+		m, err := page.Messages[i].Snapshot(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, m := range page {
-			if m.ID >= before {
-				return history, nil
-			}
-			if m.Purpose == "input" || m.Purpose == "human_reply" || m.Ended() {
-				history = append(history, m)
-				if len(history) > 20 {
-					history = history[len(history)-20:]
-				}
-			}
-		}
-		if len(page) < 100 {
-			return history, nil
-		}
-		next := page[len(page)-1].ID
-		if next <= after {
-			return nil, errors.New("history pagination did not advance")
-		}
-		after = next
+		history = append(history, m)
 	}
+	return history, nil
 }
 
-// message resolves a saved reference without changing consumption or adding a Context verb.
+// message resolves a saved reference directly without changing consumption.
 func (c *Controller) message(ctx context.Context, convID, id string) (contract.Message, error) {
-	after := ""
-	for {
-		page, err := c.Loop.Conv.Read(ctx, convID, after, 100)
-		if err != nil {
-			return contract.Message{}, err
-		}
-		for _, m := range page {
-			if m.ID == id {
-				return m, nil
-			}
-			if m.ID > id {
-				return contract.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
-			}
-		}
-		if len(page) < 100 {
-			return contract.Message{}, fmt.Errorf("message %s not found in conversation %s", id, convID)
-		}
-		next := page[len(page)-1].ID
-		if next <= after {
-			return contract.Message{}, errors.New("history pagination did not advance")
-		}
-		after = next
-	}
+	return c.Loop.Conv.Read(convID, id).Snapshot(ctx)
 }

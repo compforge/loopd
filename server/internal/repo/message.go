@@ -12,6 +12,10 @@ import (
 )
 
 type MessageRepository interface {
+	QueryMessages(context.Context, string, contract.MessageQuery) ([]model.Message, error)
+	MessageInfo(context.Context, string, string) (model.Message, error)
+	MessageSnapshot(context.Context, string, string) (model.Message, error)
+	MessageBlocks(context.Context, string, string, string, string) (contract.BlockPage, error)
 	ProjectOutput(context.Context, string, ui.Event, ...contract.MessageStatus) error
 	GetMessageState(context.Context, string) (MessageState, error)
 	ExpireMessages(context.Context, time.Time, int) ([]string, error)
@@ -23,6 +27,53 @@ type MessageRepository interface {
 	ListMessages(context.Context, string, string, int) ([]model.Message, error)
 	ListRootMessagesByTask(context.Context, string) ([]model.Message, error)
 	UpdateMessageContent(context.Context, string, string, []byte) (model.Message, error)
+}
+
+// QueryMessages never loads content or physical Parts.
+func (store *Store) QueryMessages(ctx context.Context, convID string, query contract.MessageQuery) ([]model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	q := store.db.WithContext(ctx).Omit("content").Where("conversation_id = ?", convID)
+	if len(query.IDs) > 0 {
+		q = q.Where("id IN ?", query.IDs)
+	}
+	if query.After != "" {
+		q = q.Where("id > ?", query.After)
+	}
+	if query.Before != "" {
+		q = q.Where("id < ?", query.Before)
+	}
+	if len(query.Statuses) > 0 {
+		q = q.Where("status IN ?", query.Statuses)
+	}
+	order := "id ASC"
+	if query.Order == contract.MessageDesc {
+		order = "id DESC"
+	}
+	var rows []model.Message
+	err := q.Order(order).Limit(query.Limit).Find(&rows).Error
+	return rows, mapError(err)
+}
+
+func (store *Store) MessageInfo(ctx context.Context, convID, id string) (model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	var row model.Message
+	err := store.db.WithContext(ctx).Omit("content").Where("conversation_id = ? AND id = ?", convID, id).First(&row).Error
+	return row, mapError(err)
+}
+
+func (store *Store) MessageSnapshot(ctx context.Context, convID, id string) (model.Message, error) {
+	ctx, cancel := store.withTimeout(ctx)
+	defer cancel()
+	rows, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB { return tx.Where("conversation_id = ? AND id = ?", convID, id).Limit(1) })
+	if err != nil {
+		return model.Message{}, err
+	}
+	if len(rows) == 0 {
+		return model.Message{}, ErrNotFound
+	}
+	return rows[0], nil
 }
 
 func (store *Store) CreateMessage(ctx context.Context, message model.Message) (model.Message, error) {

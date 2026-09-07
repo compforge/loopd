@@ -35,6 +35,7 @@ type Tool struct {
 }
 
 type HarnessCall struct {
+	ConversationID string         `json:"conversation_id"`
 	ID             string         `json:"id"`
 	EffectKey      string         `json:"effect_key"`
 	Target         string         `json:"target"`

@@ -18,7 +18,7 @@ Conversation 是一个对话框，actor_kind/actor_key 表达组织归属，不�
 
 两者是习惯用语，不是两套模型。Harness 组织的工作会话使用自身 actor_kind，不伪装成 Operator。
 server 在主会话接收定向消息时，按 parent_id + actor_kind + actor_key 创建或复用内部会话，
-同一 Actor 跨多次输入共享详情。Chat、Speak（含流式首写）与 Human 答复均在消息事务内完成
+同一 Actor 跨多次输入共享详情。用户提交、Speak、Tell 与 Human 答复均在消息事务内完成
 分配；先锁定父会话行，唯一关系在多个 server 实例间复用，任一步失败则消息与新会话一起回滚。
 广播、面向 User 的消息不分配过程会话；子会话中的消息不会递归创建新的过程会话。
 Conversation 不保存 task_id，也不依赖某条回答先存在。
@@ -63,6 +63,10 @@ Human 答复接受事务同时保存问题的最终选择，以及答复自身�
 
 ## Message 内容与 Parts
 
+Part 仅是 repo/model 内部减少正文读写量的物理优化。即便在 Server 内，service 和 API 也只处理
+逻辑 Message、元信息与 AgentUE 内容；Part 不是协作资源，不拥有独立业务生命周期。
+外部没有 Part API，runtime、Operator、Harness 和页面都不接收 Part ID 或存储引用。
+
 AgentUE 1.1 的 `blocks` 可以混合内联 `{id, type, ...}` 与引用 `{id, ref}`。
 loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.id`，
 解析必须同时匹配所属 `message_id` 和 block ID。引用只有 `id/ref`；type、正文、层级等字段
@@ -97,23 +101,23 @@ Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 bl
 状态，桥初始化或断档修复时才加载完整快照；DB 提交后继续按现有规则尝试 Redis 交付。
 
 存储引用不接受客户端或 Harness 自行构造。写入入口接受完整 AgentUE 内容，server 决定
-存储位置。Speak 重试、历史、Poll、Human 与页面快照均在 server 展开引用后返回完整内容；
-读取 Message 与 Parts 使用同一个数据库快照，列表批量加载 Parts。缺失 Part、错误归属、
+存储位置。内容读取、Poll、Human 与页面快照均在 server 展开引用后返回逻辑内容；
+读取 Message 与 Parts 使用同一个数据库快照。元信息列表不选择正文，也不加载 Parts；
+按 block ID 读取只展开所需内容，逻辑块分页与 Part 的数量、大小、布局无关。缺失 Part、错误归属、
 错误 block ID 或嵌套引用作为存储错误返回，不能显示为空正文。
 
-已有 1.0 内联数据直接读取，不需要全库回填；后续写入触发外置时升级为 1.1。
-新建的 server/runtime 快照默认使用 1.1。schema 升级只新增 Part 表；旧版 server 不理解
-引用，因此出现外置数据后，回退应用版本前必须先展开这些数据。
+内联与分片的逻辑读取结果相同；分页 cursor 使用 Message revision 与逻辑位置，不保存物理引用。
+翻页时 revision 改变则报告冲突，避免把不同时间的正文拼成一个快照。
 
 整条内容替换时删除不再引用的 Part，并清理保留 Part 中已经移除的 block；
 普通 `DeleteMessage` 在同一事务内删除 Message 与全部 Parts；Harness Run 拥有的消息拒绝单独
 替换或删除，须与调用记录协调保留与清理（见 [Harness](../../docs/harness.md)）。未来会话清理应复用相同事务原则，
 不能只删除父行而留下 Parts。领域 CRD 的清理仍不决定聊天历史保留时间。
 
-当前 HTTP/SSE 与 Runtime 继续接收完整模型。分片减少正文更新量，但不等于前端懒加载，
-也不限制完整历史响应的大小；AgentUE 引用解析属于持久化层，本次不引入页面 Part API。
+元信息、完整正文和逻辑块读取是面向使用者的访问选择；物理分片是独立的存储选择，
+两者不相互泄露。完整内容和块读取均设响应大小上限，超限明确报错，不截断已存内容。
 
-存储边界止于 repo：service、runtime 与页面始终读写完整 Message，不解释 ref 或分配 Part。
+存储边界止于 repo：service、runtime 与页面不解释 ref 或分配 Part。
 交付层可用 `GetMessageState` 仅查询寻址、revision 与完成状态；该返回类型不含 content。
 需要恢复流快照时通过 `GetMessage` 获取完整内容。输入内容错误由 repo 返回通用内容错误，
 HTTP 层映射为 400；持久数据缺失或损坏仍按存储故障处理。

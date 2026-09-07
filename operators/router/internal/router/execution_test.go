@@ -265,7 +265,7 @@ func (transport capacityTransport) RoundTrip(r *http.Request) (*http.Response, e
 	status, body := 0, ""
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/harness/runs" {
 		status, body = http.StatusTooManyRequests, `{"error":{"type":"harness_capacity_exceeded","message":"Harness execution capacity exhausted"}}`
-	} else if transport.failReport && strings.HasSuffix(r.URL.Path, "/speak") {
+	} else if transport.failReport && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages") {
 		status, body = http.StatusBadRequest, `{"error":{"type":"invalid","message":"cannot publish"}}`
 	} else if strings.HasSuffix(r.URL.Path, "/events") {
 		transport.t.Error("complete error report should not require Emit or End")

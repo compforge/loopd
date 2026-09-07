@@ -49,7 +49,7 @@ func TestParticipantAllocationIsAtomicAndActorScoped(t *testing.T) {
 		t.Fatalf("duplicate details: %d %v", count, err)
 	}
 	for i, target := range []contract.ActorRef{{Kind: "harness", Key: "same"}, {Kind: actor.Kind, Key: "other"}} {
-		req := contract.SpeakRequest{Key: fmt.Sprint(i), Actor: actor, Target: target, Content: content, Stream: true}
+		req := contract.SpeakRequest{Status: contract.MessageStatusStreaming, Key: fmt.Sprint(i), Actor: actor, Target: target, Content: content}
 		msg, err := s.Speak(ctx, "conv", req)
 		if err != nil {
 			t.Fatal(err)
