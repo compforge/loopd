@@ -27,15 +27,20 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 				"conversation_id", input.ConversationID, "error", runErr)
 		}
 		if runErr != nil {
-			// Failure is an explicit actor message, including when no UI stream exists.
+			// This demo reports any returned error as failure, then commits the input.
+			// Wait handles transient disconnects; Router does not classify transport errors.
 			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat",
 				"meta":   map[string]any{"error": map[string]any{"code": "router_failed", "message": "Router 执行失败，请重试。"}},
 				"blocks": []any{map[string]any{"id": "failure", "type": "text", "content": "Router 执行失败，请重试。"}}})
-			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
+			stream, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
 				Key: input.ID + "/failure", Actor: routerActor,
 				Target:    contract.ActorRef{Kind: input.Kind, Key: input.Key},
-				ReplyToID: input.ID, Content: content,
-			}); err != nil {
+				ReplyToID: input.ID, Content: content, Stream: true,
+			})
+			if err == nil {
+				err = stream.End(ctx, contract.MessageStatusFailed)
+			}
+			if err != nil {
 				runErr = errors.Join(runErr, err)
 				return
 			}

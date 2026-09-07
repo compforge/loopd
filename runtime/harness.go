@@ -15,8 +15,6 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 )
 
-var ErrCallConflict = errors.New("Harness call conflicts with an existing submission")
-
 type Harness struct {
 	client   *client
 	registry registry
@@ -62,28 +60,50 @@ func (c *Call) Cancel(ctx context.Context) error {
 	return c.client.write(ctx, "/v1/harness/runs/"+url.PathEscape(c.id)+"/cancel", struct{}{}, nil)
 }
 
-// Wait observes the Redis-backed stream, then reads the durable terminal result
-// once. Cancelling this observer does not cancel the Run.
+// Wait observes the stream and checks durable state when it ends or disconnects.
+// +spec=`A disconnected observer reattaches the same Call; only persisted terminal state proves execution has ended.`
+// Cancelling this observer does not cancel the Run.
 func (c *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
-	events, failures := c.Stream(ctx)
-	for range events {
-	}
-	for err := range failures {
+	for attempt := 0; ; attempt++ {
+		events, failures := c.Stream(ctx)
+		for range events {
+		}
+		var observationErr error
+		for err := range failures {
+			observationErr = err
+		}
+		if err := ctx.Err(); err != nil {
+			return contract.HarnessCall{}, wrapError(err)
+		}
+		value, err := c.Get(ctx)
+		if err == nil && value.Phase.Terminal() {
+			if value.Phase != contract.CallSucceeded {
+				return value, &Error{Message: value.Error}
+			}
+			return value, nil
+		}
 		if err != nil {
-			return contract.HarnessCall{}, err
+			observationErr = err
+		}
+		if observationErr == nil {
+			observationErr = &Error{Message: "Harness stream ended before durable terminal state", Retryable: true}
+		}
+		if attempt == 2 || !IsRetryable(observationErr) {
+			return value, observationErr
+		}
+		// Healthy streams do not poll SQL. Retry only after losing observation,
+		// with at most three connections and a delay to avoid a tight loop.
+		// Keep recovery limited to observed disconnect/unavailability cases;
+		// extend it with regression cases from real failures, not speculative policies.
+		c.client.logger.WarnContext(ctx, "retry Harness observation", "call_id", c.id, "attempt", attempt+2)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return value, wrapError(ctx.Err())
+		case <-timer.C:
 		}
 	}
-	value, err := c.Get(ctx)
-	if err != nil {
-		return value, err
-	}
-	if !value.Phase.Terminal() {
-		return value, errors.New("Harness stream ended before durable terminal state")
-	}
-	if value.Phase != contract.CallSucceeded {
-		return value, errors.New(value.Error)
-	}
-	return value, nil
 }
 func (c *Call) Result(ctx context.Context) (*contract.HarnessResult, error) {
 	value, err := c.Wait(ctx)
@@ -126,13 +146,13 @@ func (c *Call) Stream(ctx context.Context) (<-chan ui.Event, <-chan error) {
 			event, err := ui.Parse([]byte(data.String()))
 			data.Reset()
 			if err != nil {
-				failures <- err
+				failures <- wrapError(err)
 				return
 			}
 			select {
 			case events <- event:
 			case <-ctx.Done():
-				failures <- ctx.Err()
+				failures <- wrapError(ctx.Err())
 				return
 			}
 			if event.Op == ui.OpEnd {
@@ -140,9 +160,9 @@ func (c *Call) Stream(ctx context.Context) (<-chan ui.Event, <-chan error) {
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			failures <- err
+			failures <- transportError(err)
 		} else {
-			failures <- io.ErrUnexpectedEOF
+			failures <- transportError(io.ErrUnexpectedEOF)
 		}
 	}()
 	return events, failures

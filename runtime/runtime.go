@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -44,7 +43,7 @@ type Loop struct {
 func New(baseURL string, options Options) (*Runtime, error) {
 	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid loop-server URL %q", baseURL)
+		return nil, &Error{Message: fmt.Sprintf("invalid loop-server URL %q", baseURL)}
 	}
 	if options.HTTPClient == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -109,7 +108,7 @@ func (client *client) do(ctx context.Context, method, path string, input, output
 		return nil
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(output); err != nil {
-		return fmt.Errorf("decode loop-server response: %w", err)
+		return transportError(fmt.Errorf("decode loop-server response: %w", err))
 	}
 	return nil
 }
@@ -129,13 +128,13 @@ func (client *client) openWithHeaders(
 	if input != nil {
 		encoded, err := json.Marshal(input)
 		if err != nil {
-			return nil, err
+			return nil, wrapError(err)
 		}
 		body = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, client.baseURL.String()+path, body)
 	if err != nil {
-		return nil, err
+		return nil, wrapError(err)
 	}
 	if input != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -145,36 +144,7 @@ func (client *client) openWithHeaders(
 	}
 	response, err := client.http.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, transportError(err)
 	}
 	return response, nil
-}
-
-func decodeResponseError(response *http.Response) error {
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		var envelope errorResponse
-		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&envelope); err == nil && envelope.Error.Message != "" {
-			return &Error{StatusCode: response.StatusCode, Type: envelope.Error.Type, Message: envelope.Error.Message}
-		}
-		return &Error{StatusCode: response.StatusCode, Message: response.Status}
-	}
-	return nil
-}
-
-type Error struct {
-	StatusCode int
-	Type       string
-	Message    string
-}
-
-func (err *Error) Error() string {
-	if err.Type == "" {
-		return err.Message
-	}
-	return err.Type + ": " + err.Message
-}
-
-func IsConflict(err error) bool {
-	var target *Error
-	return errors.As(err, &target) && target.StatusCode == http.StatusConflict
 }

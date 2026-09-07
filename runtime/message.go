@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/url"
 	"sync"
 
@@ -55,10 +54,10 @@ func (message *Message) Emit(ctx context.Context, event ui.Event) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	if message.ended {
-		return errors.New("message has ended")
+		return &Error{Message: "message has ended"}
 	}
 	if event.Op != ui.OpSet && event.Op != ui.OpAppend {
-		return errors.New("Emit requires set or append; use End to finish sending")
+		return &Error{Message: "Emit requires set or append; use End to finish sending"}
 	}
 	return message.emit(ctx, event)
 }
@@ -71,17 +70,17 @@ func (message *Message) End(ctx context.Context, statuses ...contract.MessageSta
 	defer message.mu.Unlock()
 	status := contract.MessageStatusCompleted
 	if len(statuses) > 1 {
-		return errors.New("End accepts at most one status")
+		return &Error{Message: "End accepts at most one status"}
 	}
 	if len(statuses) == 1 {
 		status = statuses[0]
 	}
 	if !status.Terminal() {
-		return errors.New("End requires a terminal message status")
+		return &Error{Message: "End requires a terminal message status"}
 	}
 	if message.ended {
 		if message.value.Status != status {
-			return errors.New("message already ended with a different status")
+			return &Error{Message: "message already ended with a different status"}
 		}
 		return nil
 	}
@@ -96,7 +95,7 @@ func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...co
 	event.Seq = message.next
 	data, err := event.Marshal()
 	if err != nil {
-		return err
+		return wrapError(err)
 	}
 	request := struct {
 		Event  json.RawMessage        `json:"event"`
@@ -107,10 +106,10 @@ func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...co
 	}
 	data, err = json.Marshal(request)
 	if err != nil {
-		return err
+		return wrapError(err)
 	}
 	if len(message.pending) > 0 && !bytes.Equal(message.pending, data) {
-		return errors.New("previous message update is unresolved; retry it before sending another update")
+		return &Error{Message: "previous message update is unresolved; retry it before sending another update"}
 	}
 	if err := message.client.write(ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events", json.RawMessage(data), nil); err != nil {
 		message.pending = data
