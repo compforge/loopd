@@ -3,9 +3,10 @@
 ## 项目定位与边界
 
 server 是 loop-server 组件，数据库拥有 Conversation、Message、Operator/Harness 在线注册，以及 Harness Run 调用记录。
-Server 是人、Operator、Harness 的协作平台，HarnessRunner 独立于 Operator 驱动调用。DB 消息记录支持 Actor 独立消费，Conv CRD 保存定向信号和消费进度，Redis 支持页面
-流与重连；task_id 仅标识页面交付。Operator 领域状态、Harness 执行状态、执行审计和成本记录
-不进入聊天模型。
+Server 是人、Operator、Harness 的协作平台，HarnessRunner 独立于 Operator 驱动调用。
+Server 通过 Conv CRD 通知 Operator，通过 HTTP API 提供协作数据与能力；DB 消息记录支持
+Actor 独立消费，Redis 经 SSE 服务 UI 会话流与 Operator 调用流。task_id 仅标识页面交付。
+Operator 领域状态、Harness 执行状态、执行审计和成本记录不进入聊天模型。
 
 ## 代码地图与核心模块
 
@@ -57,9 +58,9 @@ server/
    View Model 不依赖 handler、service 或 repo。
 2. `model/` 一张表一个文件，`repo/` 按同名模型拆分；不要重新聚合成巨型 store 文件。
 3. Message 只保存页面可见聊天；完整轨迹进入 AgentLedger，Operator 领域状态不进入 server 的表。
-4. server 拥有 Conv 定向通知与可见 Message，AgentUE 拥有事件协议和续接；事务、完成顺序与重试必须
-   遵循 `docs/ue.md` 的页面交付契约。存储见 `docs/persistence.md`，注册发现及 runtime 契约见
-   `../docs/runtime.md`。
+4. server 在消息提交 DB 后更新 Conv CRD 发出定向通知，失败可重试；Poll/Commit API 协调
+   DB 消息读取和 CRD 消费位置，runtime 不直接更新这些游标。消费契约见 `docs/conversation.md`，
+   页面交付见 `docs/ue.md`，注册发现及 runtime 契约见 `../docs/runtime.md`。
 
 5. DB 保存 merge 后的 AgentUE 快照；Redis Stream append-only 保存实时事件。写入先 DB 再 Redis，
    实时消费走 Redis/SSE，DB 快照用于历史和缺口恢复，详见 persistence.md。
