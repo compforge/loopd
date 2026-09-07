@@ -3,7 +3,8 @@
 ## 项目定位与边界
 
 server 是 loop-server 组件，数据库拥有 Conversation、Message、Operator/Harness 在线注册，以及 Harness Run 调用记录。
-Server 是人、Operator、Harness 的协作平台，HarnessRunner 独立于 Operator 驱动调用。
+Server 是人、Operator、Harness 的协作平台，内置 Harness Engine 管理与驱动调用。
+Engine 包含持久 Run、HarnessRunner 与 Adapter 的协作，独立于 Operator 生命周期。
 Server 通过 Conv CRD 通知 Operator，通过 HTTP API 提供协作数据与能力；DB 消息记录支持
 Actor 独立消费，Redis 经 SSE 服务 UI 会话流与 Operator 调用流。task_id 仅标识页面交付。
 Operator 领域状态、Harness 执行状态、执行审计和成本记录不进入聊天模型。
@@ -74,4 +75,4 @@ server/
 - `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
 - `../docs/kernel.md` — loopd 稳定理念和Actor 边界
 
-- `../docs/harness.md` — Harness 管理、Run/Runner 驱动、Adapter 适配与恢复边界
+- `../docs/harness.md` — Harness Engine：Run/Runner 驱动、Adapter 适配与恢复边界

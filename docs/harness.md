@@ -1,6 +1,7 @@
-# Harness 管理与运行
+# Harness Engine：管理与运行
 
-Harness 提供智能执行，Server 接收持久调用并驱动它，Adapter 将不同 Harness 接入同一契约。
+Harness Engine 是 Server 内提供 Harness 调用与执行管理的整体能力：Run 保存调用事实，
+Runner 驱动生命周期，Adapter 适配不同 Harness。Harness 自身拥有智能执行状态。
 本文集中描述 Harness 的管理、运行、输出和恢复；Operator 如何组合调用见 [Runtime](runtime.md)，
 跨参与者的协作边界见 [Kernel](kernel.md)。
 
@@ -8,6 +9,7 @@ Harness 提供智能执行，Server 接收持久调用并驱动它，Adapter 将
 
 | 概念 | 责任 |
 |---|---|
+| Harness Engine | Server 内的调用与执行管理能力，涵盖 Run、Runner 和 Adapter 的协作 |
 | Harness | 拥有原生执行状态、上下文和恢复能力；可以是进程内执行库或远端服务 |
 | Adapter | 适配原生启动、观察与恢复协议，将可见过程转换为 AgentUE，提取最终 text/JSON |
 | Harness Run | Server 持久保存的一次调用，关联请求、执行引用、输出 Message 和调用终态 |
@@ -18,12 +20,17 @@ Run 保存驱动所需的事实，Runner 执行驱动逻辑；Adapter 负责 Har
 协议，Adapter 不直接写 loopd DB 或 Redis。Harness 内部状态由执行端持有，Operator 的业务
 状态由自己的领域 CRD 持有；Harness Run 与 LongHorizon 的业务 Run 是不同对象。
 
+Engine 是这组能力的架构名称。实现分别落在 Server 的 Run API、service/repo、
+`component.HarnessRunner` 和 `pkg/harness`；代码沿用这些具体职责名称，无需独立 Engine 进程或包装层。
+
 ```mermaid
 flowchart LR
     Operator -->|Prompt / Result| Runtime[loop-runtime]
     subgraph Server[loop-server]
-        API[Run API] -->|提交 Run| Runner[HarnessRunner]
-        Runner -->|Prompt / Resume| Adapter[Harness Adapter]
+        subgraph Engine[Harness Engine]
+            API[Run API] -->|提交 Run| Runner[HarnessRunner]
+            Runner -->|Prompt / Resume| Adapter[Harness Adapter]
+        end
     end
     Runtime --> API
     Adapter -->|原生协议| Harness

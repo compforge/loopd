@@ -33,7 +33,7 @@ Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费�
 
 ## 定位与边界
 
-- loop-server 拥有可见 Conversation、Message、在线注册、消息交付和 Harness 调用的后台驱动。
+- loop-server 拥有可见 Conversation、Message、在线注册与消息交付，内置 Harness Engine 管理调用与驱动。
 - loop-runtime 是嵌入 Operator 的 Go SDK/toolkit，封装 Server API，并辅助接入 controller-runtime。
 - Operator 决定业务含义、消息如何组成工作、何时接收补充信息及何时完成。
 - Harness 通过 Adapter 提供智能执行；执行状态与恢复属于 Harness。
@@ -124,8 +124,9 @@ End 只表示说完这条消息，不结束 Conv 或业务工作。页面流只�
 连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
 
 Server 是人、Operator、Harness 的协作平台；loop-runtime 是 Operator toolkit。
-Server 内部 HarnessRunner 独立于 Operator 运行，持久接收调用、驱动 Adapter、保存可见输出并
-承接进程故障后的重新挂接。harness_runs 是基础设施调用记录，不是 Operator 领域状态或 Agent
+Server 内置 Harness Engine，独立于 Operator 接收调用、保存输出并承接进程故障后的重新挂接。
+Run 持久保存调用事实，HarnessRunner 驱动生命周期，Adapter 适配原生协议。
+harness_runs 是基础设施调用记录，不是 Operator 领域状态或 Agent
 内部执行状态；resource_locks 为 Server 各后台组件提供通用租约。
 
 恢复责任分层：
@@ -142,7 +143,7 @@ Kernel 只定义跨功能稳定的 Actor 模型、协作主线与恢复责任。
 
 | 文档 | 回答的问题 |
 |---|---|
-| [Harness](harness.md) | Harness 如何配置与发现，Run/Runner 如何驱动调用，Adapter 如何适配与恢复？ |
+| [Harness Engine](harness.md) | Harness 如何配置与发现，Run/Runner 如何驱动调用，Adapter 如何适配与恢复？ |
 | [Runtime](runtime.md) | Operator 开发者如何接入、组合 Verb，并承担哪些调用与恢复责任？ |
 | [Conversation](../server/docs/conversation.md) | 持久消息如何定向通知、Poll、Commit，消费与重试保证到哪里？ |
 | [持久化](../server/docs/persistence.md) | 可见事实存在哪里，User/Operator conv、消息身份和快照如何归属？ |

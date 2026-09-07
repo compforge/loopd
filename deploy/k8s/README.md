@@ -12,7 +12,7 @@ Quick Start 不依赖 StorageClass：未配置 MySQL 时，loop-server 使用临
 内存数据。Pod 重建后聊天记录与运行中的事件都会丢失，因此该模式只用于体验。
 SQLite 要求 `server.replicaCount=1`；共享 MySQL 与 Redis 时可配置多个 Server 副本。
 
-Router 委托 Server 的 Harness Runner 调用模型。Chart 将模型名称与 API URL 写入 ConfigMap，
+Router 委托 Server 的 Harness Engine 调用模型。Chart 将模型名称与 API URL 写入 ConfigMap，
 API key 引用已有 Secret，避免密钥出现在普通配置中。
 
 Quick Start 可以使用内置 Redis，并配置模型 URL 与密钥：

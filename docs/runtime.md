@@ -32,7 +32,8 @@ Watch 是 Controller 配置，不是 Verb。ConversationPredicate 过滤其他 A
 本地操作，不发起网络请求；跨进程协作由 Server API 提供。
 
 Operator 不导入 server 私有 model/repo，不直接写聊天数据库或 Redis。业务自有 API 与领域
-CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Server，由 component 内的 HarnessRunner 驱动。
+CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Engine 位于 Server，
+其中的 HarnessRunner 驱动 Adapter；runtime 通过 API 使用这组能力。
 
 ActorKind 的内置常量为 ActorKindUser、ActorKindOperator、ActorKindHarness。Operator 可声明
 `operator/<operator-key>/<role>` 自定义 kind（最长 128 字节），如 LongHorizon Manager 以 Run UID
@@ -179,7 +180,7 @@ Harness steer/followup，也不规定一条消息就是一个新任务。Read �
 
 ## Harness：提交与观察
 
-Harness 执行由 Server 内部 HarnessRunner 驱动。loop-runtime 是 Operator toolkit，提交调用并
+Harness 调用由 Server 内部 Harness Engine 管理与驱动。loop-runtime 是 Operator toolkit，提交调用并
 返回可重建的远程句柄；不注入 Adapter、不持有完整事件数组，也不接管 Agent 内部执行状态。
 
 ```go
@@ -211,7 +212,7 @@ Meta。一个 Call 对应一条独立输出，不再接受调用者的 Output wr
 和执行终态。Operator 读取 text/JSON 作决策，不接手 Emit/End；自己的总结等发言仍使用 Speak。
 
 调用 API、幂等、接管、租约、结果格式及 Adapter 配置统一见
-[Harness 管理与运行](harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
+[Harness Engine](harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
 Get + RequeueAfter，完成不会自动映射成业务 CRD Watch。
 
 ## Human：Ask 与 Confirm
