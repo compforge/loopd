@@ -32,7 +32,8 @@ Watch 是 Controller 配置，不是 Verb。ConversationPredicate 过滤其他 A
 本地操作，不发起网络请求；跨进程协作由 Server API 提供。
 
 Operator 不导入 server 私有 model/repo，不直接写聊天数据库或 Redis。业务自有 API 与领域
-CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Server，由 component 内的 HarnessRunner 驱动。
+CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Engine 位于 Server，
+其中的 HarnessRunner 驱动 Adapter；runtime 通过 API 使用这组能力。
 
 ActorKind 的内置常量为 ActorKindUser、ActorKindOperator、ActorKindHarness。Operator 可声明
 `operator/<operator-key>/<role>` 自定义 kind（最长 128 字节），如 LongHorizon Manager 以 Run UID
@@ -179,7 +180,7 @@ Harness steer/followup，也不规定一条消息就是一个新任务。Read �
 
 ## Harness：提交与观察
 
-Harness 执行由 Server 内部 HarnessRunner 驱动。loop-runtime 是 Operator toolkit，提交调用并
+Harness 调用由 Server 内部 Harness Engine 管理与驱动。loop-runtime 是 Operator toolkit，提交调用并
 返回可重建的远程句柄；不注入 Adapter、不持有完整事件数组，也不接管 Agent 内部执行状态。
 
 ```go
@@ -198,7 +199,7 @@ result, err := call.Result(ctx) // result.Format + result.Content；Text() 提�
 Prompt 遇到 Server 容量不足时返回 nil Call 与统一 runtime Error，不创建新调用。用
 `IsHarnessCapacityExceeded(err)` 判断；`IsRetryable(err)` 为 true，表示 Operator 可以稍后重试，
 SDK 不自动重试容量拒绝。相同幂等 key 的既有调用不受新调用容量限制，详见
-[容量与拒绝](../server/docs/harness.md#容量与拒绝)。
+[容量与拒绝](harness.md#容量与拒绝)。
 
 Call.Get(ctx) 通过 API 读取状态，Stream(ctx) 通过 Server 的 Run SSE 接口观察 AgentUE 增量，
 实时事件来源是 Redis。Wait(ctx) 在流结束或中断时查询持久状态，可重试的中断重新连接同一
@@ -211,7 +212,7 @@ Meta。一个 Call 对应一条独立输出，不再接受调用者的 Output wr
 和执行终态。Operator 读取 text/JSON 作决策，不接手 Emit/End；自己的总结等发言仍使用 Speak。
 
 调用 API、幂等、接管、租约、结果格式及 Adapter 配置统一见
-[Harness 调用与后台驱动](../server/docs/harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
+[Harness Engine](harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
 Get + RequeueAfter，完成不会自动映射成业务 CRD Watch。
 
 ## Human：Ask 与 Confirm
@@ -266,8 +267,8 @@ Operator.Register、Harness.Register 按 kind/key 注册并随 runtime 生命周
 server 的 actors 接口只列未过期 Operator/Harness；Human 不需要注册。注册记录不是领域配置，
 租约也不是执行锁。多副本互斥与分片由 Operator 配置，不由心跳保证。
 
-内部临时 Harness 无需注册为用户可选目标。Router 只注册自身，按需调用配置的临时 Harness；
-注册 Harness 的选择、转发和分派策略由 Router 后续扩展。
+Harness 的配置 target、在线注册和输出 Actor 身份各有用途，统一见
+[Harness 管理](harness.md#管理配置注册与身份)。Router 只注册自身，按需调用 Server 配置的 Harness。
 
 ## Router 示例策略
 

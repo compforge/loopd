@@ -2,15 +2,17 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-`loopd` is a server-side runtime for Agent orchestration. Build Kubernetes
-Operators that bring people, Agent execution services (Harnesses), and business
-systems together—from routing a question to running a long-term task.
+`loopd` is a collaboration platform where people, Operators, and Agent execution
+services (Harnesses) exchange persistent messages. Build Kubernetes Operators with
+the Go loop-runtime toolkit to connect these participants with business systems,
+from routing a question to running a long-term task.
 
 ## Philosophy
 
 An Agent can execute work. A business still needs to define its goals, coordinate
 participants, and decide when the result is good enough. loopd gives developers
-a shared runtime for expressing those decisions in ordinary code:
+a collaboration platform and an Operator toolkit for expressing those decisions
+in ordinary code:
 
 ```text
 Loop = Resource(spec + status) + Reconcile
@@ -18,9 +20,10 @@ Loop = Resource(spec + status) + Reconcile
 
 Resources hold goals and observed state; Reconcile decides the next step.
 
-loopd provides a runtime for building orchestration, rather than a predefined
-workflow. Each Operator defines its own process, collaboration model, and
-completion criteria.
+Each Operator defines its own process, collaboration model, and completion
+criteria. Server manages shared messages and includes a Harness Engine to drive
+calls through adapters for different Harnesses. The embedded loop-runtime toolkit
+lets Operators use these capabilities through verbs such as Speak and Prompt.
 
 ## What makes it useful
 
@@ -55,10 +58,12 @@ Router, and Web UI. Configure an OpenAI-compatible model endpoint and credential
 open the UI, select Router, and submit a question.
 
 The Quick Start uses temporary storage and an in-process AgentGo demo. Recovery
-across restarts requires persistent storage, Operator progress, and a durable
-Harness adapter; see the [recovery contract](docs/runtime.md#harness-执行与恢复).
+across restarts requires persistent storage, saved Operator progress, and a
+Harness with persistent execution and an adapter that supports recovery; see the
+[recovery contract](docs/harness.md#恢复与内存).
 
 To build an Operator, start with the [Router source](operators/router/internal/router/router.go)
-and [runtime guide](docs/runtime.md). Explore the [kernel](docs/kernel.md),
+and [runtime guide](docs/runtime.md). For Harness integration and execution, see
+the [Harness Engine guide](docs/harness.md). Explore the [kernel](docs/kernel.md),
 [component stack](docs/stack_v1.svg), or [image build guide](deploy/docker/README.md)
 for more detail.

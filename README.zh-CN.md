@@ -2,13 +2,14 @@
 
 [English](README.md) | **简体中文**
 
-`loopd` 是一个 Agent 编排的服务端运行时。开发者通过 Kubernetes Operator，
-将人、Agent 执行服务（Harness）与业务系统组织在一起，从问题路由到长期任务都可以按需编排。
+`loopd` 是人、Operator 与 Agent 执行服务（Harness）通过持久消息协作的平台。
+开发者使用 Go 工具包 loop-runtime 编写 Kubernetes Operator，将参与者与业务系统组织在一起，
+从问题路由到长期任务都可以按需编排。
 
 ## 理念
 
 Agent 负责执行工作，业务仍需要定义目标、组织参与者，并判断结果是否达标。
-loopd 提供一套公共运行时，让开发者用普通代码表达这些判断：
+loopd 提供协作平台和 Operator 工具包，让开发者用普通代码表达这些判断：
 
 ```text
 Loop = Resource(spec + status) + Reconcile
@@ -16,8 +17,9 @@ Loop = Resource(spec + status) + Reconcile
 
 Resource 保存目标与观测状态，Reconcile 决定下一步。
 
-loopd 不预设固定的工作流，而是提供开发和运行编排的公共能力。
-业务通过 Operator 定义自己的流程、协作方式与完成条件。
+Operator 定义自己的流程、协作方式与完成条件。Server 管理共享消息，内置 Harness Engine
+驱动调用，并通过 Adapter 接入不同 Harness。嵌入 Operator 的 loop-runtime 工具包提供
+Speak、Prompt 等 Verb，供业务使用这些能力。
 
 ## 特色
 
@@ -45,9 +47,11 @@ Manager 规划 CLI 工作，Executor 执行，Auditor 检查工件，再决定�
 按照 [Kubernetes Quick Start](deploy/k8s/README.md) 安装 server、Router 与 Web UI，
 配置 OpenAI-compatible 模型地址和凭据，打开页面后选择 Router 并提交问题。
 
-Quick Start 使用临时存储与进程内 AgentGo Demo。跨重启恢复需要持久存储、Operator
-领域进度与持久 Harness Adapter，具体见 [恢复契约](docs/runtime.md#harness-执行与恢复)。
+Quick Start 使用临时存储与进程内 AgentGo Demo。跨重启恢复需要持久存储、保存的 Operator
+领域进度，以及支持持久执行的 Harness 和具备恢复能力的 Adapter，具体见
+[恢复契约](docs/harness.md#恢复与内存)。
 
 开发 Operator 可从 [Router 源码](operators/router/internal/router/router.go) 和
-[Runtime 指南](docs/runtime.md) 开始；更多设计见 [Kernel](docs/kernel.md)、
+[Runtime 指南](docs/runtime.md) 开始；Harness 接入与执行管理见 [Harness Engine](docs/harness.md)。
+更多设计见 [Kernel](docs/kernel.md)、
 [组件栈](docs/stack_v1.svg) 与 [镜像构建](deploy/docker/README.md)。

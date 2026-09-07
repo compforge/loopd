@@ -53,4 +53,4 @@ Server 默认示例使用 AgentGo 进程内 Adapter，支持 CLI 和文件工具
 
 状态机、消息检查点、消费边界、回收及验证范围见 [设计](docs/design.md)。
 
-角色 Adapter、模型凭据和工具工作目录统一在 Server 配置，见 [Harness](../../server/docs/harness.md)。
+角色 Adapter、模型凭据和工具工作目录统一在 Server 配置，见 [Harness](../../docs/harness.md)。

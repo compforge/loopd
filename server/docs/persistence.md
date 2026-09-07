@@ -1,7 +1,7 @@
 # loop-server 持久化
 
 本文定义页面可见事实的存储归属与身份：数据库保存 Conversation、Message 和 Operator/Harness
-在线注册，以及 Harness Run 调用记录和通用 resource_locks 租约（见 [Harness](harness.md)）。同一份 Message 同时支持页面历史与参与者消费，不另建一份业务消息 queue 表。
+在线注册，以及 Harness Run 调用记录和通用 resource_locks 租约（见 [Harness](../../docs/harness.md)）。同一份 Message 同时支持页面历史与参与者消费，不另建一份业务消息 queue 表。
 消费协议由 [Conversation](conversation.md) 定义，跨存储的责任分层见 [Kernel](../../docs/kernel.md)。
 
 数据库差异由 repo 的 GORM Dialector 封装，使用 DATABASE_DRIVER 与 DATABASE_DSN 配置。
@@ -107,7 +107,7 @@ Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 bl
 
 整条内容替换时删除不再引用的 Part，并清理保留 Part 中已经移除的 block；
 普通 `DeleteMessage` 在同一事务内删除 Message 与全部 Parts；Harness Run 拥有的消息拒绝单独
-替换或删除，须与调用记录协调保留与清理（见 [Harness](harness.md)）。未来会话清理应复用相同事务原则，
+替换或删除，须与调用记录协调保留与清理（见 [Harness](../../docs/harness.md)）。未来会话清理应复用相同事务原则，
 不能只删除父行而留下 Parts。领域 CRD 的清理仍不决定聊天历史保留时间。
 
 当前 HTTP/SSE 与 Runtime 继续接收完整模型。分片减少正文更新量，但不等于前端懒加载，

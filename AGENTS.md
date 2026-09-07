@@ -30,7 +30,7 @@ loopd/
 │   ├── v1alpha1/           # Conv Go 类型
 │   └── crds/               # Conv 生成清单与校验测试
 ├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
-├── server/                 # 协作平台、Harness Runner 与 HTTP 服务；细节见 server/AGENTS.md
+├── server/                 # 协作平台、Harness Engine 与 HTTP 服务；细节见 server/AGENTS.md
 └── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 ```
 
@@ -40,7 +40,8 @@ loopd/
    承载完整轨迹。具体存储、交付和发现约束见各领域文档。
 2. Operator 复用 controller-runtime 的资源控制循环，通过 loop-runtime 封装的 Server API 协作。
    Poll/Commit 的消息读取和 Conv CRD 游标更新由 Server 执行；领域 CRD 由 Operator 自行操作，
-   领域类型不进入 server。Harness provider 差异封装在 Adapter，由 Server component 驱动。
+   领域类型不进入 server。Server 内置 Harness Engine：Run 记录调用，HarnessRunner 驱动，
+   Adapter 适配 provider 差异。
    runtime 的定位与协作能力统一见 `docs/runtime.md`。
 3. 修改 `pkg/k8s/` 或 `operators/longhorizon/api/` 下的 CRD 类型后运行 `make generate manifests`。
    生成清单与校验测试分别归属 `pkg/k8s/crds/` 和 `operators/longhorizon/api/crds/`；
@@ -51,6 +52,7 @@ loopd/
 ## References
 
 - `docs/kernel.md` — Actor 协作模型、状态与恢复责任、设计文档分工
+- `docs/harness.md` — Harness Engine：配置与发现、Run/Runner 生命周期、Adapter 契约与恢复
 - `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、共享历史、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `server/docs/conversation.md` — Conv 消息接收与 Poll 契约
