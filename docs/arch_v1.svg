@@ -15,15 +15,15 @@
   <rect width="1500" height="930" fill="#fbfcfe"/>
   <text x="40" y="53" font-size="36" font-weight="750">loopd</text>
   <text x="40" y="85" font-size="18">人、Operator、Harness 的协作平台</text>
-  <!-- The SDK forms the bottom strip of the Operator boundary. -->
-  <rect x="360" y="130" width="800" height="230" rx="16" fill="#edf7ef" stroke="#7ca889" stroke-width="2"/>
+  <!-- The narrower SDK strip is attached to the bottom of the Operator boundary. -->
+  <rect x="360" y="130" width="800" height="180" rx="16" fill="#edf7ef" stroke="#7ca889" stroke-width="2"/>
   <text x="390" y="173" font-size="26" font-weight="650">Operators</text>
   <rect x="400" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
   <text class="name" x="567.5" y="244">Router</text>
   <rect x="785" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
   <text class="name" x="952.5" y="244">LongHorizon</text>
-  <path d="M360 310 H1160 V344 Q1160 360 1144 360 H376 Q360 360 360 344 Z" fill="#f8eddc" stroke="#c69468" stroke-width="2"/>
-  <text x="390" y="343" font-size="23" font-weight="650">loop-runtime · SDK</text>
+  <path d="M400 310 H1120 V344 Q1120 360 1104 360 H416 Q400 360 400 344 Z" fill="#f8eddc" stroke="#c69468" stroke-width="2"/>
+  <text x="425" y="343" font-size="23" font-weight="650">loop-runtime · SDK</text>
   <text class="detail" x="927" y="342">Poll · Speak · Prompt · Ask / Confirm</text>
   <rect x="40" y="310" width="220" height="100" rx="16" fill="#f2f0fb" stroke="#a79ac8" stroke-width="2"/>
   <text class="name" x="150" y="360">Conv CRD</text>
