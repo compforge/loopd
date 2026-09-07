@@ -43,7 +43,10 @@ func (store *Store) Speak(ctx context.Context, convID string, request contract.S
 		if err := ensureParticipantConversation(tx, conv, request.Target); err != nil {
 			return err
 		}
-		status := contract.MessageStatusCompleted
+		status := request.Status
+		if status == "" {
+			status = contract.MessageStatusCompleted
+		}
 		if request.Stream {
 			status = contract.MessageStatusStreaming
 		}

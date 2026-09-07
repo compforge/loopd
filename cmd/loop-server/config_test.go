@@ -93,7 +93,7 @@ func TestLoadConfigRejectsLegacyEnvironment(t *testing.T) {
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"MESSAGE_TTL",
+		"MESSAGE_TTL", "HARNESS_RUN_CONCURRENCY",
 		"SERVER_ADDRESS", "DATABASE_DRIVER", "DATABASE_DSN", "REDIS_ADDRESS", "REDIS_USERNAME", "REDIS_PASSWORD",
 		"TASK_NAMESPACE", "TASK_CLIENT_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
 		"LOOP_SERVER_MYSQL_DSN", "LOOP_SERVER_SQLITE_PATH", "LOOP_SERVER_ADDR", "LOOP_SERVER_REDIS_ADDR",
@@ -119,6 +119,28 @@ func TestMessageStorageThresholds(t *testing.T) {
 			t.Setenv(name, "-1")
 			if _, err := loadConfig(); err == nil {
 				t.Fatal("accepted invalid threshold")
+			}
+		})
+	}
+}
+
+func TestHarnessRunConcurrency(t *testing.T) {
+	clearConfigEnv(t)
+	for _, test := range []struct {
+		raw  string
+		want int
+	}{{"", 50}, {"7", 7}, {"0", 0}, {"-1", 0}, {"invalid", 0}} {
+		t.Run(test.raw, func(t *testing.T) {
+			t.Setenv("HARNESS_RUN_CONCURRENCY", test.raw)
+			config, err := loadConfig()
+			if test.want == 0 {
+				if err == nil {
+					t.Fatal("accepted invalid capacity")
+				}
+				return
+			}
+			if err != nil || config.harnessRunConcurrency != test.want {
+				t.Fatalf("capacity=%d err=%v", config.harnessRunConcurrency, err)
 			}
 		})
 	}

@@ -38,6 +38,9 @@ func (service *MessageService) Speak(ctx context.Context, convID string, request
 		(request.Target != (contract.ActorRef{}) && (!request.Target.Kind.Valid() || request.Target.Key == "")) {
 		return contract.Message{}, ErrInvalid
 	}
+	if request.Status != "" && (request.Stream || !request.Status.Terminal()) {
+		return contract.Message{}, ErrInvalid
+	}
 	if len(request.Content) == 0 {
 		request.Content = []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)
 	}

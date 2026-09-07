@@ -72,6 +72,8 @@ spec:
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           env:
+            - name: HARNESS_RUN_CONCURRENCY
+              value: {{ .Values.server.harnessRunConcurrency | quote }}
             - name: HARNESS_CONFIG_FILE
               value: /etc/loopd/harnesses.json
             {{- if .Values.server.harnessAPISecret }}

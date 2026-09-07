@@ -24,14 +24,17 @@ import (
 // HumanIdentity resolves the trusted user principal for chat creation and replies.
 type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
 
+const DefaultHarnessRunConcurrency = component.DefaultHarnessRunConcurrency
+
 type Config struct {
-	Harnesses     map[string]harness.Adapter
-	MessageTTL    time.Duration
-	Conversations ConversationCoordinator
-	Database      DatabaseConfig
-	Redis         RedisConfig
-	Logger        *slog.Logger
-	HumanIdentity HumanIdentity
+	HarnessRunConcurrency int
+	Harnesses             map[string]harness.Adapter
+	MessageTTL            time.Duration
+	Conversations         ConversationCoordinator
+	Database              DatabaseConfig
+	Redis                 RedisConfig
+	Logger                *slog.Logger
+	HumanIdentity         HumanIdentity
 }
 
 type DatabaseConfig struct {
@@ -59,6 +62,12 @@ type Server struct {
 }
 
 func New(config Config) (*Server, error) {
+	if config.HarnessRunConcurrency < 0 {
+		return nil, errors.New("Harness run concurrency must be positive")
+	}
+	if config.HarnessRunConcurrency == 0 {
+		config.HarnessRunConcurrency = DefaultHarnessRunConcurrency
+	}
 	if config.MessageTTL < 0 {
 		return nil, errors.New("message TTL must be positive")
 	}
@@ -92,9 +101,10 @@ func New(config Config) (*Server, error) {
 	chat := service.NewChatService(store, config.Logger, poll)
 	human := service.NewHumanService(store, config.Logger)
 	harnessRunner := component.NewHarnessRunner(store, config.Harnesses, config.Logger)
+	harnessRunner.Concurrency = config.HarnessRunConcurrency
 	harnessRunner.Publish = messages.PublishCommitted
 	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
-	api.HarnessRuns = service.NewHarnessRunService(store, config.Harnesses, harnessRunner.Wake)
+	api.HarnessRuns = service.NewHarnessRunService(store, config.Harnesses, harnessRunner)
 	api.HarnessRuns.Messages = messages
 	api.HarnessRuns.Listen = func(ctx context.Context, id string, deliver func(ui.Event) error) error {
 		return component.NewMessageListener(events, store, id, config.Logger).Run(ctx, deliver)

@@ -59,7 +59,7 @@ func WithHarnesses(t *testing.T, client *http.Client, adapters map[string]harnes
 	runner := component.NewHarnessRunner(store, adapters, nil)
 	runner.Publish = output.PublishCommitted
 	runner.ScanInterval = 5 * time.Millisecond
-	svc := service.NewHarnessRunService(store, adapters, runner.Wake)
+	svc := service.NewHarnessRunService(store, adapters, runner)
 	svc.Messages = output
 	svc.Listen = func(ctx context.Context, id string, deliver func(ui.Event) error) error {
 		return component.NewMessageListener(bridge, store, id, nil).Run(ctx, deliver)

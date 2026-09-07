@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -28,11 +29,33 @@ func (err *Error) Error() string {
 
 func (err *Error) Unwrap() error { return err.Cause }
 
-var ErrCallConflict = &Error{StatusCode: http.StatusConflict, Message: "Harness call conflicts with an existing submission"}
+var (
+	ErrCallConflict            = &Error{StatusCode: http.StatusConflict, Message: "Harness call conflicts with an existing submission"}
+	errRegistrationKeyRequired = &Error{Message: "registration key is required"}
+	errMessageEnded            = &Error{Message: "message has ended"}
+	errInvalidEmit             = &Error{Message: "Emit requires set or append; use End to finish sending"}
+	errEndStatusCount          = &Error{Message: "End accepts at most one status"}
+	errEndStatusInvalid        = &Error{Message: "End requires a terminal message status"}
+	errEndStatusConflict       = &Error{Message: "message already ended with a different status"}
+	errPendingMessageUpdate    = &Error{Message: "previous message update is unresolved; retry it before sending another update"}
+	errHarnessStreamIncomplete = &Error{Message: "Harness stream ended before durable terminal state", Retryable: true}
+)
+
+func invalidServerURLError(baseURL string) error {
+	return &Error{Message: fmt.Sprintf("invalid loop-server URL %q", baseURL)}
+}
+func harnessFailure(message string) error { return &Error{Message: message} }
+func harnessConflict(cause error) error   { return errors.Join(ErrCallConflict, cause) }
 
 func IsConflict(err error) bool {
 	var target *Error
 	return errors.As(err, &target) && target.StatusCode == http.StatusConflict
+}
+
+// IsHarnessCapacityExceeded reports admission rejection; no new Run was accepted.
+func IsHarnessCapacityExceeded(err error) bool {
+	var target *Error
+	return errors.As(err, &target) && target.StatusCode == http.StatusTooManyRequests && target.Type == "harness_capacity_exceeded"
 }
 
 func IsRetryable(err error) bool {

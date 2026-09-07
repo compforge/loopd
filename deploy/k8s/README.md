@@ -62,6 +62,9 @@ Part 大小为目标值，单个更大的 block 独占一个 Part。详见
 
 ## Harness 配置
 
+`server.harnessRunConcurrency` 设置每个 Server Pod 的 Harness 驱动上限，默认 50，通过
+`HARNESS_RUN_CONCURRENCY` 传入。新调用满载返回 429；已接收调用的超时、取消维护不占执行槽。
+
 `server.harnesses` 是 target → Adapter 配置映射，通过 ConfigMap 挂载为 HARNESS_CONFIG_FILE。
 Router 默认使用 agentgo；LongHorizon 使用 manager/executor/auditor。模型、凭据与文件工作目录
 属于 Server，Operator Pod 只保留编排配置。`server.workspace` 配置 demo 文件工具存储。

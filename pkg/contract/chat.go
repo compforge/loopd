@@ -47,6 +47,9 @@ type Message struct {
 // SpeakRequest creates one actor-owned message. Key is stable within the
 // conversation and actor, independent of any UI delivery. Empty Target broadcasts.
 type SpeakRequest struct {
+	// Status is the terminal status of a non-streaming message; empty means completed.
+	// It only applies when creating the message and cannot be combined with Stream.
+	Status MessageStatus `json:"status,omitempty"`
 	// Stream leaves the message open for incremental output. The default publishes a complete message.
 	Stream    bool            `json:"stream,omitempty"`
 	Key       string          `json:"key"`

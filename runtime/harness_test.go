@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,5 +97,32 @@ func TestHarnessExplicitCancellation(t *testing.T) {
 	value, err := call.Wait(ctx)
 	if err == nil || value.Phase != contract.CallCancelled {
 		t.Fatalf("cancel=%+v %v", value, err)
+	}
+}
+
+func TestHarnessPromptReturnsCapacityWithoutAutomaticRetry(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"type":"harness_capacity_exceeded","message":"Harness execution capacity exhausted"}}`))
+	}))
+	defer server.Close()
+	rt, err := New(server.URL, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	call, err := rt.Loop.Harness.Prompt(context.Background(), Prompt{ConversationID: "conv", IdempotencyKey: "key", Target: "test", EffectKey: "work", Text: "go"})
+	if call != nil || !IsHarnessCapacityExceeded(err) || !IsRetryable(err) || requests.Load() != 1 {
+		t.Fatalf("call=%v err=%v requests=%d", call, err, requests.Load())
+	}
+	var typed *Error
+	if !errors.As(err, &typed) || typed.StatusCode != 429 {
+		t.Fatalf("typed error lost: %v", err)
+	}
+	if IsHarnessCapacityExceeded(&Error{StatusCode: 429, Type: "other_limit"}) {
+		t.Fatal("unrelated 429 classified as Harness capacity")
 	}
 }

@@ -18,7 +18,11 @@ import (
 )
 
 func HarnessResource(id string) string { return "harness-run/" + id }
-func (s *Store) CreateHarnessRun(ctx context.Context, request contract.HarnessRunRequest) (run model.HarnessRun, err error) {
+
+// CreateHarnessRun checks idempotency before calling admit for a new Run.
+// The caller releases any reservation if the transaction fails. Replays never
+// reserve capacity, even when this Server is full.
+func (s *Store) CreateHarnessRun(ctx context.Context, request contract.HarnessRunRequest, admit func(string) error) (run model.HarnessRun, err error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return run, err
@@ -47,6 +51,11 @@ func (s *Store) CreateHarnessRun(ctx context.Context, request contract.HarnessRu
 		}
 		now := time.Now().UTC()
 		run = model.HarnessRun{ID: uuid.V7(), MessageID: uuid.V7(), ConversationID: request.ConversationID, Target: request.Target, EffectKey: request.EffectKey, Request: raw, RequestHash: fingerprint, SubmissionKey: key, Phase: string(contract.CallPending), DeadlineAt: now.Add(request.Timeout), NextAttemptAt: now}
+		if admit != nil {
+			if err := admit(run.ID); err != nil {
+				return err
+			}
+		}
 		content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": request.Meta, "blocks": []any{}})
 		m := model.Message{ID: run.MessageID, ConversationID: run.ConversationID, Kind: request.Actor.Kind, ActorKey: request.Actor.Key, TargetKind: request.Recipient.Kind, TargetKey: request.Recipient.Key, Purpose: "harness", Revision: 1, Status: string(contract.MessageStatusStreaming), Content: content}
 		if err := s.saveMessage(tx, &m, true); err != nil {
@@ -63,6 +72,16 @@ func (s *Store) GetHarnessRun(ctx context.Context, id string) (run model.Harness
 	return
 }
 func (s *Store) ListRunnableHarnessRuns(ctx context.Context, limit int) ([]model.HarnessRun, error) {
+	return s.listAvailableHarnessRuns(ctx, limit, false)
+}
+
+// ListDueHarnessRuns ignores execution retry delays; cancellation and deadlines
+// must progress even when no execution slot is available.
+func (s *Store) ListDueHarnessRuns(ctx context.Context, limit int) ([]model.HarnessRun, error) {
+	return s.listAvailableHarnessRuns(ctx, limit, true)
+}
+
+func (s *Store) listAvailableHarnessRuns(ctx context.Context, limit int, due bool) ([]model.HarnessRun, error) {
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var rows []model.HarnessRun
@@ -71,7 +90,15 @@ func (s *Store) ListRunnableHarnessRuns(ctx context.Context, limit int) ([]model
 		join = "resource_locks.resource = 'harness-run/' || harness_runs.id"
 	}
 	now := time.Now().UTC()
-	err := s.db.WithContext(ctx).Select("harness_runs.id").Joins("LEFT JOIN resource_locks ON "+join).Where("harness_runs.phase IN ? AND harness_runs.next_attempt_at <= ?", []string{"pending", "starting", "running"}, now).Where("resource_locks.resource IS NULL OR resource_locks.expires_at <= ?", now).Order("harness_runs.next_attempt_at, harness_runs.id").Limit(limit).Find(&rows).Error
+	query := s.db.WithContext(ctx).Model(&model.HarnessRun{}).Select("harness_runs.id").Joins("LEFT JOIN resource_locks ON "+join).
+		Where("harness_runs.phase IN ?", []string{"pending", "starting", "running"}).
+		Where("resource_locks.resource IS NULL OR resource_locks.expires_at <= ?", now)
+	if due {
+		query = query.Where("harness_runs.cancel_requested = ? OR harness_runs.deadline_at <= ?", true, now).Order("harness_runs.deadline_at, harness_runs.id")
+	} else {
+		query = query.Where("harness_runs.next_attempt_at <= ?", now).Order("harness_runs.next_attempt_at, harness_runs.id")
+	}
+	err := query.Limit(limit).Find(&rows).Error
 	return rows, err
 }
 

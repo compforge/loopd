@@ -116,3 +116,76 @@ func TestOutputHTTPIdentityAndWriteBoundaries(t *testing.T) {
 		t.Fatalf("removed context route=%d", removed.StatusCode())
 	}
 }
+
+// +case=`A complete error report persists AgentUE error and failed status together; retries cannot overwrite or reopen it.`
+func TestSpeakTerminalStatus(t *testing.T) {
+	ctx := context.Background()
+	store, err := repo.Open(repo.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "failed.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "root"}); err != nil {
+		t.Fatal(err)
+	}
+	api := New(service.NewActorService(store, nil), service.NewConversationService(store, nil), service.NewMessageService(store, nil, nil), nil, nil)
+	engine := route.NewEngine(config.NewOptions(nil))
+	api.Register(engine)
+	request := contract.SpeakRequest{
+		Key: "failure", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"},
+		Status:  contract.MessageStatusFailed,
+		Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{"error":{"code":"operator_failed","message":"Please retry."}},"blocks":[]}`),
+	}
+	speak := func(request contract.SpeakRequest) contract.Message {
+		t.Helper()
+		body, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := performJSON(t, engine, "POST", "/v1/conversations/root/speak", string(body))
+		var message contract.Message
+		if response.StatusCode() != 200 {
+			t.Fatalf("speak=%d %s", response.StatusCode(), response.Body())
+		}
+		if err := json.Unmarshal(response.Body(), &message); err != nil {
+			t.Fatal(err)
+		}
+		return message
+	}
+	first := speak(request)
+	if first.Status != contract.MessageStatusFailed || !first.Ended() {
+		t.Fatalf("message=%+v", first)
+	}
+	stored, err := store.GetMessage(ctx, first.ID)
+	if err != nil || stored.Status != string(contract.MessageStatusFailed) || !strings.Contains(string(stored.Content), "operator_failed") {
+		t.Fatalf("persisted error=%+v err=%v", stored, err)
+	}
+	request.Status = ""
+	request.Content = json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)
+	for _, stream := range []bool{false, true} {
+		request.Stream = stream
+		retry := speak(request)
+		if retry.ID != first.ID || retry.Status != first.Status || string(retry.Content) != string(first.Content) {
+			t.Fatalf("retry changed error: %+v", retry)
+		}
+	}
+	for _, invalid := range []contract.SpeakRequest{
+		{Key: "invalid-stream", Actor: request.Actor, Stream: true, Status: contract.MessageStatusFailed},
+		{Key: "invalid-status", Actor: request.Actor, Status: contract.MessageStatusStreaming},
+		{Key: "unknown-status", Actor: request.Actor, Status: "unknown"},
+	} {
+		body, _ := json.Marshal(invalid)
+		response := performJSON(t, engine, "POST", "/v1/conversations/root/speak", string(body))
+		if response.StatusCode() != 400 {
+			t.Fatalf("invalid status=%d %s", response.StatusCode(), response.Body())
+		}
+	}
+	history, err := store.ListMessages(ctx, "root", "", 100)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	request.Key, request.Stream = "completed", false
+	if completed := speak(request); completed.Status != contract.MessageStatusCompleted {
+		t.Fatalf("default=%+v", completed)
+	}
+}

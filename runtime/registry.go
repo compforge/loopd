@@ -48,7 +48,7 @@ func (service registry) register(ctx context.Context, value registration) error 
 	value.displayName = strings.TrimSpace(value.displayName)
 	value.description = strings.TrimSpace(value.description)
 	if value.key == "" {
-		return &Error{Message: "registration key is required"}
+		return errRegistrationKeyRequired
 	}
 	if err := service.renew(ctx, value); err != nil {
 		return fmt.Errorf("register %s %q: %w", service.kind, value.key, err)

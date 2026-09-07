@@ -11,21 +11,22 @@ import (
 )
 
 type config struct {
-	messageTTL          time.Duration
-	messageInlineBlocks int
-	messageInlineBytes  int
-	messagePartBytes    int
-	address             string
-	databaseDriver      string
-	databaseDSN         string
-	redisAddress        string
-	redisUsername       string
-	redisPassword       string
-	taskNamespace       string
-	taskClientTimeout   time.Duration
-	readTimeout         time.Duration
-	idleTimeout         time.Duration
-	shutdownTimeout     time.Duration
+	harnessRunConcurrency int
+	messageTTL            time.Duration
+	messageInlineBlocks   int
+	messageInlineBytes    int
+	messagePartBytes      int
+	address               string
+	databaseDriver        string
+	databaseDSN           string
+	redisAddress          string
+	redisUsername         string
+	redisPassword         string
+	taskNamespace         string
+	taskClientTimeout     time.Duration
+	readTimeout           time.Duration
+	idleTimeout           time.Duration
+	shutdownTimeout       time.Duration
 }
 
 func loadConfig() (config, error) {
@@ -58,18 +59,19 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("unsupported DATABASE_DRIVER %q", databaseDriver)
 	}
 	value := config{
-		messageTTL:        server.DefaultMessageTTL,
-		address:           envOr("SERVER_ADDRESS", ":8080"),
-		databaseDriver:    databaseDriver,
-		databaseDSN:       databaseDSN,
-		redisAddress:      envOr("REDIS_ADDRESS", "127.0.0.1:6379"),
-		redisUsername:     os.Getenv("REDIS_USERNAME"),
-		redisPassword:     os.Getenv("REDIS_PASSWORD"),
-		taskNamespace:     envOr("TASK_NAMESPACE", "default"),
-		taskClientTimeout: 10 * time.Second,
-		readTimeout:       30 * time.Second,
-		idleTimeout:       90 * time.Second,
-		shutdownTimeout:   15 * time.Second,
+		harnessRunConcurrency: server.DefaultHarnessRunConcurrency,
+		messageTTL:            server.DefaultMessageTTL,
+		address:               envOr("SERVER_ADDRESS", ":8080"),
+		databaseDriver:        databaseDriver,
+		databaseDSN:           databaseDSN,
+		redisAddress:          envOr("REDIS_ADDRESS", "127.0.0.1:6379"),
+		redisUsername:         os.Getenv("REDIS_USERNAME"),
+		redisPassword:         os.Getenv("REDIS_PASSWORD"),
+		taskNamespace:         envOr("TASK_NAMESPACE", "default"),
+		taskClientTimeout:     10 * time.Second,
+		readTimeout:           30 * time.Second,
+		idleTimeout:           90 * time.Second,
+		shutdownTimeout:       15 * time.Second,
 	}
 	durations := []struct {
 		name  string
@@ -92,6 +94,7 @@ func loadConfig() (config, error) {
 		name   string
 		target *int
 	}{
+		{"HARNESS_RUN_CONCURRENCY", &value.harnessRunConcurrency},
 		{"MESSAGE_INLINE_BLOCKS", &value.messageInlineBlocks},
 		{"MESSAGE_INLINE_BYTES", &value.messageInlineBytes},
 		{"MESSAGE_PART_BYTES", &value.messagePartBytes},

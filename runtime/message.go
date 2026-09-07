@@ -54,10 +54,10 @@ func (message *Message) Emit(ctx context.Context, event ui.Event) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	if message.ended {
-		return &Error{Message: "message has ended"}
+		return errMessageEnded
 	}
 	if event.Op != ui.OpSet && event.Op != ui.OpAppend {
-		return &Error{Message: "Emit requires set or append; use End to finish sending"}
+		return errInvalidEmit
 	}
 	return message.emit(ctx, event)
 }
@@ -70,17 +70,17 @@ func (message *Message) End(ctx context.Context, statuses ...contract.MessageSta
 	defer message.mu.Unlock()
 	status := contract.MessageStatusCompleted
 	if len(statuses) > 1 {
-		return &Error{Message: "End accepts at most one status"}
+		return errEndStatusCount
 	}
 	if len(statuses) == 1 {
 		status = statuses[0]
 	}
 	if !status.Terminal() {
-		return &Error{Message: "End requires a terminal message status"}
+		return errEndStatusInvalid
 	}
 	if message.ended {
 		if message.value.Status != status {
-			return &Error{Message: "message already ended with a different status"}
+			return errEndStatusConflict
 		}
 		return nil
 	}
@@ -109,7 +109,7 @@ func (message *Message) emit(ctx context.Context, event ui.Event, statuses ...co
 		return wrapError(err)
 	}
 	if len(message.pending) > 0 && !bytes.Equal(message.pending, data) {
-		return &Error{Message: "previous message update is unresolved; retry it before sending another update"}
+		return errPendingMessageUpdate
 	}
 	if err := message.client.write(ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events", json.RawMessage(data), nil); err != nil {
 		message.pending = data

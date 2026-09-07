@@ -11,6 +11,8 @@ rbac:
   create: true
 
 server:
+  # Per-pod capacity; new Harness submissions receive 429 when full.
+  harnessRunConcurrency: 50
   # Inactivity timeout for ordinary output and Redis retention.
   messageTTL: 24h
   # Multiple Server replicas require shared MySQL and Redis.
