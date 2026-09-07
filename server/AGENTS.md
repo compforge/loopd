@@ -39,7 +39,7 @@ server/
 │   ├── conversation.go
 │   ├── message.go
 │   └── message_part.go     # 内联/引用装箱、定点更新与一致性展开
-├── internal/conversation/  # Conv CRD 定向唤醒与参与者接收游标
+├── internal/k8s/           # Kubernetes 操作封装；Conv CRD 定向唤醒与参与者接收游标
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService；消息发布、输出固化与 Redis 流写入

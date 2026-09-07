@@ -9,7 +9,7 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
-	conversationclient "github.com/compforge/loopd/server/internal/conversation"
+	k8sclient "github.com/compforge/loopd/server/internal/k8s"
 	"github.com/compforge/loopd/server/internal/model"
 	kuberuntime "k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,7 +24,7 @@ func testConversationCoordinator(t *testing.T) ConversationCoordinator {
 		t.Fatal(err)
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	return conversationclient.NewClient(kube, "test", 0)
+	return k8sclient.NewConversationClient(kube, "test", 0)
 }
 
 // +case=`Actors exchange durable messages without a UI task; Poll waits for an open earlier message, End wakes it, and Commit stays actor-local.`
@@ -39,7 +39,7 @@ func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
 		t.Fatal(err)
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	poll := NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
+	poll := NewPollService(store, k8sclient.NewConversationClient(kube, "test", 0), nil)
 	a := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"}
 	b := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "b"}
 	c := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "c"}
