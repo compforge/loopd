@@ -1,4 +1,4 @@
-package crd_test
+package crds_test
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 // Generated YAML must pass Kubernetes's admission schema and CEL cost checks;
 // controller-gen success alone does not establish installability.
 func TestGeneratedCRDAdmission(t *testing.T) {
-	paths, err := filepath.Glob("bases/*.yaml")
-	if err != nil || len(paths) != 4 {
+	paths, err := filepath.Glob("*.yaml")
+	if err != nil || len(paths) != 1 {
 		t.Fatalf("CRDs=%v %v", paths, err)
 	}
 	for _, path := range paths {

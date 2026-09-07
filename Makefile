@@ -14,8 +14,9 @@ generate: $(CONTROLLER_GEN)
 	$(CONTROLLER_GEN) object paths="./pkg/k8s/...;./operators/longhorizon/api/..."
 
 manifests: $(CONTROLLER_GEN)
-	$(CONTROLLER_GEN) crd paths="./pkg/k8s/...;./operators/longhorizon/api/..." output:crd:artifacts:config=config/crd/bases
-	cp config/crd/bases/*.yaml deploy/k8s/loopd/crds/
+	$(CONTROLLER_GEN) crd paths="./pkg/k8s/..." output:crd:artifacts:config=pkg/k8s/crds
+	$(CONTROLLER_GEN) crd paths="./operators/longhorizon/api/..." output:crd:artifacts:config=operators/longhorizon/api/crds
+	cp pkg/k8s/crds/*.yaml operators/longhorizon/api/crds/*.yaml deploy/k8s/loopd/crds/
 
 test:
 	go test ./...

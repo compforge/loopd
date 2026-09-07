@@ -17,7 +17,6 @@ Agent、Assistant、Session 等外部
 ```text
 loopd/
 ├── cmd/loop-server/        # 进程配置、依赖组装与生命周期
-├── config/crd/             # loopd Conv CRD 安装清单
 ├── deploy/                 # loop-server、Router、Web 镜像与 Kubernetes Helm Chart
 ├── docs/                   # loopd 稳定内核与跨模块设计
 ├── operators/longhorizon/  # Manager/Executor/Auditor 长期 CLI Operator；Run 自主管理期限与回收
@@ -25,7 +24,9 @@ loopd/
 ├── operators/interaction/  # 串行 Ask → Confirm 交互示例，含取消、超时与结果汇总
 ├── pkg/contract/           # 跨 server、runtime 和 harness 的公共协作契约
 ├── pkg/harness/            # Harness Adapter 契约；agentgo 为进程内 demo，managedagent 接入远端 SDK API
-├── pkg/k8s/v1alpha1/        # server 与 runtime 共享的 Conv CRD 契约
+├── pkg/k8s/                # server 与 runtime 共享的 Kubernetes 契约
+│   ├── v1alpha1/           # Conv Go 类型
+│   └── crds/               # Conv 生成清单与校验测试
 ├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
 ├── server/                 # 协作平台、Harness Runner 与 HTTP 服务；细节见 server/AGENTS.md
 └── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
@@ -37,8 +38,9 @@ loopd/
    承载完整轨迹。具体存储、交付和发现约束见各领域文档。
 2. Operator 通过 loop-runtime 公共契约接入，复用 controller-runtime 的资源控制循环；runtime 的
    定位与协作能力统一见 `docs/runtime.md`，领域类型不进入 server；Harness provider 差异封装在 Adapter，Server component 驱动公共契约。
-3. 修改 `pkg/k8s/` 或 `operators/longhorizon/api/` 下的 CRD 类型后运行 `make generate manifests`，提交 DeepCopy、基础 CRD
-   YAML 与 Helm Chart 中同步的 CRD YAML。
+3. 修改 `pkg/k8s/` 或 `operators/longhorizon/api/` 下的 CRD 类型后运行 `make generate manifests`。
+   生成清单与校验测试分别归属 `pkg/k8s/crds/` 和 `operators/longhorizon/api/crds/`；
+   提交 DeepCopy、生成清单与同步到 `deploy/k8s/loopd/crds/` 的 Helm 安装清单。
 4. 根目录 `VERSION` 使用 SemVer；任何代码改动都必须在同一变更中递增版本。
 5. 公开仓内容必须脱敏，不得提交内部链接、凭据或仅在公司环境成立的配置。
 

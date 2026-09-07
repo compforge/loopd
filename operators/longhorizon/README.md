@@ -8,7 +8,8 @@ Auditor 独立检查工件，再由 Manager 决定继续、询问用户或结束
 
 ```sh
 make generate manifests
-kubectl apply -f config/crd/bases/
+kubectl apply -f pkg/k8s/crds/
+kubectl apply -f operators/longhorizon/api/crds/
 # 使用当前 kubeconfig；server 必须服务同一 namespace。
 export LOOP_LH_NAMESPACE=loopd
 export LOOP_LH_SERVER_URL=http://127.0.0.1:8080
