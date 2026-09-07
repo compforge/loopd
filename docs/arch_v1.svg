@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="930" viewBox="0 0 1500 930" role="img" aria-labelledby="title desc">
   <title id="title">loopd collaboration architecture</title>
-  <desc id="desc">Router and LongHorizon are shown inside the Operator boundary, with loop-runtime attached as a slim SDK strip. Operators use this embedded SDK to call Server APIs and receive run streams. Server updates Conv CRDs to wake Operators. Inside Server, collaboration services connect to the Harness Engine, which contains a Runner and an Adapter for driving Harnesses. Server uses DB for persistence and Redis for live events. User interfaces communicate with Server through HTTP and conversation streams.</desc>
+  <desc id="desc">Server is the widest component boundary. Router and LongHorizon sit inside the narrower Operator boundary, with an even narrower loop-runtime SDK strip attached below. Operators use this embedded SDK to call Server APIs and receive run streams. Server updates Conv CRDs to wake Operators. Inside Server, collaboration services connect to the Harness Engine, which contains a Runner and an Adapter for driving Harnesses. Server uses DB for persistence and Redis for live events. User interfaces communicate with Server through HTTP and conversation streams.</desc>
   <defs>
     <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" fill="#536477"/></marker>
     <style>
@@ -15,21 +15,21 @@
   <rect width="1500" height="930" fill="#fbfcfe"/>
   <text x="40" y="53" font-size="36" font-weight="750">loopd</text>
   <text x="40" y="85" font-size="18">人、Operator、Harness 的协作平台</text>
-  <!-- The narrower SDK strip is attached to the bottom of the Operator boundary. -->
-  <rect x="360" y="130" width="800" height="180" rx="16" fill="#edf7ef" stroke="#7ca889" stroke-width="2"/>
-  <text x="390" y="173" font-size="26" font-weight="650">Operators</text>
-  <rect x="400" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
-  <text class="name" x="567.5" y="244">Router</text>
-  <rect x="785" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
-  <text class="name" x="952.5" y="244">LongHorizon</text>
-  <path d="M400 310 H1120 V344 Q1120 360 1104 360 H416 Q400 360 400 344 Z" fill="#f8eddc" stroke="#c69468" stroke-width="2"/>
-  <text x="425" y="343" font-size="23" font-weight="650">loop-runtime · SDK</text>
-  <text class="detail" x="927" y="342">Poll · Speak · Prompt · Ask / Confirm</text>
+  <!-- Server is widest; Operators and the attached SDK strip step inward around the same center. -->
+  <rect x="420" y="130" width="680" height="180" rx="16" fill="#edf7ef" stroke="#7ca889" stroke-width="2"/>
+  <text x="450" y="173" font-size="26" font-weight="650">Operators</text>
+  <rect x="450" y="195" width="285" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
+  <text class="name" x="592.5" y="244">Router</text>
+  <rect x="785" y="195" width="285" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
+  <text class="name" x="927.5" y="244">LongHorizon</text>
+  <path d="M450 310 H1070 V344 Q1070 360 1054 360 H466 Q450 360 450 344 Z" fill="#f8eddc" stroke="#c69468" stroke-width="2"/>
+  <text x="470" y="343" font-size="21" font-weight="650">loop-runtime · SDK</text>
+  <text class="detail" x="885" y="342">Poll · Speak · Prompt · Ask / Confirm</text>
   <rect x="40" y="310" width="220" height="100" rx="16" fill="#f2f0fb" stroke="#a79ac8" stroke-width="2"/>
   <text class="name" x="150" y="360">Conv CRD</text>
   <text class="detail" x="150" y="390">信号 · 消费进度</text>
-  <path class="edge" d="M150 310 V180 H360"/>
-  <text class="label" x="255" y="160">Watch / 唤醒</text>
+  <path class="edge" d="M150 310 V180 H420"/>
+  <text class="label" x="285" y="160">Watch / 唤醒</text>
   <path class="edge" d="M360 510 H150 V410"/>
   <text class="label" x="253" y="489">通知 / 游标</text>
   <path class="edge both" d="M760 360 V490"/>
