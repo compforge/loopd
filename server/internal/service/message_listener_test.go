@@ -105,7 +105,7 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 			_, err = store.ExpireMessages(ctx, time.Now().Add(time.Second), 100)
 			return err
 		}
-		if event.MessageID == active.ID && patch.Op == ui.OpEnd {
+		if event.MessageID == active.ID && patch.Op == ui.OpStart && event.Message.Ended() {
 			if event.Message.Status != contract.MessageStatusExpired {
 				t.Fatal("missing expired status")
 			}

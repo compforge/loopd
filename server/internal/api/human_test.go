@@ -93,7 +93,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if history.StatusCode() != 200 || len(onlyReply.Data) != 1 || onlyReply.Data[0].ID != result.Reply.ID || onlyReply.Data[0].ReplyToID != question.Message.ID {
 		t.Fatalf("page: %s", history.Body())
 	}
-	streamData, err := messageEventData(result.Reply.ID, result.Reply, json.RawMessage(`{"op":"start","seq":1}`))
+	streamData, err := messageEventData(result.Reply, json.RawMessage(`{"op":"start","seq":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}

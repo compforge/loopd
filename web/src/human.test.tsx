@@ -12,13 +12,13 @@ describe("Human messages", () => {
  it("routes equal block IDs to different Messages and ignores a stale snapshot", () => {
   const a = message("a"), b = message("b", "confirm");
   b.content.blocks[0].status = "success"; b.revision = 2;
-  const frame = `data: ${JSON.stringify({ message_id: "b", message: b, event: { op: "start", seq: 2, model: b.content } })}`;
+  const frame = `data: ${JSON.stringify({ message: b, event: { stream_id: "b", op: "start", seq: 2, model: b.content } })}`;
   const event = decodeMessageFrame(frame);
   const updated = applyMessageEvent([a, message("b", "confirm")], event);
   expect(updated[0].content.blocks[0].status).toBe("pending");
   expect(updated[1].content.blocks[0].status).toBe("success");
   const stale = message("b", "confirm");
-  const old = decodeMessageFrame(`data: ${JSON.stringify({ message_id: "b", message: stale, event: { op: "start", seq: 1, model: stale.content } })}`);
+  const old = decodeMessageFrame(`data: ${JSON.stringify({ message: stale, event: { stream_id: "b", op: "start", seq: 1, model: stale.content } })}`);
   expect(applyMessageEvent(updated, old)).toBe(updated);
  });
  it("renders a reply without the original message loaded and preserves its selected label", () => {

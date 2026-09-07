@@ -69,9 +69,9 @@ func (server *Server) streamConversation(ctx context.Context, request *hertzapp.
 	var writer *hertzsse.Writer
 	err := server.Listen(ctx, convID, func(event component.Event) error {
 		data := event.Data
-		if event.MessageID != "" {
+		if event.Message != nil {
 			var err error
-			data, err = messageEventData(event.MessageID, event.Message, data)
+			data, err = messageEventData(event.Message, data)
 			if err != nil {
 				return err
 			}

@@ -152,7 +152,10 @@ func (runner convStreamRunner) Listen(_ context.Context, convID string, deliver 
 		runner.t.Fatalf("stream conv = %q", convID)
 	}
 	m := contract.Message{ID: "message", ConversationID: convID, Status: contract.MessageStatusStreaming, Kind: contract.ActorKindOperator, Key: "router", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
-	return deliver(component.Event{MessageID: m.ID, Message: &m, Data: json.RawMessage(`{"op":"start","seq":1,"model":{"version":"1.1","biz":"chat","meta":{},"blocks":[]}}`)})
+	if err := deliver(component.Event{MessageID: m.ID, Message: &m, Data: json.RawMessage(`{"stream_id":"message","op":"start","seq":1,"model":{"version":"1.1","biz":"chat","meta":{},"blocks":[]}}`)}); err != nil {
+		return err
+	}
+	return deliver(component.Event{MessageID: m.ID, Data: json.RawMessage(`{"stream_id":"message","op":"set","seq":2,"block":{"id":"text","type":"text","content":"delta"}}`)})
 }
 
 func TestConversationStreamHTTPWithoutUserInput(t *testing.T) {
@@ -175,8 +178,12 @@ func TestConversationStreamHTTPWithoutUserInput(t *testing.T) {
 	writer := &streamWriter{}
 	request.Response.HijackWriter(writer)
 	engine.ServeHTTP(context.Background(), request)
-	if request.Response.StatusCode() != 200 || !strings.Contains(writer.String(), `"message_id":"message"`) || !strings.Contains(string(request.Response.Header.ContentType()), "text/event-stream") {
+	if request.Response.StatusCode() != 200 || !strings.Contains(writer.String(), `"stream_id":"message"`) || !strings.Contains(string(request.Response.Header.ContentType()), "text/event-stream") {
 		t.Fatalf("stream response: %d %s", request.Response.StatusCode(), writer.String())
+	}
+	if strings.Count(writer.String(), `"message":`) != 1 || strings.Count(writer.String(), `"event":`) != 1 ||
+		!strings.Contains(writer.String(), `data: {"stream_id":"message","op":"set"`) {
+		t.Fatalf("ordinary delta must be bare AgentUE: %s", writer.String())
 	}
 	missing := ut.PerformRequest(engine, "GET", "/v1/conversations/missing/stream", nil).Result()
 	if missing.StatusCode() != 404 {

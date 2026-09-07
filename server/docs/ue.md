@@ -105,9 +105,16 @@ MessageService 统一承接 Speak 和 EmitMessage：前者创建消息，后者�
 
 ### 聚合流与恢复
 
-页面先分页读取历史，每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流；每个事件仍用
-message_id、message、event 寻址，客户端按消息 ID/revision 合并。AgentUE seq 和 Redis cursor
-只在单条消息内有意义，不充当共享 Conv 游标。连接的 ping 不创建消息气泡。
+页面先分页读取历史，每次 stream 请求创建一个 Conv Listener，聚合当前运行态消息的独立 Redis 流。
+AgentUE 的 `stream_id` 在这里取 Message ID，客户端先按它分流，再按各自的 seq/revision 合并。
+这是一条 SSE 连接上的逻辑多路复用，不是共享内容模型；AgentUE 本身不要求所有使用方提供
+`stream_id`。seq 和 Redis cursor 只在单条消息内有意义，不充当共享 Conv 游标。
+连接的 ping 不带 stream_id，也不创建消息气泡。
+
+首次发现、重连恢复和状态变化时，快照以 `{message, event}` 交付完整消息及带 stream_id 的
+AgentUE Start。普通增量直接交付带 stream_id 的 AgentUE event，不附带 Message 或既有正文；
+页面保留已知的身份、引用和状态，只合并本次内容变化。终态通过快照同步 Message.status，
+随后发送该消息的 End，不关闭其他消息流。引用卡片的展示数据已自包含，逐帧路径不查询被回复消息。
 
 server 按 ID 定期增量发现该 Conv 的新消息。新的一次性发言直接交付，流式发言加入监听；
 状态检查只读取运行态消息的元数据，revision 变化或增量缺口才加载正文快照，不重复扫描终态历史。

@@ -72,7 +72,7 @@ export function DetailPanel({ selection, onReply }: {
 
   const selected = detail?.scope === scope ? detail : undefined;
   useConversationStream(selected?.conversation?.id, (event) => {
-    if (!event.messageID) return;
+    if (!event.event.stream_id) return;
     setDetail((current) => current?.scope === scope
       ? { ...current, messages: applyMessageEvent(current.messages, event) } : current);
   }, async (signal) => {
