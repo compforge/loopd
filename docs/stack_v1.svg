@@ -100,16 +100,12 @@
   <rect x="685" y="326" width="240" height="32" rx="16" fill="#ffffff" stroke="#9ca3af" stroke-width="1.4"/>
   <text x="805" y="347" font-size="14" font-weight="650" text-anchor="middle">Conv CRD · 唤醒 / 消费进度</text>
 
-  <!-- The Operator toolkit calls Server APIs for collaboration and execution. -->
-  <rect class="card" x="250" y="365" width="190" height="220" rx="24" fill="#eef0fb"/>
-  <rect x="276" y="393" width="138" height="31" rx="15" fill="#ffffff" stroke="#7f86b6" stroke-width="1.4"/>
-  <text x="345" y="414" font-size="14" font-weight="680" text-anchor="middle">embedded SDK</text>
-  <text x="345" y="456" font-size="24" font-weight="740" text-anchor="middle">loop-runtime</text>
-  <text x="345" y="500" font-size="16" font-weight="650" text-anchor="middle">Poll · Speak · Prompt</text>
-  <text x="345" y="544" font-size="16" font-weight="650" text-anchor="middle">Ask / Confirm</text>
-  <line class="flow" x1="345" y1="365" x2="345" y2="320"/>
-  <rect x="265" y="328" width="160" height="27" rx="12" fill="#fff"/>
-  <text x="345" y="347" font-size="14" text-anchor="middle">HTTP / Run SSE</text>
+  <!-- The embedded toolkit sits between Server and Operators. -->
+  <rect class="card" x="250" y="324" width="410" height="36" rx="12" fill="#eef0fb"/>
+  <text x="455" y="340" font-size="16" font-weight="740" text-anchor="middle">loop-runtime · embedded SDK</text>
+  <text x="455" y="354" font-size="12" font-weight="650" text-anchor="middle">Poll · Speak · Prompt · Ask / Confirm</text>
+  <path class="flow" d="M250 342 H225 V285 H250"/>
+  <text x="137" y="347" font-size="14" text-anchor="middle">HTTP / Run SSE</text>
 
   <!-- Domain Operators own business state, decisions, and completion semantics. -->
   <rect class="card" x="480" y="365" width="650" height="220" rx="24" fill="#e7f5eb"/>
@@ -124,14 +120,14 @@
   <text class="card-detail" x="805" y="566">领域状态可恢复 ≠ 恢复 Go 调用栈或未完成的 Agent 执行</text>
 
   <!-- Server Harness Engine drives execution through Adapters. -->
-  <rect class="card" x="480" y="630" width="650" height="205" rx="24" fill="#fff3cf"/>
-  <text class="card-title" x="805" y="685">Harness</text>
-  <text class="card-detail" x="805" y="719">AgentGo · 持久执行服务</text>
-  <rect x="585" y="758" width="440" height="39" rx="19" fill="#fff9e8" stroke="#c59a2c" stroke-width="1.4"/>
-  <text x="805" y="784" font-size="14" font-weight="650" text-anchor="middle">Harness 持有执行状态，Adapter 适配恢复</text>
+  <rect class="card" x="250" y="630" width="880" height="205" rx="24" fill="#fff3cf"/>
+  <text class="card-title" x="690" y="685">Harness</text>
+  <text class="card-detail" x="690" y="719">AgentGo · 持久执行服务</text>
+  <rect x="470" y="758" width="440" height="39" rx="19" fill="#fff9e8" stroke="#c59a2c" stroke-width="1.4"/>
+  <text x="690" y="784" font-size="14" font-weight="650" text-anchor="middle">Harness 持有执行状态，Adapter 适配恢复</text>
 
   <!-- The embedded toolkit exposes collaboration and Harness Verbs with read or write effects. -->
-  <line class="flow" x1="474" y1="475" x2="442" y2="475"/>
+  <path class="flow" d="M474 475 H455 V362"/>
   <path class="flow" d="M1145 300 V610 H1100 V630"/>
 
   <!-- Dashed edges show optional integrations, not built-in loop-server storage. -->
