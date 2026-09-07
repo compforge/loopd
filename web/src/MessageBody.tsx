@@ -2,16 +2,16 @@ import Markdown from "react-markdown";
 import type { ReactNode } from "react";
 import { parseMessageContent } from "./content";
 import { HumanMessage } from "./HumanMessage";
+import { humanCard } from "./card";
 import { humanStatus, type HumanQuestion } from "./human";
 import type { HumanResult, Message } from "./api";
 
 export function MessageBody({ message, onReply, empty }: {
   message: Message; onReply?(result: HumanResult): void; empty?: ReactNode;
 }) {
-  if (message.card && message.card.type !== "content") {
-    return <HumanMessage key={message.id} message={message} card={message.card} onReply={onReply} />;
-  }
   try {
+    const card = humanCard(message);
+    if (card) return <HumanMessage key={message.id} message={message} card={card} onReply={onReply} />;
     const model = parseMessageContent(message.content);
     const result = model.blocks.find((block) => block.type === "result");
     const blocks = model.blocks.filter((block) => !(result?.format === "text" && block.type === "text" && block.content === result.content));
@@ -34,8 +34,7 @@ export function MessageBody({ message, onReply, empty }: {
 
 export function ReplyReference({ message }: { message: Message }) {
   if (!message.reply_to_id) return null;
-  const ref = message.reply_to?.id === message.reply_to_id ? message.reply_to : undefined;
-  return <a className="reply-reference" href={`#message-${message.reply_to_id}`} title={ref?.preview}>
-    {ref?.preview ? `回复：${ref.preview}` : "查看所回复的消息"}
+  return <a className="reply-reference" href={`#message-${message.reply_to_id}`}>
+    查看所回复的消息
   </a>;
 }

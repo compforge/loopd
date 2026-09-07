@@ -10,6 +10,7 @@ export interface HumanQuestion {
   confirm_label?: string;
   decline_label?: string;
   reason?: string;
+  selected_value?: string;
 }
 export function humanStatus(status: HumanQuestion["status"]): string {
   return { pending: "等待答复", success: "已答复", dismissed: "已忽略", timeout: "已超时", failure: "已结束" }[status];

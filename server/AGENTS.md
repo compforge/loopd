@@ -42,7 +42,6 @@ server/
 ├── internal/service/       # 用例层；每类能力一个 Service
 │   ├── conversation.go     # ConversationService
 │   ├── message.go          # MessageService；消息发布、输出固化与 Redis 流写入
-│   ├── message_enrichment.go # 页面消息富化；分页不变、直接引用与卡片投影
 │   ├── actor.go            # Operator/Harness 注册与 Actor 聚合发现
 │   ├── chat.go             # ChatService；用户输入提交
 │   ├── poll.go             # DB 消息接收、提交后通知与重试

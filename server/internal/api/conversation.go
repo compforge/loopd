@@ -71,7 +71,7 @@ func (server *Server) streamConversation(ctx context.Context, request *hertzapp.
 		data := event.Data
 		if event.MessageID != "" {
 			var err error
-			data, err = server.messageEventData(ctx, event.MessageID, event.Message, data)
+			data, err = messageEventData(event.MessageID, event.Message, data)
 			if err != nil {
 				return err
 			}

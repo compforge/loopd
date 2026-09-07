@@ -32,12 +32,6 @@ type humanContent struct {
 	} `json:"meta"`
 	Blocks []contract.HumanBlock `json:"blocks"`
 }
-type replyBlock struct {
-	ID      string               `json:"id"`
-	Type    string               `json:"type"`
-	Outcome contract.HumanStatus `json:"outcome"`
-	Value   string               `json:"value,omitempty"`
-}
 
 func decodeHuman(m model.Message) (humanContent, error) {
 	var c humanContent
@@ -65,7 +59,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (contract.HumanRe
 			return result, err
 		}
 		var content struct {
-			Blocks []replyBlock `json:"blocks"`
+			Blocks []contract.HumanReplyBlock `json:"blocks"`
 		}
 		if err := json.Unmarshal(reply.Content, &content); err != nil {
 			return result, err
@@ -215,12 +209,19 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 		if !changed {
 			return nil
 		}
+		// Freeze display data from the validated question, not from the client.
+		// Both messages retain the accepted choice in this same transaction, so
+		// rendering either page never needs a reverse lookup or a parent fetch.
+		c.Blocks[0].Status, c.Blocks[0].Reason = question.Status, question.Reason
+		if question.Status == contract.HumanSuccess {
+			c.Blocks[0].SelectedValue = &r.Value
+		}
 		content, _ := json.Marshal(struct {
-			Version string         `json:"version"`
-			Biz     string         `json:"biz"`
-			Meta    map[string]any `json:"meta"`
-			Blocks  []replyBlock   `json:"blocks"`
-		}{"1.1", "chat", map[string]any{}, []replyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value}}})
+			Version string                     `json:"version"`
+			Biz     string                     `json:"biz"`
+			Meta    map[string]any             `json:"meta"`
+			Blocks  []contract.HumanReplyBlock `json:"blocks"`
+		}{"1.1", "chat", map[string]any{}, []contract.HumanReplyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value, Question: c.Blocks[0]}}})
 		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
 		var parent model.Conversation
 		if err := tx.First(&parent, "id = ?", conversationID).Error; err != nil {
@@ -232,7 +233,6 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 		if err := store.saveMessage(tx, &reply, true); err != nil {
 			return err
 		}
-		c.Blocks[0].Status, c.Blocks[0].Reason = question.Status, question.Reason
 		if err := store.saveHuman(tx, &m, c, true); err != nil {
 			return err
 		}

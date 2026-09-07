@@ -42,7 +42,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	if err != nil {
 		return err
 	}
-	data, err := server.messageEventData(ctx, accepted.ID, accepted, raw)
+	data, err := messageEventData(accepted.ID, accepted, raw)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	// Input submission is acknowledged once. The page independently subscribes
 	// to its Conv; it does not need an input-owned connection to observe actors.
 	end, _ := ui.End(accepted.Revision).Marshal()
-	endData, err := server.messageEventData(ctx, accepted.ID, accepted, end)
+	endData, err := messageEventData(accepted.ID, accepted, end)
 	if err == nil {
 		err = writer.WriteEvent("", "", endData)
 	}
@@ -66,15 +66,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	return nil
 }
 
-// Historical snapshots, live snapshots and acknowledgements use the same projection.
-func (s *Server) messageEventData(ctx context.Context, id string, message *contract.Message, event json.RawMessage) ([]byte, error) {
-	var projected *view.Message
-	if message != nil {
-		values, err := s.messages.EnrichMessages(ctx, []contract.Message{*message})
-		if err != nil {
-			return nil, err
-		}
-		projected = &values[0]
-	}
-	return json.Marshal(view.MessageEvent{MessageID: id, Message: projected, Event: event})
+// History and live delivery carry the same self-contained message content.
+func messageEventData(id string, message *contract.Message, event json.RawMessage) ([]byte, error) {
+	return json.Marshal(view.MessageEvent{MessageID: id, Message: message, Event: event})
 }

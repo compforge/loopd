@@ -11,7 +11,6 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
-	"github.com/compforge/loopd/server/internal/view"
 )
 
 // HumanIdentity may resolve an authenticated principal from a trusted host.
@@ -59,11 +58,7 @@ func (s *Server) createHuman(ctx context.Context, r *hertzapp.RequestContext) er
 	if err != nil {
 		return err
 	}
-	view, err := s.humanView(ctx, result)
-	if err != nil {
-		return err
-	}
-	r.JSON(200, view)
+	r.JSON(200, result)
 	return nil
 }
 func (s *Server) getHuman(ctx context.Context, r *hertzapp.RequestContext) error {
@@ -74,11 +69,7 @@ func (s *Server) getHuman(ctx context.Context, r *hertzapp.RequestContext) error
 	if err != nil {
 		return err
 	}
-	view, err := s.humanView(ctx, result)
-	if err != nil {
-		return err
-	}
-	r.JSON(200, view)
+	r.JSON(200, result)
 	return nil
 }
 func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) error {
@@ -104,26 +95,6 @@ func (s *Server) replyHuman(ctx context.Context, r *hertzapp.RequestContext) err
 	if err != nil {
 		return err
 	}
-	view, err := s.humanView(ctx, result)
-	if err != nil {
-		return err
-	}
-	r.JSON(200, view)
+	r.JSON(200, result)
 	return nil
-}
-
-func (s *Server) humanView(ctx context.Context, result contract.HumanResult) (view.HumanResult, error) {
-	messages := []contract.Message{result.Message}
-	if result.Reply != nil {
-		messages = append(messages, *result.Reply)
-	}
-	views, err := s.messages.EnrichMessages(ctx, messages)
-	if err != nil {
-		return view.HumanResult{}, err
-	}
-	resultView := view.HumanResult{HumanResult: result, Message: views[0]}
-	if len(views) > 1 {
-		resultView.Reply = &views[1]
-	}
-	return resultView, nil
 }
