@@ -30,83 +30,88 @@ func (s *Store) ProjectOutput(ctx context.Context, id string, event agentueui.Ev
 	if (event.Op == agentueui.OpEnd && !status.Terminal()) || (event.Op != agentueui.OpEnd && status != "") {
 		return ErrConflict
 	}
+	ctx, cancel := s.withTimeout(ctx)
+	defer cancel()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { return s.projectOutput(tx, id, event, status, false) })
+}
+func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, status contract.MessageStatus, harnessWrite bool) error {
 	data, err := event.Marshal()
 	if err != nil {
 		return err
 	}
 	// Status is part of the write identity, outside the AgentUE event payload.
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256(append(data, []byte("\x00"+string(status))...)))
-	ctx, cancel := s.withTimeout(ctx)
-	defer cancel()
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var m model.Message
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
-			return err
+
+	var m model.Message
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
+		return err
+	}
+	if m.Purpose == "harness" && !harnessWrite {
+		return ErrConflict
+	}
+	c, err := openMessageContent(tx, m)
+	if err != nil {
+		return err
+	}
+	snapshot := c.snapshot
+	meta, _ := snapshot["meta"].(map[string]any)
+	output, _ := meta["output"].(map[string]any)
+	if event.Seq <= m.Revision {
+		if event.Seq == m.Revision && output["last_event"] == fingerprint {
+			return nil
 		}
-		c, err := openMessageContent(tx, m)
-		if err != nil {
-			return err
-		}
-		snapshot := c.snapshot
-		meta, _ := snapshot["meta"].(map[string]any)
-		output, _ := meta["output"].(map[string]any)
-		if event.Seq <= m.Revision {
-			if event.Seq == m.Revision && output["last_event"] == fingerprint {
-				return nil
+		return ErrConflict
+	}
+	if event.Seq != m.Revision+1 {
+		return ErrConflict
+	}
+	if (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended() {
+		return ErrConflict
+	}
+	if _, ref := event.Block["ref"]; ref {
+		return fmt.Errorf("%w: complete block bodies are required", ErrInvalidContent)
+	}
+	if event.Op == agentueui.OpSet || event.Op == agentueui.OpAppend {
+		if id, ok := event.Block["id"].(string); ok {
+			if err := c.materialize(id); err != nil {
+				return err
 			}
-			return ErrConflict
 		}
-		if event.Seq != m.Revision+1 {
-			return ErrConflict
-		}
-		if (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended() {
-			return ErrConflict
-		}
-		if _, ref := event.Block["ref"]; ref {
-			return fmt.Errorf("%w: complete block bodies are required", ErrInvalidContent)
-		}
-		if event.Op == agentueui.OpSet || event.Op == agentueui.OpAppend {
-			if id, ok := event.Block["id"].(string); ok {
-				if err := c.materialize(id); err != nil {
-					return err
-				}
-			}
-		}
-		next, err := agentueui.Apply(snapshot, event)
-		if err != nil {
-			return err
-		}
-		meta, _ = next["meta"].(map[string]any)
-		if meta == nil {
-			meta = map[string]any{}
-			next["meta"] = meta
-		}
-		meta["output"] = map[string]any{"last_event": fingerprint}
-		c.snapshot = next
-		content, err := s.packContent(c)
-		if err != nil {
-			return err
-		}
-		if err := c.persist(); err != nil {
-			return err
-		}
-		updates := map[string]any{"content": content, "revision": event.Seq}
-		if event.Op == agentueui.OpEnd {
-			updates["status"] = string(status)
-		}
-		if event.Op == agentueui.OpEnd && m.TargetKind != contract.ActorKindUser {
-			updates["dispatch_pending"] = true
-		}
-		// TTL measures server acceptance, not an untrusted or replayed event clock.
-		now := time.Now().UTC()
-		at := now
-		if event.Timestamp != nil {
-			at = time.UnixMilli(*event.Timestamp).UTC()
-		}
-		if at.Before(m.CreatedAt) {
-			updates["created_at"] = at
-		}
-		updates["updated_at"] = now
-		return tx.Model(&m).UpdateColumns(updates).Error
-	})
+	}
+	next, err := agentueui.Apply(snapshot, event)
+	if err != nil {
+		return err
+	}
+	meta, _ = next["meta"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+		next["meta"] = meta
+	}
+	meta["output"] = map[string]any{"last_event": fingerprint}
+	c.snapshot = next
+	content, err := s.packContent(c)
+	if err != nil {
+		return err
+	}
+	if err := c.persist(); err != nil {
+		return err
+	}
+	updates := map[string]any{"content": content, "revision": event.Seq}
+	if event.Op == agentueui.OpEnd {
+		updates["status"] = string(status)
+	}
+	if event.Op == agentueui.OpEnd && m.TargetKind != contract.ActorKindUser {
+		updates["dispatch_pending"] = true
+	}
+	now := time.Now().UTC()
+	at := now
+	if event.Timestamp != nil {
+		at = time.UnixMilli(*event.Timestamp).UTC()
+	}
+	if at.Before(m.CreatedAt) {
+		updates["created_at"] = at
+	}
+	// TTL follows server acceptance, not a replayed provider timestamp.
+	updates["updated_at"] = now
+	return tx.Model(&m).UpdateColumns(updates).Error
 }

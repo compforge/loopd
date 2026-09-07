@@ -43,10 +43,10 @@ Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费�
 Conversation、Human 及 Speak/Poll/Commit；`pkg/k8s/v1alpha1` 定义共享的 Conv CRD。
 server、runtime 和 harness 使用同一份公共契约；CRD 可以依赖 contract，contract 不依赖 Kubernetes
 或任何组件实现。`pkg/harness` 定义 Adapter 接口及执行句柄，依赖 contract；
-调用、调度和消息发布由 runtime 负责。页面 View 和持久化模型继续由 server 拥有。
+调用由 runtime 提交，后台驱动和输出持久化由 Server 负责。页面 View 和持久化模型继续由 server 拥有。
 
 Operator 不依赖 server 的私有 model/repo，不直接操作聊天数据库或 Redis。
-server 不导入 Operator 领域 CRD，也不执行 Harness Adapter。
+server 不导入 Operator 领域 CRD；HarnessRunner 只驱动 Adapter 公共契约，不解释 provider 原生协议。
 
 Operator 关注收发消息与业务逻辑。消费进度持久化、通知重试、消息增量固化和间接送达页面等技术
 机制收在 Verb 之下；runtime 的价值是让业务代码不必管理数据库 queue、Redis 或 SSE 连接。
@@ -103,11 +103,17 @@ End 只表示说完这条消息，不结束 Conv 或业务工作。页面流只�
 不是 Operator 的完成动作。
 连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
 
+Server 是人、Operator、Harness 的协作平台；loop-runtime 是 Operator toolkit。
+Server 内部 HarnessRunner 独立于 Operator 运行，持久接收调用、驱动 Adapter、保存可见输出并
+承接进程故障后的重新挂接。harness_runs 是基础设施调用记录，不是 Operator 领域状态或 Agent
+内部执行状态；resource_locks 为 Server 各后台组件提供通用租约。
+
 恢复责任分层：
 
 - 编排恢复依赖 Operator 持久化的 CRD 领域进度；Conv 游标不能恢复 Go 调用栈。
 - Harness 恢复由 Adapter 和执行端保证；agentd 可承载持久执行，agentgo 是进程内 demo。
-- 聊天层负责消息快照、通知重试、流式续接与消息结束状态，不接管以上执行恢复。
+- Server 负责调用记录、输出落库和驱动者接管；聊天层负责消息快照、通知重试及流式续接。
+- DB 保存合并后的 AgentUE 快照，Redis Stream 追加保存实时事件；二者的区别见持久化文档。
 
 ## 文档分工
 
@@ -116,6 +122,7 @@ Kernel 只定义跨功能稳定的 Actor 模型、协作主线与恢复责任。
 
 | 文档 | 回答的问题 |
 |---|---|
+| [Harness](../server/docs/harness.md) | Server 如何接收、驱动和恢复 Harness 调用，Operator 如何获取最终结果？ |
 | [Runtime](runtime.md) | Operator 开发者如何接入、组合 Verb，并承担哪些调用与恢复责任？ |
 | [Conversation](../server/docs/conversation.md) | 持久消息如何定向通知、Poll、Commit，消费与重试保证到哪里？ |
 | [持久化](../server/docs/persistence.md) | 可见事实存在哪里，User/Operator conv、消息身份和快照如何归属？ |

@@ -1,372 +1,149 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"io"
 	"log/slog"
-	"sync"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
-	agentueui "github.com/compforge/agentue/sdks/go/ui"
+	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
-	provider "github.com/compforge/loopd/pkg/harness"
-	"github.com/qiankunli/go-stdx/uuid"
 )
 
-var ErrCallConflict = errors.New("harness call conflicts with an existing effect")
+var ErrCallConflict = errors.New("Harness call conflicts with an existing submission")
 
 type Harness struct {
-	conv     Conv
+	client   *client
 	registry registry
-	state    *harnessState
+}
+type Prompt = contract.HarnessRunRequest
+type HarnessRegistration struct{ Key, DisplayName, Description string }
+
+func newHarness(ctx context.Context, c *client, lease time.Duration, logger *slog.Logger) Harness {
+	return Harness{client: c, registry: newRegistry(ctx, c, contract.ActorKindHarness, "harnesses", lease, logger)}
+}
+func (h Harness) Register(ctx context.Context, value HarnessRegistration) error {
+	return h.registry.register(ctx, registration{key: value.Key, displayName: value.DisplayName, description: value.Description})
 }
 
-type harnessState struct {
-	ctx      context.Context
-	adapters map[string]provider.Adapter
-	logger   *slog.Logger
-	mu       sync.Mutex
-	calls    map[string]*Call
-}
-
-type Prompt struct {
-	// ConversationID directs visible output independently of a user Delivery.
-	ConversationID string
-	// IdempotencyKey belongs to the caller's business scope, not the UI stream.
-	IdempotencyKey string
-	EffectKey      string
-	Target         string
-	Text           string
-	Tools          []contract.Tool
-	Actor          *contract.ActorRef
-	Timeout        time.Duration
-	// Output binds visible events to an existing streaming Speak handle instead
-	// of creating another message. While the Call runs, Harness owns its writes;
-	// after the Call is terminal, the caller finalizes and Ends the message.
-	Output *Message `json:"-"`
-}
-
-type HarnessRegistration struct {
-	Key         string
-	DisplayName string
-	Description string
-}
-
-func newHarness(
-	ctx context.Context,
-	client *client,
-	leaseDuration time.Duration,
-	adapters map[string]provider.Adapter,
-	logger *slog.Logger,
-) Harness {
-	values := make(map[string]provider.Adapter, len(adapters))
-	for key, adapter := range adapters {
-		values[key] = adapter
-	}
-	return Harness{registry: newRegistry(ctx, client, contract.ActorKindHarness, "harnesses", leaseDuration, logger), state: &harnessState{
-		ctx: ctx, adapters: values, logger: logger,
-		calls: make(map[string]*Call),
-	}}
-}
-
-func (service Harness) Register(ctx context.Context, value HarnessRegistration) error {
-	return service.registry.register(ctx, registration{
-		key: value.Key, displayName: value.DisplayName, description: value.Description,
-	})
-}
-
-// Prompt is a Verb (effect: write) starting or resuming one process-local Call. The effect identity avoids
-// duplicate starts while this Runtime is alive. A production Adapter such as
-// agentd must additionally make IdempotencyKey durable across process restarts.
-func (service Harness) Prompt(ctx context.Context, prompt Prompt) (*Call, error) {
-	if err := ctx.Err(); err != nil {
+// Prompt submits a durable call. The Server owns driving and persisting output;
+// returning or closing a Runtime never ends remote execution.
+func (h Harness) Prompt(ctx context.Context, p Prompt) (*Call, error) {
+	var value contract.HarnessCall
+	if err := h.client.write(ctx, "/v1/harness/runs", p, &value); err != nil {
+		if IsConflict(err) {
+			return nil, errors.Join(ErrCallConflict, err)
+		}
 		return nil, err
 	}
-	if (prompt.ConversationID == "" || prompt.IdempotencyKey == "") || prompt.EffectKey == "" || prompt.Target == "" || prompt.Text == "" {
-		return nil, errors.New("conversation and idempotency key, effect key, Harness target, and prompt are required")
-	}
-	if prompt.Timeout < 0 {
-		return nil, errors.New("timeout cannot be negative")
-	}
-	if prompt.Actor != nil {
-		if !prompt.Actor.ValidTarget() {
-			return nil, errors.New("invalid output actor")
-		}
-		author := *prompt.Actor
-		prompt.Actor = &author
-	}
-	if prompt.Output != nil {
-		output := prompt.Output.Value()
-		if output.ID == "" || output.ConversationID != prompt.ConversationID {
-			return nil, errors.New("Harness output must belong to the prompt conversation")
-		}
-		if prompt.Actor != nil && (output.Kind != prompt.Actor.Kind || output.Key != prompt.Actor.Key) {
-			return nil, errors.New("Harness output author differs from prompt actor")
-		}
-	}
-	adapter := service.state.adapters[prompt.Target]
-	if adapter == nil {
-		return nil, fmt.Errorf("harness target %q is not configured", prompt.Target)
-	}
-	fingerprint, err := promptFingerprint(prompt)
-	if err != nil {
-		return nil, err
-	}
-	effectID := prompt.IdempotencyKey
-
-	service.state.mu.Lock()
-	if existing := service.state.calls[effectID]; existing != nil {
-		service.state.mu.Unlock()
-		if existing.fingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: conversation %q effect %q", ErrCallConflict, prompt.ConversationID, prompt.EffectKey)
-		}
-		return existing, nil
-	}
-	if prompt.Output != nil && prompt.Output.Value().Status != contract.MessageStatusStreaming {
-		service.state.mu.Unlock()
-		return nil, errors.New("Harness output must be streaming before starting a Call")
-	}
-	callID := uuid.V7()
-	request := provider.Request{
-		CallID:         callID,
-		IdempotencyKey: effectID,
-		Timeout:        prompt.Timeout, Prompt: prompt.Text, Tools: append([]contract.Tool(nil), prompt.Tools...),
-	}
-	providerCall, err := adapter.Prompt(service.state.ctx, request)
-	if err != nil {
-		service.state.mu.Unlock()
-		return nil, fmt.Errorf("start harness %q: %w", prompt.Target, err)
-	}
-	if providerCall == nil || providerCall.ID() == "" {
-		service.state.mu.Unlock()
-		return nil, fmt.Errorf("start harness %q: adapter returned a call without an ID", prompt.Target)
-	}
-	now := time.Now().UTC()
-	call := &Call{
-		value: contract.HarnessCall{
-			ID: providerCall.ID(), EffectKey: prompt.EffectKey,
-			Target: prompt.Target, Phase: contract.CallRunning,
-			Timestamped: contract.Timestamped{CreatedAt: now, UpdatedAt: now},
-		},
-		fingerprint: fingerprint,
-		changed:     make(chan struct{}),
-		done:        make(chan struct{}),
-	}
-	service.state.calls[effectID] = call
-	service.state.mu.Unlock()
-	service.state.logger.InfoContext(ctx, "harness call started",
-		"conversation_id", prompt.ConversationID,
-		"effect_key", prompt.EffectKey,
-		"target", prompt.Target,
-		"call_id", providerCall.ID(),
-	)
-
-	go call.follow(service.state.ctx, providerCall, service.conv, prompt, service.state.logger)
-	return call, nil
+	return h.Call(value.ID), nil
 }
 
-func promptFingerprint(prompt Prompt) ([32]byte, error) {
-	outputID := ""
-	if prompt.Output != nil {
-		outputID = prompt.Output.ID()
-	}
-	// A handle's revision/content changes while streaming, but its binding is
-	// immutable for this Call. Never fingerprint the mutable handle itself.
-	encoded, err := json.Marshal(struct {
-		Prompt
-		OutputID string
-	}{Prompt: prompt, OutputID: outputID})
-	if err != nil {
-		return [32]byte{}, fmt.Errorf("encode Harness prompt: %w", err)
-	}
-	return sha256.Sum256(encoded), nil
-}
+// Call reconstructs a remote handle from a persisted run ID without starting work.
+func (h Harness) Call(id string) *Call { return &Call{client: h.client, id: id} }
 
 type Call struct {
-	mu          sync.Mutex
-	value       contract.HarnessCall
-	fingerprint [32]byte
-	events      []agentueui.Event
-	changed     chan struct{}
-	done        chan struct{}
-	terminalErr error
+	client *client
+	id     string
 }
 
-// Value is a Verb (effect: read) observing the locally known execution state.
-func (call *Call) Value() contract.HarnessCall {
-	call.mu.Lock()
-	defer call.mu.Unlock()
-	return call.value
+func (c *Call) ID() string { return c.id }
+func (c *Call) Get(ctx context.Context) (contract.HarnessCall, error) {
+	var value contract.HarnessCall
+	err := c.client.do(ctx, http.MethodGet, "/v1/harness/runs/"+url.PathEscape(c.id), nil, &value)
+	return value, err
+}
+func (c *Call) Cancel(ctx context.Context) error {
+	return c.client.write(ctx, "/v1/harness/runs/"+url.PathEscape(c.id)+"/cancel", struct{}{}, nil)
 }
 
-// Wait is a Verb (effect: read); cancelling the wait does not cancel execution.
-func (call *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
-	select {
-	case <-ctx.Done():
-		return call.Value(), ctx.Err()
-	case <-call.done:
-		call.mu.Lock()
-		defer call.mu.Unlock()
-		return call.value, call.terminalErr
+// Wait observes the Redis-backed stream, then reads the durable terminal result
+// once. Cancelling this observer does not cancel the Run.
+func (c *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
+	events, failures := c.Stream(ctx)
+	for range events {
 	}
+	for err := range failures {
+		if err != nil {
+			return contract.HarnessCall{}, err
+		}
+	}
+	value, err := c.Get(ctx)
+	if err != nil {
+		return value, err
+	}
+	if !value.Phase.Terminal() {
+		return value, errors.New("Harness stream ended before durable terminal state")
+	}
+	if value.Phase != contract.CallSucceeded {
+		return value, errors.New(value.Error)
+	}
+	return value, nil
+}
+func (c *Call) Result(ctx context.Context) (*contract.HarnessResult, error) {
+	value, err := c.Wait(ctx)
+	return value.Result, err
 }
 
-// Stream observes this Call from its locally retained beginning, then follows it.
-// It is not a page subscription; no Redis/SSE replay cursor is required.
-func (call *Call) Stream(ctx context.Context) (<-chan agentueui.Event, <-chan error) {
-	events := make(chan agentueui.Event)
-	errors := make(chan error, 1)
+// Stream reads the Server's Redis-backed SSE delivery. Reconnect yields a fresh
+// snapshot, so no process-local event array or per-token SQL polling is needed.
+func (c *Call) Stream(ctx context.Context) (<-chan ui.Event, <-chan error) {
+	events := make(chan ui.Event)
+	failures := make(chan error, 1)
 	go func() {
 		defer close(events)
-		defer close(errors)
-		index := 0
-		for {
-			call.mu.Lock()
-			pending := append([]agentueui.Event(nil), call.events[index:]...)
-			index = len(call.events)
-			changed := call.changed
-			terminal := call.value.Phase.Terminal()
-			call.mu.Unlock()
-			for _, event := range pending {
-				select {
-				case <-ctx.Done():
-					errors <- ctx.Err()
-					return
-				case events <- event:
+		defer close(failures)
+		response, err := c.client.open(ctx, http.MethodGet, "/v1/harness/runs/"+url.PathEscape(c.id)+"/stream", nil)
+		if err != nil {
+			failures <- err
+			return
+		}
+		defer response.Body.Close()
+		if err := decodeResponseError(response); err != nil {
+			failures <- err
+			return
+		}
+		scanner := bufio.NewScanner(response.Body)
+		scanner.Buffer(make([]byte, 4096), 32<<20)
+		var data strings.Builder
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data:") {
+				if data.Len() > 0 {
+					data.WriteByte('\n')
 				}
+				data.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+				continue
 			}
-			if terminal {
+			if line != "" || data.Len() == 0 {
+				continue
+			}
+			event, err := ui.Parse([]byte(data.String()))
+			data.Reset()
+			if err != nil {
+				failures <- err
 				return
 			}
 			select {
+			case events <- event:
 			case <-ctx.Done():
-				errors <- ctx.Err()
+				failures <- ctx.Err()
 				return
-			case <-changed:
 			}
+			if event.Op == ui.OpEnd {
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			failures <- err
+		} else {
+			failures <- io.ErrUnexpectedEOF
 		}
 	}()
-	return events, errors
-}
-
-func (call *Call) follow(
-	ctx context.Context,
-	providerCall provider.Call,
-	conv Conv,
-	prompt Prompt,
-	logger *slog.Logger,
-) {
-	var publishErr error
-	output := prompt.Output
-	for event := range providerCall.Events() {
-		if publishErr != nil {
-			continue
-		}
-		value, err := agentueui.Parse(event.Data)
-		if err != nil {
-			publishErr = fmt.Errorf("decode harness AgentUE event: %w", err)
-			continue
-		}
-		if value.Op != agentueui.OpSet && value.Op != agentueui.OpAppend {
-			publishErr = fmt.Errorf("harness may only publish AgentUE set or append events, got %q", value.Op)
-			continue
-		}
-		// Stamp once before delivery: retries must carry the same event bytes.
-		// AgentUE's timestamp is the visible output time, not Task completion.
-		if value.Timestamp == nil {
-			now := time.Now().UnixMilli()
-			value.Timestamp = &now
-		}
-		if value.Block != nil {
-			// AgentUE retains extra block fields on creation/full replacement;
-			// masked deltas only update their field, so identity never appends.
-			value.Block["call_id"] = call.value.ID
-			value.Block["effect_key"] = call.value.EffectKey
-		}
-		if output == nil {
-			var message *Message
-			var err error
-			content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"effect_key": prompt.EffectKey}, "blocks": []any{}})
-			author := contract.ActorRef{Kind: contract.ActorKindHarness, Key: call.value.ID}
-			if prompt.Actor != nil {
-				author = *prompt.Actor
-			}
-			message, err = conv.Speak(ctx, prompt.ConversationID, contract.SpeakRequest{
-				Stream: true, Key: prompt.IdempotencyKey, Actor: author, Content: content,
-			})
-			if err != nil {
-				publishErr = err
-				continue
-			}
-			output = message
-		}
-		err = output.Emit(ctx, value)
-		if err != nil {
-			publishErr = err
-			continue
-		}
-		call.appendEvent(value)
-	}
-	result, waitErr := providerCall.Wait(ctx)
-	if output != nil && prompt.Output == nil && publishErr == nil && ctx.Err() == nil {
-		status := contract.MessageStatusCompleted
-		if errors.Is(waitErr, context.Canceled) {
-			status = contract.MessageStatusCancelled
-		} else if waitErr != nil {
-			status = contract.MessageStatusFailed
-		}
-		publishErr = output.End(ctx, status)
-	}
-	err := errors.Join(publishErr, waitErr)
-	phase := contract.CallSucceeded
-	if err != nil {
-		phase = contract.CallFailed
-	}
-	call.finish(phase, result.Text, err)
-	value := call.Value()
-	logContext := context.WithoutCancel(ctx)
-	if err != nil {
-		logger.ErrorContext(logContext, "harness call failed",
-			"conversation_id", prompt.ConversationID,
-			"effect_key", value.EffectKey,
-			"target", value.Target,
-			"call_id", providerCall.ID(),
-			"error", err,
-		)
-		return
-	}
-	logger.InfoContext(logContext, "harness call completed",
-		"conversation_id", prompt.ConversationID,
-		"effect_key", value.EffectKey,
-		"target", value.Target,
-		"call_id", providerCall.ID(),
-	)
-}
-
-func (call *Call) appendEvent(event agentueui.Event) {
-	call.mu.Lock()
-	call.events = append(call.events, event)
-	now := time.Now().UTC()
-	call.value.LastActivityAt = &now
-	call.value.UpdatedAt = now
-	close(call.changed)
-	call.changed = make(chan struct{})
-	call.mu.Unlock()
-}
-
-func (call *Call) finish(phase contract.CallPhase, result string, err error) {
-	call.mu.Lock()
-	call.value.Phase = phase
-	call.value.Result = result
-	if err != nil {
-		call.value.Error = err.Error()
-		call.terminalErr = err
-	}
-	call.value.UpdatedAt = time.Now().UTC()
-	close(call.changed)
-	close(call.done)
-	call.mu.Unlock()
+	return events, failures
 }

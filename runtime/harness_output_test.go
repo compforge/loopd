@@ -4,84 +4,83 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/pkg/harness"
 )
 
-func TestHarnessUsesBoundMessageAndLeavesEndToCaller(t *testing.T) {
-	var speaks atomic.Int32
+func TestHarnessStreamUsesServerSSE(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/conversations/workspace/speak" {
-			speaks.Add(1)
-			var in contract.SpeakRequest
-			_ = json.NewDecoder(r.Body).Decode(&in)
-			_ = json.NewEncoder(w).Encode(contract.Message{ID: in.Key, ConversationID: "workspace", Kind: in.Actor.Kind, Key: in.Actor.Key, Status: contract.MessageStatusStreaming, Revision: 1, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
+		if r.URL.Path != "/v1/harness/runs/run/stream" {
+			t.Errorf("unexpected SQL polling path %s", r.URL.Path)
+			http.NotFound(w, r)
 			return
 		}
-		if strings.HasSuffix(r.URL.Path, "/events") {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		http.NotFound(w, r)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"op\":\"start\",\"seq\":4,\"model\":{\"version\":\"1.1\",\"biz\":\"chat\",\"meta\":{},\"blocks\":[]}}\n\n")
+		fmt.Fprint(w, "data: {\"op\":\"append\",\"seq\":5,\"mask\":\"block.content\",\"block\":{\"id\":\"text\",\"type\":\"text\",\"content\":\"hi\"}}\n\n")
+		fmt.Fprint(w, "data: {\"op\":\"end\",\"seq\":6}\n\n")
 	}))
-	t.Cleanup(server.Close)
-	adapter := &fakeHarnessAdapter{}
-	runtime, err := New(server.URL, Options{HTTPClient: server.Client(), Harnesses: map[string]harness.Adapter{"demo": adapter}})
-	if err != nil {
+	defer server.Close()
+	rt, _ := New(server.URL, Options{})
+	defer rt.Close()
+	events, failures := rt.Loop.Harness.Call("run").Stream(context.Background())
+	var ops []string
+	for event := range events {
+		ops = append(ops, string(event.Op))
+	}
+	for err := range failures {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = runtime.Close() })
-	ctx := context.Background()
-	author := contract.ActorRef{Kind: "operator/example/manager", Key: "run"}
-	output, err := runtime.Loop.Conv.Speak(ctx, "workspace", contract.SpeakRequest{Key: "step", Actor: author, Stream: true})
-	if err != nil {
-		t.Fatal(err)
+	if fmt.Sprint(ops) != "[start append end]" {
+		t.Fatalf("ops=%v", ops)
 	}
-	prompt := Prompt{ConversationID: "workspace", IdempotencyKey: "step", EffectKey: "plan", Target: "demo", Text: "hello", Actor: &author, Output: output}
-	call, err := runtime.Loop.Harness.Prompt(ctx, prompt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := call.Wait(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if speaks.Load() != 1 || output.Value().Status != contract.MessageStatusStreaming || !strings.Contains(string(output.Value().Content), "hello") {
-		t.Fatalf("bound output not streamed or ended by Harness: speaks=%d, output=%+v", speaks.Load(), output.Value())
-	}
-	if err := output.End(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// Neither changing revision nor ending the message changes Call identity.
-	again, err := runtime.Loop.Harness.Prompt(ctx, prompt)
-	if err != nil || again != call || adapter.starts != 1 {
-		t.Fatalf("Call not reused: same=%v starts=%d err=%v", again == call, adapter.starts, err)
-	}
-	other, err := runtime.Loop.Conv.Speak(ctx, "workspace", contract.SpeakRequest{Key: "other", Actor: author, Stream: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := prompt
-	changed.Output = other
-	if _, err := runtime.Loop.Harness.Prompt(ctx, changed); !errors.Is(err, ErrCallConflict) {
-		t.Fatalf("changed output binding: %v", err)
-	}
-	changed = prompt
-	changed.ConversationID = "other-conv"
-	if _, err := runtime.Loop.Harness.Prompt(ctx, changed); err == nil {
-		t.Fatal("accepted output from another conversation")
-	}
-	changed = prompt
-	changed.IdempotencyKey = "new-call"
-	if _, err := runtime.Loop.Harness.Prompt(ctx, changed); err == nil {
-		t.Fatal("started a new Call with an ended message")
-	}
-	if adapter.starts != 1 {
-		t.Fatalf("invalid bindings started Harnesses: %d", adapter.starts)
+}
+
+func TestHarnessResultWaitsForStreamAndReadsTerminalStateOnce(t *testing.T) {
+	for _, complete := range []bool{true, false} {
+		t.Run(fmt.Sprint(complete), func(t *testing.T) {
+			var streams, reads atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/harness/runs/run/stream":
+					streams.Add(1)
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"op\":\"start\",\"seq\":1,\"model\":{\"version\":\"1.1\",\"biz\":\"chat\",\"meta\":{},\"blocks\":[]}}\n\n")
+					if complete {
+						fmt.Fprint(w, "data: {\"op\":\"end\",\"seq\":2}\n\n")
+					}
+				case "/v1/harness/runs/run":
+					reads.Add(1)
+					result := contract.TextResult("answer")
+					_ = json.NewEncoder(w).Encode(contract.HarnessCall{ID: "run", Phase: contract.CallSucceeded, Result: &result})
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			rt, err := New(server.URL, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			result, err := rt.Loop.Harness.Call("run").Result(context.Background())
+			if complete {
+				if err != nil || result.Text() != "answer" || reads.Load() != 1 {
+					t.Fatalf("result=%+v err=%v reads=%d", result, err, reads.Load())
+				}
+			} else if !errors.Is(err, io.ErrUnexpectedEOF) || reads.Load() != 0 {
+				t.Fatalf("truncated stream: %v reads=%d", err, reads.Load())
+			}
+			if streams.Load() != 1 {
+				t.Fatalf("streams=%d", streams.Load())
+			}
+		})
 	}
 }

@@ -33,7 +33,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	adapters, err := loadHarnesses()
+	if err != nil {
+		return err
+	}
 	loopServer, err := server.New(server.Config{
+		Harnesses:  adapters,
 		MessageTTL: config.messageTTL,
 		Database:   server.DatabaseConfig{MessageInlineBlocks: config.messageInlineBlocks, MessageInlineBytes: config.messageInlineBytes, MessagePartBytes: config.messagePartBytes, Driver: config.databaseDriver, DSN: config.databaseDSN},
 		Redis: server.RedisConfig{
@@ -65,7 +70,9 @@ func run() error {
 
 	processCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go loopServer.Run(processCtx)
+	componentsDone := make(chan struct{})
+	go func() { defer close(componentsDone); loopServer.Run(processCtx) }()
+	defer func() { stop(); <-componentsDone }()
 	serveErr := make(chan error, 1)
 	go func() {
 		logger.Info("loop-server polling",

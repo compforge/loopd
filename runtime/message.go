@@ -23,36 +23,15 @@ type Message struct {
 	pending json.RawMessage
 }
 
-type messageHandles struct {
-	mu     sync.Mutex
-	values map[string]*Message
-}
+// Handles are caller-owned; Runtime never retains complete message snapshots.
+type messageHandles struct{}
 
-func (handles *messageHandles) handle(c *client, value contract.Message) *Message {
-	handles.mu.Lock()
-	message := handles.values[value.ID]
-	if message == nil {
-		message = &Message{client: c, value: value, next: 2}
-		handles.values[value.ID] = message
+func (*messageHandles) handle(c *client, value contract.Message) *Message {
+	next := value.Revision + 1
+	if next < 2 {
+		next = 2
 	}
-	handles.mu.Unlock()
-	// A network write may hold this message's lock. Do not block unrelated
-	// message handles while refreshing its snapshot.
-	message.mu.Lock()
-	defer message.mu.Unlock()
-	// An ambiguous write must keep its original sequence until retried. A fresh
-	// Speak snapshot cannot tell whether the caller has accounted for that write.
-	if len(message.pending) > 0 {
-		return message
-	}
-	if value.Revision >= message.value.Revision {
-		message.value = value
-	}
-	if value.Revision >= message.next {
-		message.next = value.Revision + 1
-	}
-	message.ended = message.ended || value.Ended()
-	return message
+	return &Message{client: c, value: value, next: next, ended: value.Ended()}
 }
 
 func (message *Message) ID() string {

@@ -8,11 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	agent "github.com/compforge/agentgo"
-	"github.com/compforge/agentgo/llm"
 	operatorrouter "github.com/compforge/loopd/operators/router/internal/router"
-	"github.com/compforge/loopd/pkg/harness"
-	agentgoharness "github.com/compforge/loopd/pkg/harness/agentgo"
 	conversationv1alpha1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
 	loopruntime "github.com/compforge/loopd/runtime"
 	"github.com/go-logr/logr"
@@ -34,34 +30,9 @@ func main() {
 func run() error {
 	logger := slog.Default()
 	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
-	modelOptions := []llm.ModelOption{
-		llm.WithRequestTimeout(30 * time.Minute),
-		llm.WithStreamIdleTimeout(2 * time.Minute),
-	}
-	if value := os.Getenv("LOOP_ROUTER_API_KEY"); value != "" {
-		modelOptions = append(modelOptions, llm.WithAPIKey(value))
-	}
-	if value := os.Getenv("LOOP_ROUTER_BASE_URL"); value != "" {
-		modelOptions = append(modelOptions, llm.WithBaseURL(value))
-	}
-	model, err := llm.NewModel(
-		envOr("LOOP_ROUTER_MODEL_PROVIDER", "openai"),
-		envOr("LOOP_ROUTER_MODEL", "gpt-5-mini"),
-		modelOptions...,
-	)
-	if err != nil {
-		return fmt.Errorf("create Router model: %w", err)
-	}
-	adapter, err := agentgoharness.New(func(context.Context, harness.Request) (*agent.Agent, error) {
-		return agent.NewAgent(agent.WithModel(model), agent.WithMaxTurns(8)), nil
-	})
-	if err != nil {
-		return err
-	}
-
 	runtime, err := loopruntime.New(envOr("LOOP_ROUTER_SERVER_URL", "http://127.0.0.1:8080"), loopruntime.Options{
-		Harnesses: map[string]harness.Adapter{harnessTarget: adapter},
-		Logger:    logger,
+
+		Logger: logger,
 	})
 	if err != nil {
 		return err
@@ -98,7 +69,7 @@ func run() error {
 		return err
 	}
 	reconciler, err := operatorrouter.New(runtime.Loop, operatorrouter.Config{
-		HarnessTarget: harnessTarget, MaxSubtasks: maxSubtasks, Logger: logger,
+		HarnessTarget: envOr("LOOP_ROUTER_HARNESS_TARGET", harnessTarget), MaxSubtasks: maxSubtasks, Logger: logger,
 	})
 	if err != nil {
 		return err

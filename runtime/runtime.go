@@ -17,14 +17,12 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/pkg/contract"
-	"github.com/compforge/loopd/pkg/harness"
 )
 
 type Options struct {
 	HTTPClient            *http.Client
 	RequestTimeout        time.Duration
 	RegistryLeaseDuration time.Duration
-	Harnesses             map[string]harness.Adapter
 	Logger                *slog.Logger
 }
 
@@ -71,18 +69,16 @@ func New(baseURL string, options Options) (*Runtime, error) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	loop := Loop{}
-	loop.Conv = Conv{client: c, messages: &messageHandles{values: make(map[string]*Message)}}
+	loop.Conv = Conv{client: c, messages: &messageHandles{}}
 	loop.Human = Human{client: c}
-	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Harnesses, options.Logger)
-	loop.Harness.conv = loop.Conv
+	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Logger)
 	loop.Operator = Operator{registry: newRegistry(
 		runCtx, c, contract.ActorKindOperator, "operators", options.RegistryLeaseDuration, options.Logger,
 	)}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }
 
-// Close stops process-local Harness executions. A durable Adapter remains
-// resumable through its Harness service; the demo agentgo Adapter does not.
+// Close stops local registration heartbeats. Server-owned Harness runs continue.
 func (runtime *Runtime) Close() error {
 	if runtime.cancel != nil {
 		runtime.cancel()

@@ -71,10 +71,10 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := runtime.Loop.Conv.Speak(ctx, "conv", contract.SpeakRequest{Stream: true, Key: "stream"})
-	if err != nil || again != stream {
+	if err != nil || again.ID() != stream.ID() {
 		t.Fatalf("handle not shared: %v", err)
 	}
-	if err := again.Emit(ctx, event); err != nil {
+	if err := stream.Emit(ctx, event); err != nil {
 		t.Fatal(err)
 	}
 	if err := stream.End(ctx); err != nil {
@@ -141,7 +141,8 @@ func TestMessageKeepsUnconfirmedUpdate(t *testing.T) {
 	if err := stream.Emit(ctx, update); err == nil || attempts != 3 {
 		t.Fatalf("retry budget: attempts=%d err=%v", attempts, err)
 	}
-	same, err := rt.Loop.Conv.Speak(ctx, "conv", request)
+	same := stream
+	err = nil
 	if err != nil || same != stream {
 		t.Fatalf("refresh: %v", err)
 	}

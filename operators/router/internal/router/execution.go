@@ -180,7 +180,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input contract.M
 		if err != nil {
 			return nil, err
 		}
-		results[index] = strings.TrimSpace(result.Result)
+		results[index] = strings.TrimSpace(result.Result.Text())
 		if results[index] == "" {
 			return nil, fmt.Errorf("Harness subtask %d returned an empty result", index+1)
 		}
@@ -199,7 +199,7 @@ func (reconciler *Reconciler) call(ctx context.Context, input contract.Message, 
 	if err != nil {
 		return "", fmt.Errorf("wait for %s Harness: %w", key, err)
 	}
-	text := strings.TrimSpace(result.Result)
+	text := strings.TrimSpace(result.Result.Text())
 	if text == "" {
 		return "", fmt.Errorf("%s Harness returned an empty result", key)
 	}

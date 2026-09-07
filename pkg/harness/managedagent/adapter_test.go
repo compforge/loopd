@@ -307,3 +307,61 @@ func TestPromptConfiguresRemoteTools(t *testing.T) {
 		t.Fatal("expected fixture rejection after verifying override")
 	}
 }
+
+func TestResumeReattachesAndAmbiguousCreateRequiresIdempotency(t *testing.T) {
+	var creates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/sessions":
+			creates.Add(1)
+			if r.Header.Get("Idempotency-Key") != "business-step-1" {
+				t.Error("missing stable idempotency key")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"id":"session-1","type":"session"}`)
+		case "/v1/sessions/session-1/events":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"data":[%s,%s,%s],"has_more":false}`, inputEvent, answerEvent, endEvent)
+		case "/v1/sessions/session-1/events/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			writeEvents(w, inputEvent, answerEvent, endEvent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	adapter, err := New(testConfig(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Resume(context.Background(), testRequest()); !errors.Is(err, harness.ErrRecoveryUnsupported) {
+		t.Fatalf("unsafe recovery=%v", err)
+	}
+	request := testRequest()
+	request.ExecutionRef = "session-1"
+	call, err := adapter.Resume(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range call.Events() {
+	}
+	result, err := call.Wait(context.Background())
+	if err != nil || result.Text != "hello world" || creates.Load() != 0 {
+		t.Fatalf("reattach=%+v creates=%d err=%v", result, creates.Load(), err)
+	}
+	config := testConfig(server.URL)
+	config.IdempotentSubmission = true
+	adapter, _ = New(config)
+	call, err = adapter.Resume(context.Background(), testRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range call.Events() {
+	}
+	if _, err := call.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if creates.Load() != 1 {
+		t.Fatalf("creates=%d", creates.Load())
+	}
+}

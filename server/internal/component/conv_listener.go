@@ -118,7 +118,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 			return err
 		}
 		watch.revision = revision
-		if row.Purpose == "output" && message.Ended() {
+		if (row.Purpose == "output" || row.Purpose == "harness") && message.Ended() {
 			data, err := agentueui.End(revision).Marshal()
 			if err != nil {
 				return err
@@ -138,7 +138,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 		watch.message = row
 		if !visibleMessage(row).Ended() || row.HumanDueAt != nil {
 			watching[row.ID] = watch
-			if row.Purpose == "output" && !visibleMessage(row).Ended() {
+			if (row.Purpose == "output" || row.Purpose == "harness") && !visibleMessage(row).Ended() {
 				start(watch)
 			}
 		} else {
@@ -194,7 +194,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 				} else if state.Ended && state.HumanDueAt == nil {
 					stop(watch)
 					delete(watching, state.ID)
-				} else if watch.message.Purpose == "output" {
+				} else if watch.message.Purpose == "output" || watch.message.Purpose == "harness" {
 					start(watch)
 				}
 			}

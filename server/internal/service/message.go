@@ -335,3 +335,22 @@ func parseOutputEvent(data json.RawMessage) (ui.Event, error) {
 	}
 	return event, nil
 }
+
+// PublishCommitted uses the same bridge as Operator output, after the fenced
+// SQL transaction. Failure is repaired by snapshots, not by repeating execution.
+func (c *MessageService) PublishCommitted(ctx context.Context, id string, event ui.Event) {
+	state, err := c.repo.GetMessageState(ctx, id)
+	if err == nil {
+		// A completion transaction can commit result + end together. Deliver
+		// each committed event at its own revision, preserving the Redis log.
+		if event.Seq > state.Revision {
+			return
+		}
+		state.Revision = event.Seq
+		state.Ended = event.Op == ui.OpEnd
+		_, err = c.publish(ctx, state, event)
+	}
+	if err != nil {
+		c.logger.WarnContext(ctx, "Harness page delivery deferred", "message_id", id, "error", err)
+	}
+}

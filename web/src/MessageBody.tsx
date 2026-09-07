@@ -13,10 +13,13 @@ export function MessageBody({ message, onReply, empty }: {
   }
   try {
     const model = parseMessageContent(message.content);
+    const result = model.blocks.find((block) => block.type === "result");
+    const blocks = model.blocks.filter((block) => !(result?.format === "text" && block.type === "text" && block.content === result.content));
     return <div className="message-content">
-      {model.blocks.map((block) => <div key={block.id}>
+      {blocks.map((block) => <div key={block.id}>
         {block.type === "tool" && <div className="detail-card-subtitle">{String(block.name ?? "TOOL")} {String(block.status ?? "")}</div>}
-        {typeof block.content === "string" && (block.type === "markdown"
+        {block.type === "result" && block.format === "json" && <pre className="result-json">{JSON.stringify(block.content, null, 2)}</pre>}
+        {typeof block.content === "string" && !(block.type === "result" && block.format === "json") && (block.type === "markdown"
           ? <div className="markdown-content"><Markdown>{block.content}</Markdown></div>
           : <p>{block.content}</p>)}
         {block.type === "human_reply" && <p>{block.outcome === "dismissed" ? "已忽略" : String(block.value ?? "已答复")}</p>}

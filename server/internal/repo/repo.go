@@ -128,6 +128,8 @@ func Open(config Config) (*Store, error) {
 		&model.MessagePart{},
 		&model.Operator{},
 		&model.Harness{},
+		&model.HarnessRun{},
+		&model.ResourceLock{},
 	); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("migrate loopd database: %w", err)

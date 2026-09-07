@@ -1,7 +1,7 @@
 # loop-server 持久化
 
 本文定义页面可见事实的存储归属与身份：数据库保存 Conversation、Message 和 Operator/Harness
-在线注册。同一份 Message 同时支持页面历史与参与者消费，不另建一份业务消息 queue 表。
+在线注册，以及 Harness Run 调用记录和通用 resource_locks 租约（见 [Harness](harness.md)）。同一份 Message 同时支持页面历史与参与者消费，不另建一份业务消息 queue 表。
 消费协议由 [Conversation](conversation.md) 定义，跨存储的责任分层见 [Kernel](../../docs/kernel.md)。
 
 数据库差异由 repo 的 GORM Dialector 封装，使用 DATABASE_DRIVER 与 DATABASE_DSN 配置。
@@ -102,7 +102,8 @@ Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 bl
 引用，因此出现外置数据后，回退应用版本前必须先展开这些数据。
 
 整条内容替换时删除不再引用的 Part，并清理保留 Part 中已经移除的 block；
-`DeleteMessage` 在同一事务内删除 Message 与全部 Parts。未来会话清理应调用同样的删除路径，
+普通 `DeleteMessage` 在同一事务内删除 Message 与全部 Parts；Harness Run 拥有的消息拒绝单独
+替换或删除，须与调用记录协调保留与清理（见 [Harness](harness.md)）。未来会话清理应复用相同事务原则，
 不能只删除父行而留下 Parts。领域 CRD 的清理仍不决定聊天历史保留时间。
 
 当前 HTTP/SSE 与 Runtime 继续接收完整模型。分片减少正文更新量，但不等于前端懒加载，
@@ -137,3 +138,30 @@ created_at 与 updated_at 表达首次到最后一次可见活动。updated_at �
 保留最后活动时间与正文。DB 和 Redis 的 TTL 独立推进，容许短暂不一致，详见 [失活与 TTL](ue.md#失活与-ttl)。
 
 时间区间如何用于并行展示见 [消息呈现](ue.md#消息呈现)，不由存储层规定页面布局。
+
+## AgentUE 快照与实时事件流
+
+DB 与 Redis 保存的是同一输出的不同形态，Operator 和 Harness 输出遵守相同契约：
+
+- **DB 保存 merge 后的 AgentUE 模型快照**：依次应用 set、append 等更新，Message.content
+  及其物理 parts 保存当前 meta/blocks，Revision 标识已应用的位置；DB 不追加保存每一条原始事件。
+- **Redis Stream 保存 append-only 的实时 AgentUE 事件记录**：每条新记录追加到流中，
+  不原地修改旧记录。append-only 描述 Redis 日志的存储方式，记录中的 AgentUE op 仍可以
+  是 set、append 或 end；对某个 block 的修改通过追加新事件表达。
+- 正常写入先在 DB 事务中合并快照，再尽力向 Redis 发布对应增量。前端与实时观察者从 Redis
+  消费事件，按 AgentUE 语义更新本地模型；不以逐 token 查询数据库代替实时流。
+- 重连、Redis 丢失或增量缺口时，从 DB 读取当前快照并以 start 恢复状态，再继续消费事件。
+  快照能够恢复当前内容，但不能还原被合并掉的每一步原始增量。Redis 历史保留受交付 TTL 限制，
+  不作为永久执行审计。
+
+因此，DB Revision 表达快照进度，Redis Stream ID 表达交付游标，两者不可互换。Harness 原生
+执行的稳定回放仍由 Harness 与 Adapter 负责，不能从 DB 快照反推出完整原生轨迹。
+
+实时交付有两个消费视角，共用按 Message ID 寻址的 Redis 流：
+
+- `GET /v1/conversations/:conversation_id/stream` 聚合会话内消息，服务 UI。
+- `GET /v1/harness/runs/:run_id/stream` 观察 Run 对应的输出消息，服务 Operator 的 Call 句柄。
+
+Operator 的 Speak/Emit 与 HarnessRunner 均先保存 DB 快照，再经 MessageService 发布 Redis；
+Run 接收后尽力初始化消息流，再返回句柄，使正常订阅直接进入 Redis。监听器不创建 Redis key。
+DB 只承担历史、首次快照、低频元数据发现与断档补偿；实时 AgentUE 更新不由数据库轮询交付。

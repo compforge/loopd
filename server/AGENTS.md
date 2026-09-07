@@ -2,8 +2,8 @@
 
 ## 项目定位与边界
 
-server 是 loop-server 组件，数据库拥有 Conversation 与 Message 两类聊天事实，以及 Operator/Harness
-在线注册。DB 消息记录支持 Actor 独立消费，Conv CRD 保存定向信号和消费进度，Redis 支持页面
+server 是 loop-server 组件，数据库拥有 Conversation、Message、Operator/Harness 在线注册，以及 Harness Run 调用记录。
+Server 是人、Operator、Harness 的协作平台，HarnessRunner 独立于 Operator 驱动调用。DB 消息记录支持 Actor 独立消费，Conv CRD 保存定向信号和消费进度，Redis 支持页面
 流与重连；task_id 仅标识页面交付。Operator 领域状态、Harness 执行状态、执行审计和成本记录
 不进入聊天模型。
 
@@ -17,8 +17,11 @@ server/
 │   ├── operator.go         # Operator Registry
 │   └── harness.go          # Harness Registry
 ├── internal/view/          # API 与 service 共用的 View Model；按领域拆文件，仅定义数据结构
+├── internal/lock/          # 通用 resource_locks 租约契约及续租生命周期
 ├── internal/domain/        # Human 消息的纯状态规则，不持有独立存储
 ├── internal/component/     # 有生命周期的运行组件
+│   ├── harness_runner.go  # 持久调用扫描、租约驱动与恢复
+│   ├── message_listener.go # Run 输出的请求级 Redis/SSE 监听
 │   ├── message_gc.go       # 随 server 启停的全局 Message 失活回收
 │   └── conv_listener.go    # 随 stream 请求启停的单 Conv 监听
 ├── internal/migrations/    # 已有数据库的 Schema 迁移
@@ -27,7 +30,9 @@ server/
 │   ├── message.go          # messages
 │   ├── message_part.go     # message_parts，Message 内部的物理正文分片
 │   ├── operator.go         # operators 在线注册
-│   └── harness.go          # harnesses 在线注册
+│   ├── harness.go          # harnesses 在线注册
+│   ├── harness_run.go      # harness_runs 调用记录
+│   └── resource_lock.go    # resource_locks 通用短租约
 ├── internal/repo/          # 数据库连接及按表拆分的持久化操作
 │   ├── conversation.go
 │   ├── message.go
@@ -56,6 +61,9 @@ server/
    遵循 `docs/ue.md` 的页面交付契约。存储见 `docs/persistence.md`，注册发现及 runtime 契约见
    `../docs/runtime.md`。
 
+5. DB 保存 merge 后的 AgentUE 快照；Redis Stream append-only 保存实时事件。写入先 DB 再 Redis，
+   实时消费走 Redis/SSE，DB 快照用于历史和缺口恢复，详见 persistence.md。
+
 ## References
 
 - `../AGENTS.md` — loopd 全局边界与代码地图
@@ -64,3 +72,5 @@ server/
 - `docs/ue.md` — 页面布局、消息呈现、交互卡片与页面交付；不定义业务完成
 - `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
 - `../docs/kernel.md` — loopd 稳定理念和Actor 边界
+
+- `docs/harness.md` — Harness 调用、result、Server Runner、通用租约与恢复边界

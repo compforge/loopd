@@ -52,7 +52,7 @@ func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (ha
 		return nil, errors.New("agentgo harness factory returned nil")
 	}
 	call := &call{
-		id: request.CallID, agent: instance, cancel: cancel,
+		id: request.CallID, agent: instance, cancel: cancel, ctx: ctx,
 		events: make(chan harness.Event, 128), done: make(chan struct{}),
 	}
 	instance.Subscribe(call.consume)
@@ -65,6 +65,7 @@ func (adapter *Adapter) Prompt(ctx context.Context, request harness.Request) (ha
 }
 
 type call struct {
+	ctx           context.Context
 	cancel        context.CancelFunc
 	id            string
 	agent         *agent.Agent
@@ -106,7 +107,10 @@ func (call *call) consume(event agent.Event) {
 			call.agent.AbortSilent()
 			return
 		}
-		call.events <- harness.Event{Data: data}
+		select {
+		case call.events <- harness.Event{Data: data}:
+		case <-call.ctx.Done():
+		}
 	}
 	if event.Type == agent.EventAgentEnd {
 		call.mu.Lock()

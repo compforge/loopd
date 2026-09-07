@@ -12,6 +12,8 @@ import (
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
+	ui "github.com/compforge/agentue/sdks/go/ui"
+	"github.com/compforge/loopd/pkg/harness"
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/component"
 	"github.com/compforge/loopd/server/internal/repo"
@@ -23,6 +25,7 @@ import (
 type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, error)
 
 type Config struct {
+	Harnesses     map[string]harness.Adapter
 	MessageTTL    time.Duration
 	Conversations ConversationCoordinator
 	Database      DatabaseConfig
@@ -45,13 +48,14 @@ type DatabaseConfig struct {
 }
 
 type Server struct {
-	messageGC *component.MessageGC
-	poll      *service.PollService
-	store     *repo.Store
-	redis     redis.UniversalClient
-	api       *serverapi.Server
-	human     *service.HumanService
-	chat      *service.ChatService
+	harnessRunner *component.HarnessRunner
+	messageGC     *component.MessageGC
+	poll          *service.PollService
+	store         *repo.Store
+	redis         redis.UniversalClient
+	api           *serverapi.Server
+	human         *service.HumanService
+	chat          *service.ChatService
 }
 
 func New(config Config) (*Server, error) {
@@ -87,7 +91,14 @@ func New(config Config) (*Server, error) {
 	poll := service.NewPollService(store, config.Conversations, config.Logger)
 	chat := service.NewChatService(store, config.Logger, poll)
 	human := service.NewHumanService(store, config.Logger)
+	harnessRunner := component.NewHarnessRunner(store, config.Harnesses, config.Logger)
+	harnessRunner.Publish = messages.PublishCommitted
 	api := serverapi.New(actors, conversations, messages, chat, config.Logger)
+	api.HarnessRuns = service.NewHarnessRunService(store, config.Harnesses, harnessRunner.Wake)
+	api.HarnessRuns.Messages = messages
+	api.HarnessRuns.Listen = func(ctx context.Context, id string, deliver func(ui.Event) error) error {
+		return component.NewMessageListener(events, store, id, config.Logger).Run(ctx, deliver)
+	}
 	api.Listen = func(ctx context.Context, convID string, deliver func(component.Event) error) error {
 		return component.NewConvListener(events, store, convID).Run(ctx, deliver)
 	}
@@ -95,9 +106,10 @@ func New(config Config) (*Server, error) {
 	api.Poll = poll
 	api.HumanIdentity = serverapi.HumanIdentity(config.HumanIdentity)
 	return &Server{
-		messageGC: component.NewMessageGC(store, config.MessageTTL, time.Second, 100, config.Logger),
-		poll:      poll,
-		human:     human, chat: chat,
+		harnessRunner: harnessRunner,
+		messageGC:     component.NewMessageGC(store, config.MessageTTL, time.Second, 100, config.Logger),
+		poll:          poll,
+		human:         human, chat: chat,
 		store: store,
 		redis: redisClient,
 		api:   api,
@@ -107,6 +119,7 @@ func New(config Config) (*Server, error) {
 func (server *Server) Register(engine *route.Engine) { server.api.Register(engine) }
 func (server *Server) Run(ctx context.Context) {
 	var workers sync.WaitGroup
+	workers.Go(func() { server.harnessRunner.Run(ctx) })
 	workers.Go(func() { server.human.Run(ctx) })
 	workers.Go(func() { server.poll.Run(ctx) })
 	workers.Go(func() { server.messageGC.Run(ctx) })

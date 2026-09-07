@@ -103,6 +103,9 @@ func (store *Store) UpdateMessageContent(ctx context.Context, conversationID, id
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "conversation_id = ? AND id = ?", conversationID, id).Error; err != nil {
 			return err
 		}
+		if m.Purpose == "harness" {
+			return ErrConflict
+		}
 		m.Content = content
 		m.Revision++
 		return store.saveMessage(tx, &m, false)
@@ -118,6 +121,10 @@ func (store *Store) DeleteMessage(ctx context.Context, id string) error {
 		var m model.Message
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
 			return err
+		}
+		// Run-owned output and its idempotency record must be retired together.
+		if m.Purpose == "harness" {
+			return ErrConflict
 		}
 		if err := tx.Where("message_id = ?", id).Delete(&model.MessagePart{}).Error; err != nil {
 			return err
@@ -197,7 +204,7 @@ func (store *Store) ExpireMessages(ctx context.Context, cutoff time.Time, limit 
 	defer cancel()
 	var rows []model.Message
 	err := store.db.WithContext(ctx).Select("id", "revision", "target_kind").
-		Where("status = ? AND updated_at <= ?", contract.MessageStatusStreaming, cutoff).
+		Where("status = ? AND purpose <> ? AND updated_at <= ?", contract.MessageStatusStreaming, "harness", cutoff).
 		Order("updated_at ASC, id ASC").Limit(limit).Find(&rows).Error
 	if err != nil {
 		return nil, mapError(err)
@@ -206,7 +213,7 @@ func (store *Store) ExpireMessages(ctx context.Context, cutoff time.Time, limit 
 	for _, row := range rows {
 		// Leave updated_at at the last actual output time: expiry is not activity.
 		result := store.db.WithContext(ctx).Model(&model.Message{}).
-			Where("id = ? AND status = ? AND revision = ? AND updated_at <= ?", row.ID, contract.MessageStatusStreaming, row.Revision, cutoff).
+			Where("id = ? AND status = ? AND purpose <> ? AND revision = ? AND updated_at <= ?", row.ID, contract.MessageStatusStreaming, "harness", row.Revision, cutoff).
 			UpdateColumns(map[string]any{"status": contract.MessageStatusExpired, "revision": row.Revision + 1, "dispatch_pending": row.TargetKind != contract.ActorKindUser})
 		if result.Error != nil {
 			return expired, mapError(result.Error)

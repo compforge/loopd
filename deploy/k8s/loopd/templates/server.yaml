@@ -1,6 +1,6 @@
 {{- $mysqlEnabled := or .Values.database.mysql.dsn .Values.database.mysql.existingSecret -}}
-{{- if ne (int .Values.server.replicaCount) 1 }}
-{{- fail "server.replicaCount must be 1 in loopd v1" }}
+{{- if and (not $mysqlEnabled) (ne (int .Values.server.replicaCount) 1) }}
+{{- fail "multiple Server replicas require shared MySQL" }}
 {{- end }}
 {{- if and .Values.database.mysql.dsn .Values.database.mysql.existingSecret }}
 {{- fail "database.mysql.dsn and database.mysql.existingSecret are mutually exclusive" }}
@@ -47,6 +47,7 @@ spec:
   template:
     metadata:
       annotations:
+        checksum/harness-config: {{ include (print $.Template.BasePath "/harness-config.yaml") . | sha256sum }}
         checksum/database-secret: {{ include (print $.Template.BasePath "/database-secret.yaml") . | sha256sum }}
         {{- with .Values.server.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -71,6 +72,15 @@ spec:
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           env:
+            - name: HARNESS_CONFIG_FILE
+              value: /etc/loopd/harnesses.json
+            {{- if .Values.server.harnessAPISecret }}
+            - name: HARNESS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.harnessAPISecret }}
+                  key: {{ .Values.server.harnessAPISecretKey }}
+            {{- end }}
             - name: SERVER_ADDRESS
               value: :8080
             - name: MESSAGE_TTL
@@ -128,6 +138,11 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
+            - name: harness-config
+              mountPath: /etc/loopd
+              readOnly: true
+            - name: workspace
+              mountPath: /workspace
             {{- if not $mysqlEnabled }}
             - name: data
               mountPath: /var/lib/loopd
@@ -137,6 +152,17 @@ spec:
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
       volumes:
+        - name: harness-config
+          configMap:
+            name: {{ include "loopd.serverName" . }}-harnesses
+        - name: workspace
+          {{- if .Values.server.workspace.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.server.workspace.existingClaim }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.server.workspace.sizeLimit }}
+          {{- end }}
         {{- if not $mysqlEnabled }}
         - name: data
           emptyDir: {}

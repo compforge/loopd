@@ -12,7 +12,7 @@ kubectl apply -f config/crd/bases/
 # 使用当前 kubeconfig；server 必须服务同一 namespace。
 export LOOP_LH_NAMESPACE=loopd
 export LOOP_LH_SERVER_URL=http://127.0.0.1:8080
-# 在当前进程环境配置模型凭据，不写入仓库。
+# 在 Server 配置 manager/executor/auditor Harness 目标和模型凭据。
 go run ./operators/longhorizon/cmd/longhorizon
 ```
 
@@ -28,7 +28,7 @@ go run ./operators/longhorizon/cmd/longhorizon
 ```sh
 helm upgrade --install loopd deploy/k8s/loopd -n loopd --create-namespace \
   --set longhorizon.enabled=true \
-  --set longhorizon.model.existingSecret=longhorizon-model
+  --set server.harnessAPISecret=longhorizon-model
 ```
 
 先准备该 Secret 的 `api-key` 字段及对应版本镜像，构建见 [Docker 说明](../../deploy/docker/README.md)。
@@ -45,12 +45,11 @@ Helm 不自动更新已安装 CRD，升级前显式 apply 新定义。一个副�
 | `LOOP_LH_RUN_TIMEOUT` | 24h；Operator 自己的业务期限 |
 | `LOOP_LH_RETENTION_TTL` | 24h；最终报告落库后保留 Run 的时间 |
 | `LOOP_LH_SERVER_URL` / `LOOP_LH_NAMESPACE` | http://127.0.0.1:8080 / default |
-| `LOOP_LH_WORKSPACE` | ./workspaces；以 Run UID 划分目录 |
-| `LOOP_LH_MODEL_PROVIDER` / `LOOP_LH_MODEL` | openai / gpt-5-mini |
-| `LOOP_LH_BASE_URL` / `LOOP_LH_API_KEY` | Adapter 模型连接配置 |
 
 所有超时配置必须为正值。Helm 对应 `longhorizon.runTimeout`、`retentionTTL` 等字段。
-当前使用 AgentGo 进程内 Adapter，支持 CLI 和文件工具，不提供浏览器。PVC 只保留文件，
+Server 默认示例使用 AgentGo 进程内 Adapter，支持 CLI 和文件工具，不提供浏览器。PVC 只保留文件，
 不恢复 Agent 执行；生产持久执行和隔离由替换的 Harness Adapter 提供。
 
 状态机、消息检查点、消费边界、回收及验证范围见 [设计](docs/design.md)。
+
+角色 Adapter、模型凭据和工具工作目录统一在 Server 配置，见 [Harness](../../server/docs/harness.md)。

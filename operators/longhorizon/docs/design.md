@@ -56,23 +56,17 @@ Run 名称取首条输入 Message ID，归属 Conv UID。初始化 status 保存
 右侧按完整 kind/key 区分列，标题显示轮次；主会话的角色消息也定位到这个共享 Workspace。
 消息时间区间可以并行，因果引用依赖 reply_to_id 或 CRD 内精确引用。
 
-每轮每个角色只发布一条 Message。步骤身份为 `<runUID>/round/<n>/<role>`，展示名称只含轮次和
-角色。Speak(Stream=true) 建立角色消息，Harness.Prompt 通过 Output 绑定同一句柄，流式文字和
-工具调用直接进入这条消息，不另外复制出一张报告卡片；Timeout 仍交给 Adapter。
+每轮每个角色调用对应一条 Server 创建的 Message。步骤幂等身份为
+`<runUID>/round/<n>/<role>`；Prompt 指定角色 Actor 与展示 Meta，Server 保存过程 blocks，
+并将 Adapter 识别出的最终输出存为 result block，与终态原子提交。Operator 读取权威结果再更新
+CRD status，不接手流式 Emit/End，也不把部分 token 当成可恢复报告。
 
-Call 进入终态后，Operator 用权威结果替换已有的最后一个 text block（没有文字时才新建），
-保留工具等其他 block。最终结果与 `longhorizon_report` 标记在一个 Emit 中持久化；该标记是
-LongHorizon 的业务报告边界，不是 Harness 执行检查点，也不能用“已收到一些 token”代替。
-之后 End 消息，再更新 CRD status；执行失败的报告以 failed 结束。
+CRD status 写入丢失或 Operator 重启后，相同 key 返回同一个调用和已保存结果。主会话最终总结
+仍由 Operator 用默认 Speak 一次说完。Manager 消费结果后先持久化推进状态，再删除已消费轮次的
+Execution/Audit；长期内容留在 Message，CRD 只保存有界控制状态和引用。
 
-重试 Speak 返回既有快照。报告已存在但 End 未确认时，只重试 End，不重新启动 Harness；
-已结束报告可直接补写 status。序号分配、瞬时重试及未确认更新的顺序由句柄负责。
-主会话最终总结是另一条面向用户的真实发言，用默认 Speak 一次说完。
-
-
-Manager 消费报告后先持久化推进状态，再删除已消费轮次的 Execution/Audit。长期事实留在 Message，
-CRD 只保存有界控制状态和引用。尚未得到报告的执行恢复、外部副作用去重完全归 Adapter；AgentGo
-示例只在进程内复用 Call，重启可能重新执行未完成步骤，不承诺恰好一次。
+未完成调用由 Server 接管驱动，Harness 执行恢复及外部副作用去重由 Adapter 与执行端保证。
+AgentGo demo 不支持跨进程恢复，接管明确返回 unknown，不自动重复执行。
 
 ## Human 和生命周期
 
@@ -106,3 +100,10 @@ cd web && npm run check
 Kubernetes 和公共 HTTP fixture；API 测试另外验证自定义角色发问、定向回复及独立 Poll/Commit。
 生成 CRD 以 Kubernetes 自身校验器检查 Schema/CEL 成本。上述检查不替代真实集群 Watch、RBAC、GC
 和真实模型执行的部署后验证。
+
+## Server Harness Run
+
+角色调用通过 loop-runtime 向 Server 提交，Server HarnessRunner 驱动 Adapter，并原子持久化
+result block 和终态。每个角色调用拥有独立 Message；Operator 直接消费结果，不再绑定 Output
+writer 或接手流式 End。业务 Run/Execution/Audit 仍由 Operator 管理，Server harness_runs 仅记录
+基础设施调用。业务 CRD 状态写入丢失后，相同调用 key 从 Server 恢复已有结果。
