@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/compforge/loopd/pkg/contract"
-	conversationclient "github.com/compforge/loopd/server/internal/conversation"
+	k8sclient "github.com/compforge/loopd/server/internal/k8s"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -15,7 +15,7 @@ import (
 
 type ConversationCoordinator interface {
 	Signal(context.Context, string, string, contract.ActorRef, uint64, string) error
-	Poll(context.Context, string, contract.ActorRef, string, conversationclient.ReadMessages) (contract.PollResult, error)
+	Poll(context.Context, string, contract.ActorRef, string, k8sclient.ReadMessages) (contract.PollResult, error)
 	Commit(context.Context, string, contract.CommitRequest) error
 }
 
@@ -59,7 +59,7 @@ func (s *PollService) Poll(ctx context.Context, conversationID string, request c
 	if apierrors.IsNotFound(err) {
 		return result, repo.ErrNotFound
 	}
-	if errors.Is(err, conversationclient.ErrNotParticipant) {
+	if errors.Is(err, k8sclient.ErrNotParticipant) {
 		return result, repo.ErrForbidden
 	}
 	if apierrors.IsConflict(err) {
@@ -78,9 +78,9 @@ func (s *PollService) Commit(ctx context.Context, conversationID string, request
 	switch {
 	case apierrors.IsNotFound(err):
 		return repo.ErrNotFound
-	case errors.Is(err, conversationclient.ErrNotParticipant):
+	case errors.Is(err, k8sclient.ErrNotParticipant):
 		return repo.ErrForbidden
-	case errors.Is(err, conversationclient.ErrInvalidCommit):
+	case errors.Is(err, k8sclient.ErrInvalidCommit):
 		return ErrInvalid
 	case apierrors.IsConflict(err):
 		return ErrConflict

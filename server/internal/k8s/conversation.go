@@ -1,5 +1,5 @@
-// Package conversation owns the Kubernetes side of conversation delivery.
-package conversation
+// Package k8s owns the Kubernetes side of conversation delivery.
+package k8s
 
 import (
 	"context"
@@ -17,24 +17,24 @@ import (
 
 var ErrNotParticipant = errors.New("actor is not a conversation participant")
 
-type Client struct {
+type ConversationClient struct {
 	kube      client.Client
 	namespace string
 	timeout   time.Duration
 }
 
-// NewClient requires a direct (uncached) Kubernetes client. Poll's conflict
+// NewConversationClient requires a direct (uncached) Kubernetes client. Poll's conflict
 // retries must observe the latest cursor, not a controller cache's old version.
-func NewClient(kube client.Client, namespace string, timeout time.Duration) *Client {
+func NewConversationClient(kube client.Client, namespace string, timeout time.Duration) *ConversationClient {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	return &Client{kube: kube, namespace: namespace, timeout: timeout}
+	return &ConversationClient{kube: kube, namespace: namespace, timeout: timeout}
 }
 
 // Signal records a committed message's recipient. An empty target is an
 // explicit broadcast to existing participants; it never registers all Operators.
-func (c *Client) Signal(ctx context.Context, conversationID, messageID string, target contract.ActorRef, revision uint64, participantConversationID string) error {
+func (c *ConversationClient) Signal(ctx context.Context, conversationID, messageID string, target contract.ActorRef, revision uint64, participantConversationID string) error {
 	if conversationID == "" || messageID == "" ||
 		(target != (contract.ActorRef{}) && !target.ValidTarget()) {
 		return errors.New("conversation, message and a valid target or broadcast are required")
@@ -105,7 +105,7 @@ type ReadMessages = func(ctx context.Context, after string) ([]contract.Message,
 // Poll records receipt, not commitment. Repeating a request after a lost response
 // reads the same uncommitted range; only Commit changes the recovery position.
 // +spec=`Poll 不自动提交；失败或重启可从已提交位置重新接收`
-func (c *Client) Poll(ctx context.Context, conversationID string, actor contract.ActorRef, afterID string, read ReadMessages) (contract.PollResult, error) {
+func (c *ConversationClient) Poll(ctx context.Context, conversationID string, actor contract.ActorRef, afterID string, read ReadMessages) (contract.PollResult, error) {
 	if conversationID == "" || !actor.ValidTarget() || read == nil {
 		return contract.PollResult{}, errors.New("conversation, actor and message reader are required")
 	}
@@ -185,7 +185,7 @@ var ErrInvalidCommit = errors.New("commit exceeds received position or has no me
 // Commit monotonically stores the safe recovery boundary. Callers must only
 // acknowledge a contiguous processed prefix, never a later parallel result
 // while an earlier input has not been handled or durably adopted.
-func (c *Client) Commit(ctx context.Context, conversationID string, request contract.CommitRequest) error {
+func (c *ConversationClient) Commit(ctx context.Context, conversationID string, request contract.CommitRequest) error {
 	if !request.Actor.ValidTarget() || request.Through == "" {
 		return ErrInvalidCommit
 	}

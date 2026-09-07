@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/compforge/loopd/pkg/contract"
 	conversationv1 "github.com/compforge/loopd/pkg/k8s/v1alpha1"
-	conversationclient "github.com/compforge/loopd/server/internal/conversation"
+	k8sclient "github.com/compforge/loopd/server/internal/k8s"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
@@ -34,7 +34,7 @@ func TestConversationPollHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
+	poll := service.NewPollService(store, k8sclient.NewConversationClient(kube, "test", 0), nil)
 	chat := service.NewChatService(store, nil, poll)
 	if _, err := chat.Create(ctx, "conv", "alice", contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"},
 		json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"hello"}]}`)); err != nil {
@@ -108,7 +108,7 @@ func testActorKindConversationConsumption(t *testing.T, kind contract.ActorKind)
 	scheme := kuberuntime.NewScheme()
 	_ = conversationv1.AddToScheme(scheme)
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	poll := service.NewPollService(store, conversationclient.NewClient(kube, "test", 0), nil)
+	poll := service.NewPollService(store, k8sclient.NewConversationClient(kube, "test", 0), nil)
 	messages := service.NewMessageService(store, nil, nil)
 	// Speak persistence queues the notification; Poll service reconciles it.
 	role := contract.ActorRef{Kind: kind, Key: "run-uid"}

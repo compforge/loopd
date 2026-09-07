@@ -1,4 +1,4 @@
-package conversation
+package k8s
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 				{Kind: "operator", Key: "router", Committed: "001"},
 			}},
 		}).Build()
-	c := NewClient(kube, "test", 0)
+	c := NewConversationClient(kube, "test", 0)
 	result, err := c.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]contract.Message, error) {
 		if after != "001" {
 			t.Fatalf("cursor = %q", after)
@@ -53,7 +53,7 @@ func TestPollReadsDatabaseBeyondWakeSignal(t *testing.T) {
 		t.Fatalf("status = %+v", value.Status)
 	}
 	// A lost Poll response or restarted Operator replays the uncommitted range.
-	restarted := NewClient(kube, "test", 0)
+	restarted := NewConversationClient(kube, "test", 0)
 	replayed, err := restarted.Poll(ctx, "conv", actor, "", func(_ context.Context, after string) ([]contract.Message, error) {
 		if after != "001" {
 			t.Fatalf("replay starts at %q", after)
@@ -87,7 +87,7 @@ func TestSignalsPreserveIndependentRecipients(t *testing.T) {
 		t.Fatal(err)
 	}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	c := NewClient(kube, "test", 0)
+	c := NewConversationClient(kube, "test", 0)
 	a := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "a"}
 	b := contract.ActorRef{Kind: contract.ActorKindOperator, Key: "b"}
 	for _, signal := range []struct {
@@ -129,7 +129,7 @@ func TestSignalsMergeDetailBindingsWithoutChangingCursors(t *testing.T) {
 	a := contract.ActorRef{Kind: "operator/custom", Key: "same"}
 	b := contract.ActorRef{Kind: "harness", Key: "same"}
 	kube := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&conversationv1.Conversation{}).Build()
-	c := NewClient(kube, "test", 0)
+	c := NewConversationClient(kube, "test", 0)
 	for _, s := range []struct {
 		actor      contract.ActorRef
 		id, detail string
