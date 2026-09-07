@@ -1,4 +1,4 @@
-package runtime
+package service
 
 import (
 	"bytes"
@@ -9,14 +9,16 @@ import (
 
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/runtime/infra"
+	"github.com/compforge/loopd/runtime/model"
 )
 
 // messageStream is the writer returned by Tell. Repeating Tell with the same key
 // restores the same message; one logical writer owns its event sequence.
 type messageStream struct {
-	Message
+	model.Message
 	mu      sync.Mutex
-	client  *client
+	client  *infra.Client
 	value   contract.MessageInfo
 	next    uint64
 	ended   bool
@@ -24,7 +26,7 @@ type messageStream struct {
 }
 
 // Handles are caller-owned; Runtime never retains complete message snapshots.
-func newMessageStream(c *client, value contract.MessageInfo) *messageStream {
+func newMessageStream(c *infra.Client, value contract.MessageInfo) *messageStream {
 	next := value.Revision + 1
 	if next < 2 {
 		next = 2
@@ -38,10 +40,10 @@ func (message *messageStream) Emit(ctx context.Context, event ui.Event) error {
 	message.mu.Lock()
 	defer message.mu.Unlock()
 	if message.ended {
-		return errMessageEnded
+		return model.ErrMessageEnded
 	}
 	if event.Op != ui.OpSet && event.Op != ui.OpAppend {
-		return errInvalidEmit
+		return model.ErrInvalidEmit
 	}
 	return message.emit(ctx, event)
 }
@@ -54,17 +56,17 @@ func (message *messageStream) End(ctx context.Context, statuses ...contract.Mess
 	defer message.mu.Unlock()
 	status := contract.MessageStatusCompleted
 	if len(statuses) > 1 {
-		return errEndStatusCount
+		return model.ErrEndStatusCount
 	}
 	if len(statuses) == 1 {
 		status = statuses[0]
 	}
 	if !status.Terminal() {
-		return errEndStatusInvalid
+		return model.ErrEndStatusInvalid
 	}
 	if message.ended {
 		if message.value.Status != status {
-			return errEndStatusConflict
+			return model.ErrEndStatusConflict
 		}
 		return nil
 	}
@@ -79,7 +81,7 @@ func (message *messageStream) emit(ctx context.Context, event ui.Event, statuses
 	event.Seq = message.next
 	data, err := event.Marshal()
 	if err != nil {
-		return wrapError(err)
+		return model.WrapError(err)
 	}
 	request := struct {
 		Event  json.RawMessage        `json:"event"`
@@ -90,12 +92,12 @@ func (message *messageStream) emit(ctx context.Context, event ui.Event, statuses
 	}
 	data, err = json.Marshal(request)
 	if err != nil {
-		return wrapError(err)
+		return model.WrapError(err)
 	}
 	if len(message.pending) > 0 && !bytes.Equal(message.pending, data) {
-		return errPendingMessageUpdate
+		return model.ErrPendingMessageUpdate
 	}
-	if err := message.client.write(ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events", json.RawMessage(data), nil); err != nil {
+	if err := write(message.client, ctx, "/v1/messages/"+url.PathEscape(message.value.ID)+"/events", json.RawMessage(data), nil); err != nil {
 		message.pending = data
 		return err
 	}

@@ -30,6 +30,10 @@ loopd/
 │   ├── v1alpha1/           # Conv Go 类型
 │   └── crds/               # Conv 生成清单与校验测试
 ├── runtime/                # Operator 协作 toolkit；提供 Conv、消息句柄、Human、Harness 与注册 Verb
+│   ├── verb/               # Operator 使用入口与调用语义
+│   ├── service/            # Server API 组合、消息句柄与等待/续租流程
+│   ├── infra/              # HTTP/SSE 传输、超时与协议错误转换
+│   └── model/              # 共用请求、消息接口与错误类型；不执行 I/O
 ├── server/                 # 协作平台、Harness Engine 与 HTTP 服务；细节见 server/AGENTS.md
 └── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
 ```

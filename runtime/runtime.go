@@ -2,20 +2,15 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/http/cookiejar"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/runtime/infra"
+	"github.com/compforge/loopd/runtime/service"
+	"github.com/compforge/loopd/runtime/verb"
 )
 
 type Options struct {
@@ -40,40 +35,20 @@ type Loop struct {
 	Operator Operator
 }
 
+// New assembles the public verbs and their shared transport.
+// +rule=`Dependency direction is verb → service → infra; shared model types never import the root runtime facade.`
 func New(baseURL string, options Options) (*Runtime, error) {
-	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, invalidServerURLError(baseURL)
+	c, err := infra.NewClient(baseURL, infra.Options{HTTPClient: options.HTTPClient, RequestTimeout: options.RequestTimeout, Logger: options.Logger})
+	if err != nil {
+		return nil, err
 	}
-	if options.HTTPClient == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-		transport.TLSHandshakeTimeout = 5 * time.Second
-		transport.ResponseHeaderTimeout = 30 * time.Second
-		transport.IdleConnTimeout = 90 * time.Second
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 20
-		jar, _ := cookiejar.New(nil)
-		options.HTTPClient = &http.Client{Transport: transport, Jar: jar}
+	ctx, cancel := context.WithCancel(context.Background())
+	loop := Loop{
+		Conv:     verb.NewConv(service.NewConv(c)),
+		Human:    verb.NewHuman(service.NewHuman(c)),
+		Harness:  verb.NewHarness(service.NewHarness(c), service.NewRegistry(ctx, c, contract.ActorKindHarness, "harnesses", options.RegistryLeaseDuration, c.Logger())),
+		Operator: verb.NewOperator(service.NewRegistry(ctx, c, contract.ActorKindOperator, "operators", options.RegistryLeaseDuration, c.Logger())),
 	}
-	if options.RequestTimeout <= 0 {
-		options.RequestTimeout = 30 * time.Second
-	}
-	if options.Logger == nil {
-		options.Logger = slog.Default()
-	}
-	c := &client{
-		baseURL: parsed, http: options.HTTPClient, logger: options.Logger,
-		requestTimeout: options.RequestTimeout,
-	}
-	runCtx, cancel := context.WithCancel(context.Background())
-	loop := Loop{}
-	loop.Conv = Conv{client: c}
-	loop.Human = Human{client: c}
-	loop.Harness = newHarness(runCtx, c, options.RegistryLeaseDuration, options.Logger)
-	loop.Operator = Operator{registry: newRegistry(
-		runCtx, c, contract.ActorKindOperator, "operators", options.RegistryLeaseDuration, options.Logger,
-	)}
 	return &Runtime{Loop: loop, cancel: cancel}, nil
 }
 
@@ -83,68 +58,4 @@ func (runtime *Runtime) Close() error {
 		runtime.cancel()
 	}
 	return nil
-}
-
-type client struct {
-	logger         *slog.Logger
-	baseURL        *url.URL
-	http           *http.Client
-	requestTimeout time.Duration
-}
-
-func (client *client) do(ctx context.Context, method, path string, input, output any) error {
-	ctx, cancel := context.WithTimeout(ctx, client.requestTimeout)
-	defer cancel()
-
-	response, err := client.open(ctx, method, path, input)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if err := decodeResponseError(response); err != nil {
-		return err
-	}
-	if output == nil || response.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(output); err != nil {
-		return transportError(fmt.Errorf("decode loop-server response: %w", err))
-	}
-	return nil
-}
-
-func (client *client) open(ctx context.Context, method, path string, input any) (*http.Response, error) {
-	return client.openWithHeaders(ctx, method, path, input, nil)
-}
-
-func (client *client) openWithHeaders(
-	ctx context.Context,
-	method string,
-	path string,
-	input any,
-	headers map[string]string,
-) (*http.Response, error) {
-	var body io.Reader
-	if input != nil {
-		encoded, err := json.Marshal(input)
-		if err != nil {
-			return nil, wrapError(err)
-		}
-		body = bytes.NewReader(encoded)
-	}
-	request, err := http.NewRequestWithContext(ctx, method, client.baseURL.String()+path, body)
-	if err != nil {
-		return nil, wrapError(err)
-	}
-	if input != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	for key, value := range headers {
-		request.Header.Set(key, value)
-	}
-	response, err := client.http.Do(request)
-	if err != nil {
-		return nil, transportError(err)
-	}
-	return response, nil
 }

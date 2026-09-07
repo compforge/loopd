@@ -11,6 +11,22 @@ Operator 持久化的领域 CRD；Harness 恢复由 Adapter 及执行端保证�
 本文面向 Operator 开发者，定义 Verb 的调用与组合契约；Actor 的整体协作模型见 Kernel，
 服务端消费、存储和页面交付机制分别下沉到 server 的领域文档。
 
+## Toolkit 分工
+
+Operator 通过根包组装 Runtime，使用 `Loop.Conv`、`Loop.Human`、`Loop.Harness` 和
+`Loop.Operator`。内部依赖沿 `verb → service → infra` 展开，各层共用 `model`：
+
+- verb 表达调用意图，如 Speak 一次说完、Tell 开启流式输出；不处理 HTTP 路径和 SSE 协议。
+- service 组合 Server API，实现惰性消息读取、流式写入、Call/Human 等待和注册续租。
+  哪些操作可重试、何时检查持久终态属于这一层，不交给通用 HTTP 客户端决定。
+- infra 提供有界 HTTP 请求、SSE 解码及传输错误转换，不判断业务是否完成。
+- model 保存共用请求、Message/Stream 接口及 Error；已有公共协作数据复用 contract，
+  不复制一份同义模型，也不执行 I/O。
+
+这些包直接位于 runtime 下，不另设 internal 层。根包保留组装、controller-runtime 接入辅助和
+公共类型入口；下层不反向导入根包，因此错误的共享定义放在 model，`runtime/errors.go` 保留
+类型别名与判断入口。消息句柄的实现由 service 拥有，Operator 不必了解传输或存储细节。
+
 ## 参与者与接入
 
 Human 与 Operator 在持久会话中独立发言，不要求轮流说话或每条输入对应一条答案。
@@ -67,7 +83,7 @@ Effect 分类不增加额外的 Verbs 容器或独立 CRD。
 ## Verb 的错误返回与保存
 
 Verb 在正常业务数据之外返回 error（没有业务返回值时只返回 error）；流式观察通过错误通道
-交付异步错误。错误定义和转换统一在 `runtime/errors.go`，通过 `errors.As` 读取 `runtime.Error`，
+交付异步错误。公共错误入口为 `runtime/errors.go`，通过 `errors.As` 读取 `runtime.Error`，
 通过 `errors.Is` 保留底层原因的判断。`Retryable` 是可重试提示，不是业务必须重试的指令。
 Human 的拒绝、忽略或超时等类型化正常结果，仍由业务返回值表达。
 
@@ -304,8 +320,8 @@ Router 直接 Reconcile Conv，不创建 Work CRD。Poll 到输入后，用 List
 
 ## 实现与验证入口
 
-[Conv](../runtime/conversation.go)、[消息句柄](../runtime/message.go)、
-[Human](../runtime/human.go)、[Harness](../runtime/harness.go) 和
+[Conv](../runtime/verb/conversation.go)、[消息句柄](../runtime/model/message.go)、
+[Human](../runtime/verb/human.go)、[Harness](../runtime/verb/harness.go) 和
 [Router](../operators/router/internal/router/router.go) 是能力入口。
 Go 测试覆盖消费重读、交付和交互，Web 测试覆盖消息投影与卡片展示。
 页面交互与交付协议见 [UE](../server/docs/ue.md)。

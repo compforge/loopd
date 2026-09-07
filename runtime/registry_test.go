@@ -15,7 +15,9 @@ func TestOperatorAndHarnessRegistriesStartLeases(t *testing.T) {
 			http.NotFound(response, request)
 			return
 		}
-		var input registrationRequest
+		var input struct {
+			LeaseSeconds int `json:"lease_seconds"`
+		}
 		if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
 			t.Error(err)
 			return
