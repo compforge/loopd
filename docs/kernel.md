@@ -20,7 +20,7 @@ Actor 模型也容纳直接面向用户的 Harness。角色描述身份，不表
 |---|---|---|
 | DB | 保存 Conversation、Message 与 Harness 调用记录，提供消息快照和持久调用结果 | Operator 领域进度、Harness 原生执行状态、完整执行轨迹 |
 | Conv CRD | 保存参与者过程会话关联、消费进度与定向信号，通过 Watch 触发 Reconcile | 消息正文、业务工作完成判定 |
-| Redis | 追加保存实时事件，经 SSE 服务 UI 会话流与 Operator 调用流，支持重连与 replay | 参与者消费进度、业务执行恢复 |
+| Redis | append-only保存实时事件，经 SSE 服务 UI 会话流与 Operator 调用流，支持重连与 replay | 参与者消费进度、业务执行恢复 |
 
 可以把 DB 理解成协作 queue，但消费不会删除消息，也不争抢一个全局消费位置；参与者各自
 维护消费进度，历史仍可 Read。Poll 表示收到，Commit 表示可安全越过该消费前缀，不表示整个
@@ -128,7 +128,7 @@ Server 内部 HarnessRunner 独立于 Operator 运行，持久接收调用、驱
 - 编排恢复依赖 Operator 持久化的 CRD 领域进度；Conv 游标不能恢复 Go 调用栈。
 - Harness 恢复由 Adapter 和执行端保证；agentd 可承载持久执行，agentgo 是进程内 demo。
 - Server 负责调用记录、输出落库和驱动者接管；聊天层负责消息快照、通知重试及流式续接。
-- DB 保存合并后的 AgentUE 快照，Redis Stream 追加保存实时事件；二者的区别见持久化文档。
+- DB 保存合并后的 AgentUE 快照，Redis Stream append-only保存实时事件；二者的区别见持久化文档。
 
 ## 文档分工
 
