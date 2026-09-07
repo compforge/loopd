@@ -10,6 +10,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/compforge/loopd/pkg/harness"
+	"github.com/compforge/loopd/pkg/harness/internal/httpclient"
 )
 
 func (adapter *Adapter) observe(ctx context.Context, call *call) (result harness.Result, err error) {
@@ -31,7 +32,8 @@ func (adapter *Adapter) observe(ctx context.Context, call *call) (result harness
 	// Session creation was returning. History fills that gap; IDs deduplicate the
 	// overlap. This is initial catch-up, not a durable recovery mechanism.
 	stream := adapter.client.Beta.Sessions.Events.StreamEvents(ctx, call.sessionID, params,
-		option.WithRequestTimeout(adapter.config.StreamTimeout))
+		option.WithRequestTimeout(adapter.config.StreamTimeout),
+		option.WithHTTPClient(httpclient.DoFunc(adapter.http.DoStream)))
 	defer stream.Close()
 	if err = stream.Err(); err != nil {
 		return harness.Result{}, fmt.Errorf("open managedagent stream: %w", err)

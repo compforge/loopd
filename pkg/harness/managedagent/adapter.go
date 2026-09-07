@@ -7,13 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/compforge/loopd/pkg/harness"
+	"github.com/compforge/loopd/pkg/harness/internal/httpclient"
 )
 
 type Config struct {
@@ -29,7 +28,7 @@ type Config struct {
 	ConfigureSession func(context.Context, harness.Request, *anthropic.BetaSessionNewParams) error
 	HTTPTimeout      time.Duration
 	StreamTimeout    time.Duration
-	MaxConnections   int
+	MaxConnections   int // Per host, independently for short requests and streams.
 	// PreviewDeltas requests best-effort token previews. Leave false for backends
 	// that only support durable events; both paths publish AgentUE updates.
 	PreviewDeltas bool
@@ -39,6 +38,7 @@ type Config struct {
 type Adapter struct {
 	config Config
 	client anthropic.Client
+	http   *httpclient.Client
 }
 
 func New(config Config) (*Adapter, error) {
@@ -60,17 +60,16 @@ func New(config Config) (*Adapter, error) {
 	if config.Logger == nil {
 		config.Logger = slog.Default()
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: config.HTTPTimeout, KeepAlive: 30 * time.Second}).DialContext
-	transport.TLSHandshakeTimeout = config.HTTPTimeout
-	transport.ResponseHeaderTimeout = config.HTTPTimeout
-	transport.MaxConnsPerHost = config.MaxConnections
-	transport.MaxIdleConns = config.MaxConnections
-	transport.MaxIdleConnsPerHost = config.MaxConnections
-	transport.IdleConnTimeout = time.Minute
+	pools, err := httpclient.New(httpclient.Config{
+		RequestTimeout: config.HTTPTimeout,
+		MaxConnections: config.MaxConnections,
+	})
+	if err != nil {
+		return nil, err
+	}
 	opts := []option.RequestOption{
 		option.WithoutEnvironmentDefaults(), option.WithAPIKey(config.APIKey),
-		option.WithHTTPClient(&http.Client{Transport: transport}),
+		option.WithHTTPClient(httpclient.DoFunc(pools.DoShort)),
 		option.WithRequestTimeout(config.HTTPTimeout),
 		// A generic compatible backend need not deduplicate Session creation.
 		// Do not automatically repeat a write whose outcome is unknown.
@@ -79,8 +78,11 @@ func New(config Config) (*Adapter, error) {
 	if config.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(config.BaseURL))
 	}
-	return &Adapter{config: config, client: anthropic.NewClient(opts...)}, nil
+	return &Adapter{config: config, client: anthropic.NewClient(opts...), http: pools}, nil
 }
+
+// CloseIdleConnections releases idle HTTP connections without stopping active calls.
+func (adapter *Adapter) CloseIdleConnections() { adapter.http.CloseIdleConnections() }
 
 // Prompt creates one remote Session and returns a handle without waiting for the
 // model. The parent context bounds observation, not the remote Session lifetime.
