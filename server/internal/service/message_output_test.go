@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func TestMessageOutputAcrossInstances(t *testing.T) {
 		t.Fatalf("persisted snapshot = %s", message.Content)
 	}
 
-	seen := false
+	seen, completed := false, false
 	if err := listen(ctx, consumer, "conversation-1", func(event Event) error {
 		if event.MessageID != "message-2" {
 			return nil
@@ -92,16 +93,84 @@ func TestMessageOutputAcrossInstances(t *testing.T) {
 			return err
 		}
 		if patch.Op == agentueui.OpEnd {
-			if event.Message.Status != contract.MessageStatusCompleted {
+			if !completed || event.Message != nil {
 				t.Fatal("missing terminal status")
 			}
 			return errStop
+		}
+		if patch.Op == agentueui.OpStart && event.Message.Status == contract.MessageStatusCompleted {
+			completed = true
 		}
 		return nil
 	}); !errors.Is(err, errStop) {
 		t.Fatal(err)
 	}
 
+}
+
+// +case=`A long-message snapshot is sent once; Redis deltas only carry an addressed patch, then a SQL terminal snapshot.`
+func TestConversationDeltaDoesNotRepeatMessage(t *testing.T) {
+	store, producer, consumer := outputFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m, err := store.Speak(ctx, "work", outputRequest("long-output"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("long body ", 10000)
+	if _, err := producer.EmitMessage(ctx, m.ID, outputText(t, 2, body)); err != nil {
+		t.Fatal(err)
+	}
+	snapshotSeen, deltaSeen, completed := false, false, false
+	err = listen(ctx, consumer, "work", func(value Event) error {
+		event, err := agentueui.Parse(value.Data)
+		if err != nil {
+			return err
+		}
+		if event.Op == agentueui.OpPing {
+			if event.StreamID != "" {
+				t.Fatal("connection ping addresses a message")
+			}
+			return nil
+		}
+		if event.StreamID != m.ID {
+			t.Fatalf("stream identity = %q", event.StreamID)
+		}
+		switch event.Op {
+		case agentueui.OpStart:
+			if value.Message == nil || value.Message.Revision != event.Seq {
+				t.Fatal("snapshot lacks matching message metadata")
+			}
+			if !snapshotSeen {
+				snapshotSeen = true
+				if !strings.Contains(string(value.Message.Content), body) {
+					t.Fatal("missing initial body")
+				}
+				_, err = producer.EmitMessage(ctx, m.ID, marshalEvent(t, agentueui.Event{
+					Op: agentueui.OpAppend, Seq: 3, Mask: "block.content",
+					Block: map[string]any{"id": "text", "type": "text", "content": "!"},
+				}))
+				return err
+			}
+			completed = value.Message.Status == contract.MessageStatusCompleted
+		case agentueui.OpAppend:
+			if value.Message != nil || len(value.Data) > 512 || event.Seq != 3 {
+				t.Fatalf("delta repeats snapshot or has wrong revision: %d bytes", len(value.Data))
+			}
+			deltaSeen = true
+			_, err = producer.EmitMessage(ctx, m.ID, marshalEvent(t, agentueui.End(4)))
+			return err
+		case agentueui.OpEnd:
+			if value.Message != nil || !completed {
+				t.Fatal("End must follow terminal metadata without repeating it")
+			}
+			return errStop
+		}
+		return nil
+	})
+	if !errors.Is(err, errStop) || !snapshotSeen || !deltaSeen || !completed {
+		t.Fatalf("snapshot=%v delta=%v completed=%v err=%v", snapshotSeen, deltaSeen, completed, err)
+	}
 }
 
 var errStop = errors.New("page unsubscribed")

@@ -38,11 +38,12 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	if err != nil {
 		return err
 	}
+	start.StreamID = accepted.ID
 	raw, err := start.Marshal()
 	if err != nil {
 		return err
 	}
-	data, err := messageEventData(accepted.ID, accepted, raw)
+	data, err := messageEventData(accepted, raw)
 	if err != nil {
 		return err
 	}
@@ -54,8 +55,9 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	}
 	// Input submission is acknowledged once. The page independently subscribes
 	// to its Conv; it does not need an input-owned connection to observe actors.
-	end, _ := ui.End(accepted.Revision).Marshal()
-	endData, err := messageEventData(accepted.ID, accepted, end)
+	end := ui.End(accepted.Revision)
+	end.StreamID = accepted.ID
+	endData, err := end.Marshal()
 	if err == nil {
 		err = writer.WriteEvent("", "", endData)
 	}
@@ -66,7 +68,7 @@ func (server *Server) createChatMessages(ctx context.Context, request *hertzapp.
 	return nil
 }
 
-// History and live delivery carry the same self-contained message content.
-func messageEventData(id string, message *contract.Message, event json.RawMessage) ([]byte, error) {
-	return json.Marshal(view.MessageEvent{MessageID: id, Message: message, Event: event})
+// Snapshots carry Message metadata; ordinary deltas are bare AgentUE events.
+func messageEventData(message *contract.Message, event json.RawMessage) ([]byte, error) {
+	return json.Marshal(view.MessageEvent{Message: message, Event: event})
 }

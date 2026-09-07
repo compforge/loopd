@@ -13,11 +13,14 @@ export function mergeMessage(messages: Message[], incoming: Message): Message[] 
   return [...messages.filter((m) => m.id !== incoming.id), incoming].sort((a, b) => a.id.localeCompare(b.id));
 }
 export function applyMessageEvent(messages: Message[], delivery: MessageEvent): Message[] {
-  const { messageID, message, event } = delivery;
-  if (!messageID || !message || message.id !== messageID) throw new Error("Message event identity mismatch");
+  const { message, event } = delivery;
+  const messageID = event.stream_id;
+  if (!messageID || (message && message.id !== messageID)) throw new Error("Message event identity mismatch");
   const existing = messages.find((m) => m.id === messageID);
   if (existing && ((existing.revision ?? 0) > event.seq || (event.op !== "start" && (existing.revision ?? 0) === event.seq))) return messages;
-  const snapshot = applyPatch(structuredClone(existing?.content ?? {}), event);
+  const base = message ?? existing;
+  if (!base) throw new Error("Message event requires an initial snapshot");
+  const snapshot = applyPatch(structuredClone(existing?.content ?? base.content), event);
   const model = parseMessageContent(snapshot);
-  return mergeMessage(messages, { ...message, revision: event.seq, content: model });
+  return mergeMessage(messages, { ...base, revision: event.seq, content: model });
 }

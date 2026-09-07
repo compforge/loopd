@@ -7,7 +7,12 @@ const message = (id: string): Message => ({
  created_at:"",updated_at:"",revision:1,
  content:{version:"1.0",biz:"chat",meta:{},blocks:[]},
 });
-const frame = (m:Message,event:unknown) => decodeMessageFrame("data: "+JSON.stringify({message_id:m.id,message:m,event}));
+const frame = (m: Message, event: Record<string, unknown>) => {
+ const patch = { ...event, stream_id: m.id };
+ return decodeMessageFrame("data: " + JSON.stringify(
+  event.op === "start" || event.op === "end" ? { message: m, event: patch } : patch,
+ ));
+};
 describe("message-addressed delivery",()=>{
  it("isolates equal actor, block IDs and seq across outputs and ignores duplicate deltas",()=>{
   const a=message("a"),b=message("b");
@@ -23,7 +28,29 @@ describe("message-addressed delivery",()=>{
  });
  it("rejects mismatched envelope identity",()=>{
   const event=frame(message("a"),{op:"start",seq:1,model:message("a").content});
-  expect(()=>applyMessageEvent([],{...event,messageID:"b"})).toThrow("identity mismatch");
+  expect(()=>applyMessageEvent([],{...event,event:{...event.event,stream_id:"b"}})).toThrow("identity mismatch");
+ });
+ it("keeps metadata for bare deltas and repairs with a newer snapshot", () => {
+  const a = {...message("a"), reply_to_id: "question", target_kind: "user", target_key: "alice"};
+  let messages = applyMessageEvent([], frame(a, {op: "start", seq: 1, model: a.content}));
+  const delta = frame(a, {op: "set", seq: 2, block: {id: "text", type: "text", content: "partial"}});
+  expect(delta.message).toBeUndefined();
+  messages = applyMessageEvent(messages, delta);
+  expect(messages[0]).toMatchObject({kind: a.kind, key: a.key, reply_to_id: "question", target_key: "alice", status: "streaming", revision: 2});
+  const repaired = {...a, revision: 5, content: {...a.content, blocks: [{id: "text", type: "text", content: "recovered"}]}};
+  messages = applyMessageEvent(messages, frame(repaired, {op: "start", seq: 5, model: repaired.content}));
+  expect(applyMessageEvent(messages, delta)).toBe(messages);
+  const terminal = {...repaired, status: "completed" as const, revision: 6};
+  messages = applyMessageEvent(messages, frame(terminal, {op: "start", seq: 6, model: terminal.content}));
+  const end = decodeMessageFrame('data: {"stream_id":"a","op":"end","seq":6}');
+  expect(applyMessageEvent(messages, end)).toBe(messages);
+  expect(messages[0].status).toBe("completed");
+  expect(messages[0].content.blocks[0].content).toBe("recovered");
+ });
+ it("requires a known message for bare deltas and accepts unaddressed heartbeats", () => {
+  const delta = frame(message("missing"), {op: "set", seq: 2, block: {id: "text", type: "text", content: "x"}});
+  expect(() => applyMessageEvent([], delta)).toThrow("initial snapshot");
+  expect(decodeMessageFrame('data: {"op":"ping","seq":0}').event.stream_id).toBeUndefined();
  });
 });
 

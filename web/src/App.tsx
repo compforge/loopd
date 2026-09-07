@@ -33,7 +33,7 @@ export function App() {
   const [error, setError] = useState<string>();
   const messagePoller = useRef<{ conversationID: string; poller: MessagePoller } | undefined>(undefined);
   useConversationStream(selectedConversationID, (delivery) => {
-    if (delivery.messageID) setMessages((current) => applyMessageEvent(current, delivery));
+    if (delivery.event.stream_id) setMessages((current) => applyMessageEvent(current, delivery));
   }, (signal) => refreshMessages(selectedConversationID!, signal, true));
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
@@ -193,7 +193,7 @@ export function App() {
         conversationID, text, target: selectedActor,
         onTaskID: () => setSubmitting(false),
         onEvent: (delivery) => {
-          if (!delivery.messageID) return;
+          if (!delivery.event.stream_id) return;
           setMessages((current) => applyMessageEvent(current.filter((m) => !m.id.startsWith("local-")), delivery));
         },
       });

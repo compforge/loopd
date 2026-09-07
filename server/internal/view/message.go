@@ -14,7 +14,6 @@ type MessageEventResponse struct {
 	ID string `json:"id"`
 }
 type MessageEvent struct {
-	MessageID string            `json:"message_id"`
-	Message   *contract.Message `json:"message,omitempty"`
-	Event     json.RawMessage   `json:"event"`
+	Message *contract.Message `json:"message,omitempty"`
+	Event   json.RawMessage   `json:"event"`
 }

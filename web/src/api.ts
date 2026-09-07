@@ -195,16 +195,16 @@ async function responseError(response: Response): Promise<Error> {
   }
 }
 
-export type MessageEvent = SseMessage & { messageID?: string; message?: Message };
+export type MessageEvent = SseMessage & { message?: Message };
 
-// The envelope belongs to loopd. AgentUE still validates an unchanged event.
+// Only snapshots have a loopd metadata envelope. AgentUE owns stream addressing.
 export function decodeMessageFrame(frame: string): MessageEvent {
   const lines = frame.split("\n");
   const raw = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
-  const envelope = JSON.parse(raw) as { message_id?: string; message?: Message; event?: unknown };
-  if (!envelope.message_id) return decodeSse(frame);
+  const envelope = JSON.parse(raw) as { message?: Message; event?: unknown };
+  if (!envelope.event) return decodeSse(frame);
   const inner = lines.filter((line) => !line.startsWith("data:")).join("\n") + `\ndata: ${JSON.stringify(envelope.event)}`;
-  return { ...decodeSse(inner), messageID: envelope.message_id, message: envelope.message };
+  return { ...decodeSse(inner), message: envelope.message };
 }
 
 export interface HumanReply {

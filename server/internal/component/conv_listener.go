@@ -46,6 +46,7 @@ type watchedMessage struct {
 
 // ConvListener belongs to one stream request, never to an actor execution.
 // +spec=`Only this Conv is observed. GC runs independently; terminal messages leave the active set.`
+// +spec=`Message snapshots carry metadata; ordinary deltas carry only AgentUE patches addressed by stream_id.`
 type ConvListener struct {
 	repo           ConvMessageRepository
 	events         agentuerunner.EventBridge
@@ -109,6 +110,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 		if err != nil {
 			return err
 		}
+		patch.StreamID = row.ID
 		data, err := patch.Marshal()
 		if err != nil {
 			return err
@@ -119,11 +121,13 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 		}
 		watch.revision = revision
 		if (row.Purpose == "output" || row.Purpose == "harness") && message.Ended() {
-			data, err := agentueui.End(revision).Marshal()
+			end := agentueui.End(revision)
+			end.StreamID = row.ID
+			data, err := end.Marshal()
 			if err != nil {
 				return err
 			}
-			return deliver(Event{MessageID: row.ID, Message: &message, Data: data})
+			return deliver(Event{MessageID: row.ID, Data: data})
 		}
 		return nil
 	}
@@ -255,7 +259,6 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 				stop(watch)
 				continue
 			}
-			message := visibleMessage(watch.message)
 			patch, err := agentueui.Parse(value.delivery.Data)
 			if err != nil {
 				return err
@@ -281,8 +284,14 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 				continue
 			}
 			watch.revision = patch.Seq
-			event := Event{MessageID: id, Message: &message, Data: value.delivery.Data}
-			if err := deliver(event); err != nil {
+			// Address at the multiplexing boundary, not in the provider stream.
+			// Ordinary deltas must not repeat the potentially large SQL snapshot.
+			patch.StreamID = id
+			data, err := patch.Marshal()
+			if err != nil {
+				return err
+			}
+			if err := deliver(Event{MessageID: id, Data: data}); err != nil {
 				return err
 			}
 		}
