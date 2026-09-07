@@ -1,19 +1,9 @@
 package runtime
 
-import "context"
+import (
+	"github.com/compforge/loopd/runtime/model"
+	"github.com/compforge/loopd/runtime/verb"
+)
 
-type Operator struct {
-	registry registry
-}
-
-type OperatorRegistration struct {
-	Key         string
-	DisplayName string
-	Description string
-}
-
-func (service Operator) Register(ctx context.Context, value OperatorRegistration) error {
-	return service.registry.register(ctx, registration{
-		key: value.Key, displayName: value.DisplayName, description: value.Description,
-	})
-}
+type Operator = verb.Operator
+type OperatorRegistration = model.OperatorRegistration

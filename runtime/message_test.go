@@ -93,8 +93,11 @@ func TestSpeakHandleModesAndRecovery(t *testing.T) {
 	}
 	defer restored.Close()
 	stream, err = restored.Loop.Conv.Tell(ctx, "conv", contract.SpeakRequest{Key: "stream"})
-	if err != nil || stream.ID() != "output" || !stream.(*messageStream).value.Status.Terminal() {
+	if err != nil || stream.ID() != "output" {
 		t.Fatalf("restore: %v", err)
+	}
+	if err := stream.Emit(ctx, event); err == nil || len(seqs) != 3 {
+		t.Fatalf("restored writer accepted output after End: %v", err)
 	}
 	if err := stream.End(ctx); err != nil || len(seqs) != 3 {
 		t.Fatalf("restored End=%v seqs=%v", err, seqs)
@@ -197,8 +200,8 @@ func TestMessageEndStatus(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if writes != 1 || stream.(*messageStream).value.Status != status {
-				t.Fatalf("writes=%d status=%s", writes, stream.(*messageStream).value.Status)
+			if writes != 1 || value.Status != status {
+				t.Fatalf("writes=%d status=%s", writes, value.Status)
 			}
 			if err := stream.End(ctx); err == nil {
 				t.Fatal("replaced failure/cancellation with success")
