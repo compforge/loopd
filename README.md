@@ -56,7 +56,7 @@ open the UI, select Router, and submit a question.
 
 The Quick Start uses temporary storage and an in-process AgentGo demo. Recovery
 across restarts requires persistent storage, Operator progress, and a durable
-Harness adapter; see the [recovery contract](docs/runtime.md#harness-执行与恢复).
+Harness adapter; see the [recovery contract](docs/harness.md#恢复与内存).
 
 To build an Operator, start with the [Router source](operators/router/internal/router/router.go)
 and [runtime guide](docs/runtime.md). Explore the [kernel](docs/kernel.md),

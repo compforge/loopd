@@ -46,7 +46,7 @@ Manager 规划 CLI 工作，Executor 执行，Auditor 检查工件，再决定�
 配置 OpenAI-compatible 模型地址和凭据，打开页面后选择 Router 并提交问题。
 
 Quick Start 使用临时存储与进程内 AgentGo Demo。跨重启恢复需要持久存储、Operator
-领域进度与持久 Harness Adapter，具体见 [恢复契约](docs/runtime.md#harness-执行与恢复)。
+领域进度与持久 Harness Adapter，具体见 [恢复契约](docs/harness.md#恢复与内存)。
 
 开发 Operator 可从 [Router 源码](operators/router/internal/router/router.go) 和
 [Runtime 指南](docs/runtime.md) 开始；更多设计见 [Kernel](docs/kernel.md)、

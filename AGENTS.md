@@ -51,6 +51,7 @@ loopd/
 ## References
 
 - `docs/kernel.md` — Actor 协作模型、状态与恢复责任、设计文档分工
+- `docs/harness.md` — Harness 配置与发现、Run/Runner 生命周期、Adapter 契约与恢复
 - `docs/runtime.md` — Operator 开发库定位、注册发现、Conv 消费、共享历史、Harness Call 与结果发布
 - `server/AGENTS.md` — server 代码地图及各领域设计索引
 - `server/docs/conversation.md` — Conv 消息接收与 Poll 契约

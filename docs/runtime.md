@@ -198,7 +198,7 @@ result, err := call.Result(ctx) // result.Format + result.Content；Text() 提�
 Prompt 遇到 Server 容量不足时返回 nil Call 与统一 runtime Error，不创建新调用。用
 `IsHarnessCapacityExceeded(err)` 判断；`IsRetryable(err)` 为 true，表示 Operator 可以稍后重试，
 SDK 不自动重试容量拒绝。相同幂等 key 的既有调用不受新调用容量限制，详见
-[容量与拒绝](../server/docs/harness.md#容量与拒绝)。
+[容量与拒绝](harness.md#容量与拒绝)。
 
 Call.Get(ctx) 通过 API 读取状态，Stream(ctx) 通过 Server 的 Run SSE 接口观察 AgentUE 增量，
 实时事件来源是 Redis。Wait(ctx) 在流结束或中断时查询持久状态，可重试的中断重新连接同一
@@ -211,7 +211,7 @@ Meta。一个 Call 对应一条独立输出，不再接受调用者的 Output wr
 和执行终态。Operator 读取 text/JSON 作决策，不接手 Emit/End；自己的总结等发言仍使用 Speak。
 
 调用 API、幂等、接管、租约、结果格式及 Adapter 配置统一见
-[Harness 调用与后台驱动](../server/docs/harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
+[Harness 管理与运行](harness.md)。Wait 会占用 Reconcile 并发位；不等待时用
 Get + RequeueAfter，完成不会自动映射成业务 CRD Watch。
 
 ## Human：Ask 与 Confirm
@@ -266,8 +266,8 @@ Operator.Register、Harness.Register 按 kind/key 注册并随 runtime 生命周
 server 的 actors 接口只列未过期 Operator/Harness；Human 不需要注册。注册记录不是领域配置，
 租约也不是执行锁。多副本互斥与分片由 Operator 配置，不由心跳保证。
 
-内部临时 Harness 无需注册为用户可选目标。Router 只注册自身，按需调用配置的临时 Harness；
-注册 Harness 的选择、转发和分派策略由 Router 后续扩展。
+Harness 的配置 target、在线注册和输出 Actor 身份各有用途，统一见
+[Harness 管理](harness.md#管理配置注册与身份)。Router 只注册自身，按需调用 Server 配置的 Harness。
 
 ## Router 示例策略
 

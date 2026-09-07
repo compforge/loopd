@@ -1,10 +1,93 @@
-# Harness 调用与后台驱动
+# Harness 管理与运行
 
-Server 是人、Operator、Harness 的持久协作平台。HarnessRunner 在 Server 内独立于 Operator
-运行，由 `server/internal/component` 实现；loop-runtime 是 Operator toolkit，不驱动模型或保存
-进程级完整轨迹。Harness 内部执行状态、业务领域状态与 loopd 调用记录分别归属各自 owner。
+Harness 提供智能执行，Server 接收持久调用并驱动它，Adapter 将不同 Harness 接入同一契约。
+本文集中描述 Harness 的管理、运行、输出和恢复；Operator 如何组合调用见 [Runtime](runtime.md)，
+跨参与者的协作边界见 [Kernel](kernel.md)。
 
-## 提交与观察
+## 概念与职责
+
+| 概念 | 责任 |
+|---|---|
+| Harness | 拥有原生执行状态、上下文和恢复能力；可以是进程内执行库或远端服务 |
+| Adapter | 适配原生启动、观察与恢复协议，将可见过程转换为 AgentUE，提取最终 text/JSON |
+| Harness Run | Server 持久保存的一次调用，关联请求、执行引用、输出 Message 和调用终态 |
+| HarnessRunner | Server 内的后台组件，驱动 Run：领取、调用 Adapter、固化输出、恢复及收尾 |
+| runtime Call | Operator 持有的远程句柄，通过 Server API 观察、取结果或请求取消 Run |
+
+Run 保存驱动所需的事实，Runner 执行驱动逻辑；Adapter 负责 Harness 差异。Runner 不解释原生
+协议，Adapter 不直接写 loopd DB 或 Redis。Harness 内部状态由执行端持有，Operator 的业务
+状态由自己的领域 CRD 持有；Harness Run 与 LongHorizon 的业务 Run 是不同对象。
+
+```mermaid
+flowchart LR
+    Operator -->|Prompt / Result| Runtime[loop-runtime]
+    subgraph Server[loop-server]
+        API[Run API] -->|提交 Run| Runner[HarnessRunner]
+        Runner -->|Prompt / Resume| Adapter[Harness Adapter]
+    end
+    Runtime --> API
+    Adapter -->|原生协议| Harness
+```
+
+## 管理：配置、注册与身份
+
+### 可执行目标由部署配置
+
+Server 按 target key 装配 Adapter；Prompt 的 Target 从这份配置中选择，未配置的 target 会被
+拒绝。连接地址、模型、凭据和工具权限由部署提供，运行中的调用只引用 target，不提交凭据。
+Server 启动时加载配置，详细配置入口见本文的 [配置与验证](#配置与验证)。
+
+同一 Adapter 类型可以配置多个 target，分别使用不同模型或执行环境。承担同一组调用接管的
+Server 副本需要一致的 target 配置和输出投影版本，才能按原调用身份恢复。
+
+### 在线注册用于发现
+
+Harness.Register 按 kind/key 登记展示名称、描述和在线租约，并随 runtime 生命周期续租。
+Server 的 actors 接口只列未过期的注册；停止续租后退出在线列表。注册表示可发现的身份，
+不验证原生服务健康、不装配 Adapter，也不自动创建 Harness Run。
+
+内部 Harness 可以仅作为配置 target 被 Operator 调用，无需注册成用户可选的 Actor。反之，
+有注册记录也不代表同名 target 已配置。注册租约决定发现可见性，Run 的执行租约决定驱动归属；
+注册到期不会取消已经接收的 Run。通用注册 Verb 用法见 [Runtime](runtime.md#注册与发现)。
+
+### 执行目标与发言身份分开
+
+Target 选择实际 Adapter，Actor kind/key 表示输出 Message 的作者；未指定 Actor 时使用
+kind=harness、key=target。Operator 可以指定自己的角色身份，例如 LongHorizon 的 Manager，
+而多个角色复用同一执行 target。自定义 ActorKind 是开放字符串，不要求先注册才能发言。
+
+输出归属请求指定的 Conversation。Operator 通常将协作过程放入自己的工作会话，再向主会话
+Speak 总结；会话组织不改变 Harness 的执行协议或生命周期。
+
+## Adapter：适配原生执行
+
+公共接口位于 [pkg/harness](../pkg/harness/harness.go)。Adapter.Prompt 启动调用并及时返回
+Harness 侧的 Call；该句柄提供过程事件和最终结果。它与 runtime Call 分处 Server 两侧：
+前者封装原生执行，后者只观察 Server 中的持久 Run。
+
+Adapter 同时满足两种消费需求：
+
+- 面向页面：将原生可见过程转换为 AgentUE set/append，由 Runner 写入输出 Message。
+- 面向 Operator：从原生最终响应提取 text 或 JSON，由 Runner 保存为 result block。
+
+loopd 不要求 Harness 原生返回 AgentUE，也不从过程文本的最后一段猜测最终结果。原生 Session
+等执行引用可通过 ExecutionReference 暴露，Runner 将其作为不透明数据保存，恢复时交还 Adapter。
+支持接管的 Adapter 实现 Recoverable.Resume，保证挂接同一次执行和稳定回放；无法保证时明确
+报告不支持恢复。具体回放与观察故障处理见 [恢复与内存](#恢复与内存)。
+
+## Run：提交、驱动与观察
+
+一次调用的主流程是：
+
+1. Operator 通过 runtime 提交调用，Server 检查幂等身份和容量，原子保存 Run 与输出 Message。
+2. API 返回 Run 身份；后台 Runner 领取执行租约，通过 Adapter 启动或恢复 Harness。
+3. Adapter 提供过程事件，Runner 合并到 DB 快照，再将实时事件 append-only 写入 Redis。
+4. Harness 返回最终结果或错误，Runner 保存 result 或 error 及终态，UI 和 Operator 各自观察。
+
+调用一旦接收，运行生命周期由 Server 驱动，Operator 或 UI 的连接不持有它。业务何时重试、
+兜底、报告错误或 Commit 仍由 Operator 决定。
+
+### 提交与观察
 
 `POST /v1/harness/runs` 接收 conversation_id、idempotency_key、effect_key、target、text、
 可选 tools、actor、recipient、meta 和 timeout。Go SDK 的 timeout 使用 time.Duration JSON 数值
@@ -22,13 +105,11 @@ phase、deadline_at 等），无需等待 Harness 启动。幂等范围是 Conve
 - `POST /v1/harness/runs/:run_id/cancel` 请求停止本次 loopd 调用。Server 停止本地驱动，保存
   cancelled；当前 Adapter 不保证远端 interrupt，不能将 cancelled 解释为远端已停止副作用。
 
-`Loop.Harness.Prompt` 只提交并返回轻量 Call；Call.Get(ctx)、Wait(ctx)、Result(ctx) 和 Stream(ctx)
-观察 Server。Wait/Result 消费 `/stream`，流结束或中断时 GET 持久状态；可重试的中断会重新
-连接同一 Call，最多三次连接，正常流不轮询调用状态。
-`Loop.Harness.Call(id)` 可重建句柄；流断开后可对同一 Run 重新观察。取消等待、关闭 runtime、页面断线均不取消 Run。
-命名与 `/v1/conversations/:conversation_id/stream` 一致；Run 流随本次调用终止，Conv 流持续观察会话。
+`Loop.Harness.Prompt` 提交后返回 runtime Call，可按 Run ID 重建。Get、Stream、Wait、Result
+观察同一次调用；取消等待、关闭 runtime 或页面断线均不取消 Run。SDK 用法和断流处理见
+[Runtime：提交与观察](runtime.md#harness提交与观察)。Run 流随本次调用终止，Conv 流持续观察会话。
 
-## 容量与拒绝
+### 容量与拒绝
 
 每个 Server 实例共享一组有限执行槽，新提交与后台恢复都占用该额度。新请求在幂等检查后、
 创建 Run 和输出 Message 前预留执行槽，事务失败释放预留；提交后由后台驱动接手，驱动退出
@@ -61,7 +142,7 @@ Adapter 提取成 text 或 JSON。Server 在完成事务中写入专用 block：
 独立表达调用状态。AgentUE end/SSE EOF 本身不证明执行成功。
 
 DB 的合并快照与 Redis 的 append-only 实时事件是不同存储形态，统一遵循
-[持久化约定](persistence.md#agentue-快照与实时事件流)。最终 result/end 也按各自序号追加到
+[持久化约定](../server/docs/persistence.md#agentue-快照与实时事件流)。最终 result/end 也按各自序号追加到
 Redis；桥缺失时使用 DB 快照补齐。事件先进入受租约保护的 SQL 事务，再由 MessageService 尽力发布 Redis。
 Run 流由请求级 MessageListener 观察，ConvListener 同时聚合 Harness 输出；两类监听都不创建 Redis key。
 

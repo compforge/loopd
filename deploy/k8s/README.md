@@ -70,4 +70,4 @@ Router 默认使用 agentgo；LongHorizon 使用 manager/executor/auditor。模�
 属于 Server，Operator Pod 只保留编排配置。`server.workspace` 配置 demo 文件工具存储。
 
 AgentGo 仅用于单 Server demo，不具备跨进程执行恢复；多副本应配置可恢复的远端 Adapter。
-完整协议、Managed Agent 配置和回放边界见 [Harness](../../server/docs/harness.md)。
+完整协议、Managed Agent 配置和回放边界见 [Harness](../../docs/harness.md)。

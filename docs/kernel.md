@@ -142,7 +142,7 @@ Kernel 只定义跨功能稳定的 Actor 模型、协作主线与恢复责任。
 
 | 文档 | 回答的问题 |
 |---|---|
-| [Harness](../server/docs/harness.md) | Server 如何接收、驱动和恢复 Harness 调用，Operator 如何获取最终结果？ |
+| [Harness](harness.md) | Harness 如何配置与发现，Run/Runner 如何驱动调用，Adapter 如何适配与恢复？ |
 | [Runtime](runtime.md) | Operator 开发者如何接入、组合 Verb，并承担哪些调用与恢复责任？ |
 | [Conversation](../server/docs/conversation.md) | 持久消息如何定向通知、Poll、Commit，消费与重试保证到哪里？ |
 | [持久化](../server/docs/persistence.md) | 可见事实存在哪里，User/Operator conv、消息身份和快照如何归属？ |

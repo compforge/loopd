@@ -74,4 +74,4 @@ server/
 - `../docs/runtime.md` — Operator 协作开发契约，含注册、续租与 Actor 发现
 - `../docs/kernel.md` — loopd 稳定理念和Actor 边界
 
-- `docs/harness.md` — Harness 调用、result、Server Runner、通用租约与恢复边界
+- `../docs/harness.md` — Harness 管理、Run/Runner 驱动、Adapter 适配与恢复边界
