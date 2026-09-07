@@ -1,8 +1,8 @@
 # Loop Runtime
 
-loop-runtime 是嵌入 Operator 的 Go 协作 toolkit。controller-runtime 提供 Manager、Watch、
-Client 与 Reconcile 调度，loop-runtime 联合 server 提供数据读取、发言、流式交付、Human 交互
-和 Harness 调用的 Verb。Operator 决定业务含义、执行策略与完成条件。
+loop-runtime 是嵌入 Operator 的 Go 协作 SDK/toolkit，将 Server HTTP API 与 SSE 封装为数据
+读取、发言、流式交付、Human 交互和 Harness 调用的 Verb。controller-runtime 提供 Manager、
+Watch、Client 与 Reconcile 调度，runtime 提供接入辅助；Operator 决定业务含义、执行策略与完成条件。
 
 “Loop is a CRD” 不只是资源 CRUD：Reconcile 通过 Verb 把判断连接到真实协作。编排恢复依赖
 Operator 持久化的领域 CRD；Harness 恢复由 Adapter 及执行端保证。runtime 不恢复 Go 调用栈，
@@ -27,7 +27,9 @@ ctrl.NewControllerManagedBy(mgr).
 ```
 
 Watch 是 Controller 配置，不是 Verb。ConversationPredicate 过滤其他 Actor 的信号和单纯的
-拉取位置变化；消费契约见 [Conversation](../server/docs/conversation.md)。
+拉取位置变化；Conv CRD 承载唤醒与消费协调，消息正文通过 Server API 获取。消费契约见
+[Conversation](../server/docs/conversation.md)。Participant helper 和句柄 ID/本地快照读取属于
+本地操作，不发起网络请求；跨进程协作由 Server API 提供。
 
 Operator 不导入 server 私有 model/repo，不直接写聊天数据库或 Redis。业务自有 API 与领域
 CRD 可通过普通 Client 访问，不必进入 loopd Core。Harness Adapter 装配在 Server，由 component 内的 HarnessRunner 驱动。
@@ -51,7 +53,8 @@ Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自�
 | Human | Ask / Confirm | write：创建或复用独立问题 Message |
 | Human / Human handle | Get / Wait | read：观察问题的权威结果 |
 | Harness | Prompt | write：发起或复用有身份的执行，返回 Call |
-| Harness Call | Value / Stream / Wait | read：观察已有执行 |
+| Harness Call | Get / Stream / Wait / Result | read：观察已有执行、等待终态或提取结果 |
+| Harness Call | Cancel | write：请求停止 Server 驱动，远端取消取决于 Adapter 能力 |
 | Message handle | Emit / End | write：增量更新／结束这条消息，不管理页面连接 |
 | Message handle | ID / Value | read：观察消息身份／本地已知快照 |
 | Operator / Harness | Register | write：注册与续租在线身份 |
@@ -130,6 +133,8 @@ Operator 在启动新工作前检查 ConversationID，关联尚未投影时等�
 ## 消费与连续输入
 
 Operator 把 DB 中持久化的消息当作自己的输入 queue，经 runtime 消费，不直接连接数据库。
+Poll/Commit 在 runtime 内均调用 Server HTTP API，由 Server 协调 DB 消息读取和 Conv CRD
+消费位置更新；Operator 不自行改写这些游标。
 各 Operator 独立选择 Poll、Speak 和 Commit 的时机；持续输入是常态，不需要等当前回答结束
 才能提交下一条消息。Commit 应跟随可安全恢复的处理进度，而不是仅仅跟随 Poll 返回。
 
@@ -158,7 +163,8 @@ if err != nil { return err }
 result, err := call.Result(ctx) // result.Format + result.Content；Text() 提供文本视图
 ```
 
-Call.Get(ctx) 读取状态，Wait(ctx) 等待终态，Stream(ctx) 通过 Server 的 Redis/SSE 观察 AgentUE。
+Call.Get(ctx) 通过 API 读取状态，Stream(ctx) 通过 Server 的 Run SSE 接口观察 AgentUE 增量，
+实时事件来源是 Redis。Wait(ctx) 消费流至结束，再读取一次持久终态；Result(ctx) 从中提取结果。
 `loop.Harness.Call(runID)` 重建句柄，不重新提交。取消等待、关闭 toolkit 均不取消执行；显式
 Cancel(ctx) 请求停止 Server 驱动，远端是否中断由 Adapter 能力决定。
 

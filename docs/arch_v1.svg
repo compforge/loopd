@@ -1,211 +1,64 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980" role="img" aria-labelledby="title desc">
-  <title id="title">loopd Agent orchestration architecture</title>
-  <desc id="desc">Actors collaborate through persistent messages. Conv CRDs hold consumer positions and wake reconcilers. Business Operators use loop-runtime verbs embedded in their process and can access external systems, illustrated by Router querying an external intent library. DB stores visible conversations and messages; Redis and AgentUE deliver page streams. AgentGo provides Harness execution. AgentLedger can be integrated for complete execution facts.</desc>
-
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="930" viewBox="0 0 1500 930" role="img" aria-labelledby="title desc">
+  <title id="title">loopd collaboration architecture</title>
+  <desc id="desc">Router and LongHorizon are shown inside the Operator boundary, with loop-runtime attached as a slim SDK strip. Operators use this embedded SDK to call Server APIs and receive run streams. Server updates Conv CRDs to wake Operators. Inside Server, collaboration services connect to HarnessRunner and adapters drive Harnesses. Server uses DB for persistence and Redis for live events. User interfaces communicate with Server through HTTP and conversation streams.</desc>
   <defs>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#111827" flood-opacity="0.10"/>
-    </filter>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
-    </marker>
-    <marker id="arrow-start" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
-    </marker>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" fill="#536477"/></marker>
     <style>
-      text {
-        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
-        fill: #111827;
-      }
-      .actor {
-        stroke: #111827;
-        stroke-width: 2.5;
-        filter: url(#shadow);
-      }
-      .actor-title {
-        font-size: 27px;
-        font-weight: 720;
-        text-anchor: middle;
-      }
-      .actor-detail {
-        font-size: 16px;
-        fill: #4b5563;
-        text-anchor: middle;
-      }
-      .port-line {
-        stroke: #374151;
-        stroke-width: 3;
-        marker-start: url(#arrow-start);
-        marker-end: url(#arrow);
-      }
-      .port-pill {
-        fill: #ffffff;
-        stroke: #9ca3af;
-        stroke-width: 1.5;
-      }
-      .port-label {
-        font-size: 15px;
-        font-weight: 650;
-        text-anchor: middle;
-      }
-      .operator-card {
-        fill: #ffffff;
-        stroke: #3f7650;
-        stroke-width: 2;
-      }
-      .operator-node {
-        fill: #edf8f0;
-        stroke: #8bb498;
-        stroke-width: 1.5;
-      }
-      .operator-flow {
-        fill: none;
-        stroke: #3f7650;
-        stroke-width: 2.2;
-        marker-end: url(#arrow);
-      }
-      .effect-pill {
-        fill: #fff7da;
-        stroke: #b28b24;
-        stroke-width: 1.5;
-      }
-      .core-card {
-        fill: #ffffff;
-        stroke: #6080b8;
-        stroke-width: 2;
-      }
-      .core-pill {
-        fill: #f7faff;
-        stroke: #8da7d3;
-        stroke-width: 1.5;
-      }
-      .ledger-line {
-        fill: none;
-        stroke: #8c6b3f;
-        stroke-width: 2.2;
-        stroke-dasharray: 8 7;
-        marker-end: url(#arrow);
-      }
+      text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; fill: #172b42; }
+      .name { font-size: 26px; font-weight: 650; text-anchor: middle; }
+      .detail { font-size: 17px; fill: #536477; text-anchor: middle; }
+      .label { font-size: 17px; fill: #536477; text-anchor: middle; paint-order: stroke; stroke: #fbfcfe; stroke-width: 7px; stroke-linejoin: round; }
+      .edge { fill: none; stroke: #536477; stroke-width: 2; marker-end: url(#arrow); }
+      .both { marker-start: url(#arrow); }
     </style>
   </defs>
-
-  <rect width="1800" height="980" fill="#fbfcfe"/>
-
-  <text x="70" y="54" font-size="36" font-weight="760">loopd</text>
-  <text x="70" y="88" font-size="19" fill="#6b7280">Actor 通过持久消息协作的平台</text>
-
-  <!-- Business-owned Operators share one stable loopd runtime. -->
-  <rect x="350" y="115" width="1035" height="300" rx="26" fill="#e7f5eb" stroke="#3f7650" stroke-width="2.5" filter="url(#shadow)"/>
-  <text x="385" y="158" font-size="26" font-weight="720">Operators · 业务编排层</text>
-  <text x="1345" y="158" font-size="16" fill="#3f7650" font-weight="650" text-anchor="end">业务自定角色、状态与完成条件</text>
-
-  <rect class="operator-card" x="385" y="182" width="320" height="165" rx="18"/>
-  <text class="actor-title" x="545" y="226">Router</text>
-  <text class="actor-detail" x="545" y="257">识别意图 · 拆分任务</text>
-  <text class="actor-detail" x="545" y="283">并行调用 · 汇总回答</text>
-  <rect class="operator-node" x="415" y="302" width="260" height="30" rx="15"/>
-  <text x="545" y="323" font-size="13" font-weight="650" text-anchor="middle">Poll → plan → fan-out → Speak</text>
-
-  <!-- Extension example: external business systems are accessed by the Operator, not loopd core. -->
-  <rect x="55" y="210" width="250" height="120" rx="20" fill="#f3f4f6" stroke="#6b7280" stroke-width="2" filter="url(#shadow)"/>
-  <text x="180" y="250" font-size="24" font-weight="700" text-anchor="middle">外部意图库</text>
-  <text class="actor-detail" x="180" y="278">外部系统</text>
-  <text x="180" y="306" font-size="14" fill="#4b5563" text-anchor="middle">扩展示例 · Operator 自行接入</text>
-  <path class="operator-flow" d="M 385 275 H 311" stroke-dasharray="6 5"/>
-  <rect class="port-pill" x="317" y="239" width="56" height="27" rx="13"/>
-  <text x="345" y="259" font-size="14" font-weight="650" text-anchor="middle">查询</text>
-
-  <rect class="operator-card" x="735" y="168" width="615" height="198" rx="18"/>
-  <text class="actor-title" x="1042" y="205">LongHorizon · Long-running loop</text>
-  <text class="actor-detail" x="1042" y="231">领域 CRD：Run · Execution · Audit</text>
-
-  <rect class="operator-node" x="770" y="250" width="160" height="50" rx="15"/>
-  <text x="850" y="271" font-size="16" font-weight="700" text-anchor="middle">Manager</text>
-  <text x="850" y="290" font-size="12" fill="#4b5563" text-anchor="middle">plan next step</text>
-  <line class="operator-flow" x1="935" y1="275" x2="965" y2="275"/>
-
-  <rect class="operator-node" x="970" y="250" width="160" height="50" rx="15"/>
-  <text x="1050" y="271" font-size="16" font-weight="700" text-anchor="middle">Executor</text>
-  <text x="1050" y="290" font-size="12" fill="#4b5563" text-anchor="middle">one bounded action</text>
-  <line class="operator-flow" x1="1135" y1="275" x2="1165" y2="275"/>
-
-  <rect class="operator-node" x="1170" y="250" width="150" height="50" rx="15"/>
-  <text x="1245" y="271" font-size="16" font-weight="700" text-anchor="middle">Auditor</text>
-  <text x="1245" y="290" font-size="12" fill="#4b5563" text-anchor="middle">read-only verify</text>
-
-  <line class="operator-flow" x1="1245" y1="303" x2="1245" y2="315"/>
-  <rect class="effect-pill" x="835" y="318" width="410" height="32" rx="16"/>
-  <text x="1040" y="340" font-size="13" font-weight="650" text-anchor="middle">verified progress / failure evidence → next round</text>
-  <path class="operator-flow" d="M 835 334 C 790 334, 790 312, 846 303"/>
-
-  <text x="868" y="398" font-size="15" fill="#4b5563" text-anchor="middle">业务定义 Resource、判断逻辑与完成条件；loopd 不内建固定 Workflow 或 Agent Team。</text>
-
-  <!-- Conv signals wake reconcilers; Verbs hide persistence and page transport mechanics. -->
-  <line class="port-line" x1="600" y1="419" x2="600" y2="530"/>
-  <rect class="port-pill" x="463" y="447" width="274" height="40" rx="20"/>
-  <text class="port-label" x="600" y="473">Conv CRD · 消费进度 / 唤醒</text>
-
-  <line class="port-line" x1="1130" y1="419" x2="1130" y2="530"/>
-  <rect class="port-pill" x="1012" y="447" width="236" height="40" rx="20"/>
-  <text class="port-label" x="1130" y="473">Poll · Speak · Commit</text>
-
-  <!-- loopd owns collaboration and shared orchestration mechanics, not domain semantics. -->
-  <rect x="400" y="530" width="1000" height="305" rx="28" fill="#edf3fc" stroke="#111827" stroke-width="3" filter="url(#shadow)"/>
-  <text x="900" y="582" font-size="31" font-weight="750" text-anchor="middle">loopd · Collaboration &amp; Runtime</text>
-  <text x="900" y="613" font-size="17" fill="#4b5563" text-anchor="middle">公共能力沉淀在平台，领域判断留给 Operator</text>
-
-  <rect class="core-card" x="450" y="642" width="390" height="172" rx="18"/>
-  <text x="645" y="681" font-size="24" font-weight="720" text-anchor="middle">loop-server</text>
-  <text x="645" y="708" font-size="15" fill="#4b5563" text-anchor="middle">persistent messages &amp; page delivery</text>
-  <rect class="core-pill" x="470" y="732" width="180" height="46" rx="14"/>
-  <text x="560" y="761" font-size="14" font-weight="650" text-anchor="middle">Conversation · Message</text>
-  <rect class="core-pill" x="665" y="732" width="155" height="46" rx="14"/>
-  <text x="742" y="753" font-size="13" font-weight="650" text-anchor="middle">DB：持久协作</text>
-  <text x="742" y="770" font-size="13" font-weight="650" text-anchor="middle">Redis：页面流</text>
-
-  <rect class="core-card" x="960" y="642" width="390" height="172" rx="18"/>
-  <text x="1155" y="681" font-size="24" font-weight="720" text-anchor="middle">loop-runtime</text>
-  <text x="1155" y="708" font-size="15" fill="#4b5563" text-anchor="middle">嵌入 Operator 的 Go toolkit</text>
-  <rect class="core-pill" x="990" y="732" width="160" height="46" rx="14"/>
-  <text x="1070" y="753" font-size="13" font-weight="650" text-anchor="middle">Poll · Read · Commit</text>
-  <text x="1070" y="770" font-size="13" font-weight="650" text-anchor="middle">Speak · Emit · End</text>
-  <rect class="core-pill" x="1165" y="732" width="155" height="46" rx="14"/>
-  <text x="1242" y="753" font-size="13" font-weight="650" text-anchor="middle">Harness.Prompt</text>
-  <text x="1242" y="770" font-size="13" font-weight="650" text-anchor="middle">Human.Ask / Confirm</text>
-
-  <line class="port-line" x1="844" y1="728" x2="956" y2="728"/>
-  <rect class="port-pill" x="848" y="681" width="104" height="34" rx="17"/>
-  <text x="900" y="704" font-size="13" font-weight="650" text-anchor="middle">typed API</text>
-
-  <!-- AgentUE is the page-visible projection boundary between Human/UI and loopd. -->
-  <rect x="355" y="620" width="40" height="194" rx="16" fill="#dff3f8" stroke="#4c8a9c" stroke-width="1.8"/>
-  <text x="375" y="756" font-size="17" font-weight="700" text-anchor="middle" transform="rotate(-90 375 750)">AgentUE</text>
-
-  <!-- Human and Harness are peers connected by loopd's collaboration boundary. -->
-  <rect class="actor" x="55" y="620" width="295" height="155" rx="22" fill="#eef3fb"/>
-  <text class="actor-title" x="202" y="711">User / UI</text>
-  <text class="actor-detail" x="202" y="739">目标 · 输入 · 决策</text>
-  <text class="actor-detail" x="202" y="763">主对话 · 处理详情</text>
-
-  <line class="port-line" x1="354" y1="690" x2="396" y2="690"/>
-  <rect class="port-pill" x="260" y="638" width="230" height="38" rx="19"/>
-  <text class="port-label" x="375" y="663">Messages · Ask / Confirm</text>
-
-  <rect class="actor" x="1450" y="620" width="300" height="155" rx="22" fill="#fff3cf"/>
-  <text class="actor-title" x="1600" y="711">Harness / AgentGo</text>
-  <text class="actor-detail" x="1600" y="739">model · tools · sandbox</text>
-  <text class="actor-detail" x="1600" y="763">执行与恢复由 Adapter 拥有</text>
-
-  <line class="port-line" x1="1404" y1="690" x2="1446" y2="690"/>
-  <rect class="port-pill" x="1325" y="638" width="250" height="38" rx="19"/>
-  <text class="port-label" x="1450" y="663">Prompt · Stream · Result</text>
-
-  <!-- Dashed edges show optional ledger integration, separate from visible messages. -->
-  <path class="ledger-line" d="M 1345 795 C 1410 812, 1430 838, 1480 848"/>
-  <line class="ledger-line" x1="1600" y1="779" x2="1600" y2="828"/>
-  <rect x="1470" y="835" width="260" height="72" rx="18" fill="#f7f1e8" stroke="#8c6b3f" stroke-width="2" filter="url(#shadow)"/>
-  <text x="1600" y="866" font-size="20" font-weight="700" text-anchor="middle">AgentLedger</text>
-  <text x="1600" y="890" font-size="14" fill="#4b5563" text-anchor="middle">可接入：轨迹 · 成本 · 审计</text>
-
-  <text x="900" y="951" font-size="17" fill="#6b7280" text-anchor="middle">Actor 各自运行：DB 保存消息，CRD 保存消费与领域进度，Redis 只负责页面流与重连。</text>
+  <rect width="1500" height="930" fill="#fbfcfe"/>
+  <text x="40" y="53" font-size="36" font-weight="750">loopd</text>
+  <text x="40" y="85" font-size="18">人、Operator、Harness 的协作平台</text>
+  <!-- The narrower SDK strip is attached to the bottom of the Operator boundary. -->
+  <rect x="360" y="130" width="800" height="180" rx="16" fill="#edf7ef" stroke="#7ca889" stroke-width="2"/>
+  <text x="390" y="173" font-size="26" font-weight="650">Operators</text>
+  <rect x="400" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
+  <text class="name" x="567.5" y="244">Router</text>
+  <rect x="785" y="195" width="335" height="80" rx="12" fill="#fff" stroke="#7ca889" stroke-width="2"/>
+  <text class="name" x="952.5" y="244">LongHorizon</text>
+  <path d="M400 310 H1120 V344 Q1120 360 1104 360 H416 Q400 360 400 344 Z" fill="#f8eddc" stroke="#c69468" stroke-width="2"/>
+  <text x="425" y="343" font-size="23" font-weight="650">loop-runtime · SDK</text>
+  <text class="detail" x="927" y="342">Poll · Speak · Prompt · Ask / Confirm</text>
+  <rect x="40" y="310" width="220" height="100" rx="16" fill="#f2f0fb" stroke="#a79ac8" stroke-width="2"/>
+  <text class="name" x="150" y="360">Conv CRD</text>
+  <text class="detail" x="150" y="390">信号 · 消费进度</text>
+  <path class="edge" d="M150 310 V180 H360"/>
+  <text class="label" x="255" y="160">Watch / 唤醒</text>
+  <path class="edge" d="M360 510 H150 V410"/>
+  <text class="label" x="253" y="489">通知 / 游标</text>
+  <path class="edge both" d="M760 360 V490"/>
+  <text class="label" x="892" y="437">HTTP API / Run SSE</text>
+  <rect x="360" y="490" width="800" height="220" rx="20" fill="#edf3fc" stroke="#7996bd" stroke-width="2"/>
+  <text x="390" y="536" font-size="28" font-weight="650">loop-server</text>
+  <rect x="400" y="590" width="225" height="80" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="512.5" y="639">协作服务</text>
+  <rect x="725" y="590" width="225" height="80" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="837.5" y="639">HarnessRunner</text>
+  <rect x="1000" y="590" width="130" height="80" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="1065" y="639">Adapter</text>
+  <path class="edge both" d="M625 630 H725"/>
+  <text class="label" x="675" y="574">调用 / 输出</text>
+  <path class="edge both" d="M950 630 H1000"/>
+  <rect x="40" y="590" width="190" height="80" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="135" y="639">User / UI</text>
+  <path class="edge both" d="M230 630 H400"/>
+  <text class="label" x="303" y="574">HTTP / Conv SSE</text>
+  <rect x="1270" y="590" width="190" height="80" rx="16" fill="#fff7df" stroke="#c5ae68" stroke-width="2"/>
+  <text class="name" x="1365" y="639">Harness</text>
+  <path class="edge both" d="M1130 630 H1270"/>
+  <text class="label" x="1208" y="574">原生协议</text>
+  <rect x="400" y="800" width="225" height="90" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="512.5" y="845">DB</text>
+  <text class="detail" x="512.5" y="875">持久数据</text>
+  <rect x="800" y="800" width="265" height="90" rx="16" fill="#fff" stroke="#a4b3c4" stroke-width="2"/>
+  <text class="name" x="932.5" y="845">Redis Stream</text>
+  <text class="detail" x="932.5" y="875">实时事件</text>
+  <path class="edge both" d="M512 670 V800"/>
+  <path class="edge both" d="M590 670 V755 H932 V800"/>
 </svg>
