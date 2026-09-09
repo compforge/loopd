@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/compforge/agentue/sdks/go/storage"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
@@ -77,6 +78,9 @@ func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, sta
 	if _, ref := event.Block["ref"]; ref {
 		return fmt.Errorf("%w: complete block bodies are required", ErrInvalidContent)
 	}
+	if event.Block["type"] == storage.FrameType {
+		return fmt.Errorf("%w: storage frames are not logical input blocks", ErrInvalidContent)
+	}
 	if event.Op == agentueui.OpSet || event.Op == agentueui.OpAppend {
 		if id, ok := event.Block["id"].(string); ok {
 			if err := c.materialize(id); err != nil {
@@ -99,7 +103,7 @@ func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, sta
 	if err != nil {
 		return err
 	}
-	if err := c.persist(); err != nil {
+	if err := c.persist(s.contentMaxBytes); err != nil {
 		return err
 	}
 	updates := map[string]any{"content": content, "revision": event.Seq}

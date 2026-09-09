@@ -74,7 +74,9 @@ func (client *Client) Do(ctx context.Context, method, path string, input, output
 	if output == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20)).Decode(output); err != nil {
+	// Successful logical content can span many bounded storage parts. Keep the
+	// request deadline, but do not truncate a result already accepted by server.
+	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
 		return TransportError(fmt.Errorf("decode loop-server response: %w", err))
 	}
 	return nil

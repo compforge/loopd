@@ -26,6 +26,8 @@ type HumanIdentity func(context.Context, *hertzapp.RequestContext) (string, erro
 
 const DefaultHarnessRunConcurrency = component.DefaultHarnessRunConcurrency
 
+const DefaultContentMaxBytes = repo.DefaultContentMaxBytes
+
 type Config struct {
 	HarnessRunConcurrency int
 	Harnesses             map[string]harness.Adapter
@@ -38,16 +40,14 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	MessageInlineBlocks int
-	MessageInlineBytes  int
-	MessagePartBytes    int
-	Driver              string
-	DSN                 string
-	OperationTimeout    time.Duration
-	MaxOpenConns        int
-	MaxIdleConns        int
-	ConnMaxLifetime     time.Duration
-	ConnMaxIdleTime     time.Duration
+	ContentMaxBytes  int
+	Driver           string
+	DSN              string
+	OperationTimeout time.Duration
+	MaxOpenConns     int
+	MaxIdleConns     int
+	ConnMaxLifetime  time.Duration
+	ConnMaxIdleTime  time.Duration
 }
 
 type Server struct {
@@ -78,10 +78,8 @@ func New(config Config) (*Server, error) {
 		return nil, errors.New("conversation coordinator is required")
 	}
 	store, err := repo.Open(repo.Config{
-		MessageInlineBlocks: config.Database.MessageInlineBlocks,
-		MessageInlineBytes:  config.Database.MessageInlineBytes,
-		MessagePartBytes:    config.Database.MessagePartBytes,
-		Driver:              config.Database.Driver, DSN: config.Database.DSN,
+		ContentMaxBytes: config.Database.ContentMaxBytes,
+		Driver:          config.Database.Driver, DSN: config.Database.DSN,
 		OperationTimeout: config.Database.OperationTimeout,
 		MaxOpenConns:     config.Database.MaxOpenConns, MaxIdleConns: config.Database.MaxIdleConns,
 		ConnMaxLifetime: config.Database.ConnMaxLifetime, ConnMaxIdleTime: config.Database.ConnMaxIdleTime,

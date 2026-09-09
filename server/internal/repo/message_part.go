@@ -5,12 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strconv"
 	"strings"
 
+	"github.com/compforge/agentue/sdks/go/storage"
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
@@ -70,33 +70,15 @@ func (s *Store) MessageBlocks(ctx context.Context, convID, id, blockID, cursor s
 		for i := position; i < len(blocks); i++ {
 			block := blocks[i].(map[string]any)
 			id := block["id"].(string)
-			if ref, ok := block["ref"].(string); ok {
-				if _, loaded := c.parts[ref]; !loaded {
-					var row model.MessagePart
-					if err := tx.Where("message_id = ? AND id = ?", m.ID, ref).First(&row).Error; err != nil {
-						if errors.Is(err, gorm.ErrRecordNotFound) {
-							return fmt.Errorf("message %s has missing stored content", m.ID)
-						}
-						return err
-					}
-					p, err := decodePart(row)
-					if err != nil {
-						return err
-					}
-					c.parts[ref] = p
-				}
-				if err := c.materialize(id); err != nil {
-					return err
-				}
+			if err := c.materialize(id); err != nil {
+				return err
 			}
 			raw, err := json.Marshal(blocks[i])
 			if err != nil {
 				return err
 			}
-			if len(raw) > maxBlockPageBytes {
-				return ErrContentTooLarge
-			}
-			if len(result.Data) >= 100 || total+len(raw) > maxBlockPageBytes {
+			// A page budget may stop between blocks, never reject its first block.
+			if len(result.Data) >= 100 || (len(result.Data) > 0 && total+len(raw) > maxBlockPageBytes) {
 				result.Next = strconv.FormatUint(m.Revision, 10) + ":" + strconv.Itoa(i)
 				break
 			}
@@ -111,11 +93,9 @@ func (s *Store) MessageBlocks(ctx context.Context, convID, id, blockID, cursor s
 	return result, mapError(err)
 }
 
-const (
-	defaultMessageInlineBlocks = 32
-	defaultMessageInlineBytes  = 64 << 10
-	defaultMessagePartBytes    = 256 << 10
-)
+// The block count is only a generous packing guard. ContentMaxBytes is the
+// essential limit: every encoded root and Part content must fit that byte budget.
+const defaultMessageInlineBlocks = 1024
 
 type partContent struct {
 	Blocks []map[string]any `json:"blocks"`
@@ -124,7 +104,6 @@ type contentPart struct {
 	row   model.MessagePart
 	body  partContent
 	dirty bool
-	fresh bool
 }
 
 // messageContent routes updates by stable block ID, independently of where a
@@ -158,24 +137,67 @@ func openMessageContent(tx *gorm.DB, m model.Message) (*messageContent, error) {
 	return c, nil
 }
 
-func decodePart(row model.MessagePart) (*contentPart, error) {
-	p := &contentPart{row: row}
-	if err := decodeContentJSON(row.Content, &p.body); err != nil {
-		return nil, err
+// A reference addresses a group: one ordinary Part or multiple frame Parts.
+// Group membership and block ordering are storage concerns, not UI events.
+func decodePart(rows ...model.MessagePart) (*contentPart, error) {
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("missing stored part group")
 	}
+	p := &contentPart{row: rows[0]}
+	if p.row.GroupID == "" {
+		return nil, fmt.Errorf("part %s has no group", p.row.ID)
+	}
+	p.row.ID = p.row.GroupID
+	var frames []storage.FrameBlock
 	ids := map[string]bool{}
-	for _, b := range p.body.Blocks {
-		if err := ui.ValidateBlock(b); err != nil {
+	for _, row := range rows {
+		if row.MessageID != p.row.MessageID || row.GroupID != p.row.GroupID {
+			return nil, fmt.Errorf("mixed part ownership in group %s", p.row.GroupID)
+		}
+		var body partContent
+		if err := decodeContentJSON(row.Content, &body); err != nil {
 			return nil, err
 		}
-		if _, ref := b["ref"]; ref {
-			return nil, fmt.Errorf("nested reference in part %s", row.ID)
+		for _, block := range body.Blocks {
+			if err := ui.ValidateBlock(block); err != nil {
+				return nil, err
+			}
+			if _, ref := block["ref"]; ref {
+				return nil, fmt.Errorf("nested reference in part %s", row.ID)
+			}
+			id := block["id"].(string)
+			if ids[id] {
+				return nil, fmt.Errorf("duplicate block %s in group %s", id, row.GroupID)
+			}
+			ids[id] = true
+			if block["type"] == storage.FrameType {
+				raw, err := json.Marshal(block)
+				if err != nil {
+					return nil, err
+				}
+				var frame storage.FrameBlock
+				if err := json.Unmarshal(raw, &frame); err != nil {
+					return nil, err
+				}
+				frames = append(frames, frame)
+			} else {
+				p.body.Blocks = append(p.body.Blocks, block)
+			}
 		}
-		id := b["id"].(string)
-		if ids[id] {
-			return nil, fmt.Errorf("duplicate block %s in part %s", id, row.ID)
+	}
+	if len(frames) > 0 {
+		if len(p.body.Blocks) != 0 {
+			return nil, fmt.Errorf("mixed frames and complete blocks in group %s", p.row.GroupID)
 		}
-		ids[id] = true
+		raw, err := storage.Unframe(frames)
+		if err != nil {
+			return nil, fmt.Errorf("part group %s: %w", p.row.GroupID, err)
+		}
+		var block map[string]any
+		if err := decodeContentJSON(raw, &block); err != nil {
+			return nil, err
+		}
+		p.body.Blocks = []map[string]any{block}
 	}
 	return p, nil
 }
@@ -184,13 +206,15 @@ func (c *messageContent) loadPart(key string) (*contentPart, error) {
 	if p := c.parts[key]; p != nil {
 		return p, nil
 	}
-	var row model.MessagePart
-	if err := c.tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&row, "id = ? AND message_id = ?", key, c.owner).Error; err != nil {
-		return nil, fmt.Errorf("message %s part %s: %w", c.owner, key, err)
+	var rows []model.MessagePart
+	// Writers already hold the owning Message lock. Readers use their repeatable
+	// snapshot; no FOR UPDATE is needed (or valid in read-only transactions).
+	if err := c.tx.Where("group_id = ? AND message_id = ?", key, c.owner).Find(&rows).Error; err != nil {
+		return nil, err
 	}
-	p, err := decodePart(row)
+	p, err := decodePart(rows...)
 	if err != nil {
-		return nil, fmt.Errorf("message %s part %s: %w", c.owner, key, err)
+		return nil, fmt.Errorf("message %s part group %s: %w", c.owner, key, err)
 	}
 	c.parts[key] = p
 	return p, nil
@@ -222,7 +246,7 @@ func (c *messageContent) materialize(id string) error {
 
 func (c *messageContent) newPart(block map[string]any) *contentPart {
 	id := uuid.V7()
-	p := &contentPart{row: model.MessagePart{ID: id, MessageID: c.owner}, body: partContent{Blocks: []map[string]any{block}}, dirty: true, fresh: true}
+	p := &contentPart{row: model.MessagePart{ID: id, MessageID: c.owner, GroupID: id}, body: partContent{Blocks: []map[string]any{block}}, dirty: true}
 	c.parts[id] = p
 	c.tail = id
 	return p
@@ -250,8 +274,8 @@ func (c *messageContent) place(block map[string]any, maxBytes int) (string, erro
 			if err != nil {
 				return "", err
 			}
-			// A single oversized block occupies its own Part. The limit is a packing
-			// target; splitting inside a block is deliberately not a protocol change.
+			// A large block owns one logical group; persist splits it into bounded
+			// physical frame Parts without changing the block identity.
 			if size <= maxBytes || len(p.body.Blocks) == 1 {
 				return key, nil
 			}
@@ -294,13 +318,13 @@ func (s *Store) packContent(c *messageContent) ([]byte, error) {
 			return nil, err
 		}
 		id := b["id"].(string)
-		if !external && c.originalRefs[id] == "" && count < s.messageInlineBlocks && bytes+len(data) <= s.messageInlineBytes {
+		if !external && c.originalRefs[id] == "" && count < s.messageInlineBlocks && bytes+len(data) <= s.contentMaxBytes {
 			count++
 			bytes += len(data)
 			continue
 		}
 		external = true
-		ref, err := c.place(b, s.messagePartBytes)
+		ref, err := c.place(b, s.contentMaxBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -309,10 +333,31 @@ func (s *Store) packContent(c *messageContent) ([]byte, error) {
 	if external {
 		c.snapshot["version"] = ui.ProtocolVersion
 	}
-	return json.Marshal(c.snapshot)
+	stored, err := json.Marshal(c.snapshot)
+	// The root limit includes metadata and the reference directory, not just
+	// inline block bytes. Externalize remaining inline suffixes when necessary.
+	for i := len(c.snapshot["blocks"].([]any)) - 1; err == nil && len(stored) > s.contentMaxBytes && i >= 0; i-- {
+		blocks := c.snapshot["blocks"].([]any)
+		block := blocks[i].(map[string]any)
+		if _, ref := block["ref"]; ref {
+			continue
+		}
+		ref, placeErr := c.place(block, s.contentMaxBytes)
+		if placeErr != nil {
+			return nil, placeErr
+		}
+		blocks[i] = map[string]any{"id": block["id"], "ref": ref}
+		c.snapshot["version"] = ui.ProtocolVersion
+		stored, err = json.Marshal(c.snapshot)
+	}
+	if err == nil && len(stored) > s.contentMaxBytes {
+		return nil, fmt.Errorf("%w: metadata and block references must fit within %d bytes", ErrContentTooLarge, s.contentMaxBytes)
+	}
+	return stored, err
 }
 
-func (c *messageContent) persist() error {
+// +spec=`Every stored content column is bounded; frame replacement and revision updates commit in the owning Message transaction.`
+func (c *messageContent) persist(maxBytes int) error {
 	for _, p := range c.parts {
 		if !p.dirty {
 			continue
@@ -321,17 +366,49 @@ func (c *messageContent) persist() error {
 		if err != nil {
 			return err
 		}
-		p.row.Content, p.row.SizeBytes = data, len(data)
-		if p.fresh {
-			err = c.tx.Create(&p.row).Error
-		} else {
-			err = c.tx.Model(&p.row).Updates(map[string]any{"content": data, "size_bytes": len(data)}).Error
+		payloads := [][]byte{data}
+		if len(data) > maxBytes {
+			if len(p.body.Blocks) != 1 {
+				return fmt.Errorf("%w: oversized multi-block part group", ErrContentTooLarge)
+			}
+			block, err := json.Marshal(p.body.Blocks[0])
+			if err != nil {
+				return err
+			}
+			// Frame sizes include their JSON envelopes; reserve the Part wrapper.
+			frames, err := storage.Frame(block, maxBytes-len(`{"blocks":[]}`))
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrContentTooLarge, err)
+			}
+			payloads = make([][]byte, 0, len(frames))
+			for _, frame := range frames {
+				body, err := json.Marshal(struct {
+					Blocks []storage.FrameBlock `json:"blocks"`
+				}{Blocks: []storage.FrameBlock{frame}})
+				if err != nil {
+					return err
+				}
+				payloads = append(payloads, body)
+			}
 		}
-		if err != nil {
+		// Replace the complete group atomically; never mix frame revisions.
+		if err := c.tx.Where("message_id = ? AND group_id = ?", c.owner, p.row.GroupID).Delete(&model.MessagePart{}).Error; err != nil {
 			return err
 		}
+		for i, content := range payloads {
+			if len(content) > maxBytes {
+				return ErrContentTooLarge
+			}
+			id := p.row.GroupID
+			if i > 0 {
+				id = uuid.V7()
+			}
+			row := model.MessagePart{ID: id, MessageID: c.owner, GroupID: p.row.GroupID, Content: content, SizeBytes: len(content)}
+			if err := c.tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
 		p.dirty = false
-		p.fresh = false
 	}
 	return nil
 }
@@ -346,6 +423,11 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 	}
 	if len(incoming.originalRefs) != 0 {
 		return fmt.Errorf("%w: complete block bodies are required", ErrInvalidContent)
+	}
+	for _, value := range incoming.snapshot["blocks"].([]any) {
+		if value.(map[string]any)["type"] == storage.FrameType {
+			return fmt.Errorf("%w: storage frames are not logical input blocks", ErrInvalidContent)
+		}
 	}
 	if !create {
 		var previous model.Message
@@ -363,7 +445,7 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 	if err != nil {
 		return err
 	}
-	if len(incoming.parts) == 0 && len(incoming.originalRefs) == 0 {
+	if len(incoming.parts) == 0 && len(incoming.originalRefs) == 0 && len(full) <= s.contentMaxBytes {
 		stored = full
 	}
 	m.Content = stored
@@ -405,12 +487,12 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 			p.dirty = true
 		}
 	}
-	if err := incoming.persist(); err != nil {
+	if err := incoming.persist(s.contentMaxBytes); err != nil {
 		return err
 	}
 	q := tx.Where("message_id = ?", m.ID)
 	if len(keys) > 0 {
-		q = q.Where("id NOT IN ?", keys)
+		q = q.Where("group_id NOT IN ?", keys)
 	}
 	if err := q.Delete(&model.MessagePart{}).Error; err != nil {
 		return err
@@ -431,7 +513,7 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 	return nil
 }
 
-// +spec=`同一次读取的 Message 与 Parts 属于同一数据库快照；引用按 message_id + part_id + block_id 解析`
+// +spec=`同一次读取的 Message 与 Parts 属于同一数据库快照；引用按 message_id + group_id + block_id 解析`
 func hydrateMessages(tx *gorm.DB, messages []model.Message) error {
 	contents := make([]*messageContent, len(messages))
 	owners := []string{}
@@ -452,13 +534,17 @@ func hydrateMessages(tx *gorm.DB, messages []model.Message) error {
 	if err := tx.Where("message_id IN ?", owners).Find(&rows).Error; err != nil {
 		return err
 	}
-	parts := map[string]*contentPart{}
+	groupRows := map[string][]model.MessagePart{}
 	for _, row := range rows {
-		p, err := decodePart(row)
+		groupRows[row.GroupID] = append(groupRows[row.GroupID], row)
+	}
+	parts := map[string]*contentPart{}
+	for groupID, rows := range groupRows {
+		p, err := decodePart(rows...)
 		if err != nil {
 			return err
 		}
-		parts[row.ID] = p
+		parts[groupID] = p
 	}
 	for i, c := range contents {
 		if len(c.originalRefs) == 0 {

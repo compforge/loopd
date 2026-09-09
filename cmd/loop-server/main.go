@@ -41,7 +41,7 @@ func run() error {
 		HarnessRunConcurrency: config.harnessRunConcurrency,
 		Harnesses:             adapters,
 		MessageTTL:            config.messageTTL,
-		Database:              server.DatabaseConfig{MessageInlineBlocks: config.messageInlineBlocks, MessageInlineBytes: config.messageInlineBytes, MessagePartBytes: config.messagePartBytes, Driver: config.databaseDriver, DSN: config.databaseDSN},
+		Database:              server.DatabaseConfig{ContentMaxBytes: config.contentMaxBytes, Driver: config.databaseDriver, DSN: config.databaseDSN},
 		Redis: server.RedisConfig{
 			Address:  config.redisAddress,
 			Username: config.redisUsername,

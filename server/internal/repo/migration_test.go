@@ -47,6 +47,20 @@ func TestOpenMigratesDomainKeys(t *testing.T) {
 	})
 }
 
+func TestMessagePartSchemaRequiresExplicitRecreation(t *testing.T) {
+	s := openTestStore(t)
+	// This database belongs to the test. Production startup only inspects schema.
+	if err := s.db.Migrator().DropColumn(&model.MessagePart{}, "group_id"); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.CurrentSchema(s.db); err == nil || !strings.Contains(err.Error(), "message_parts") {
+		t.Fatalf("accepted incompatible Part schema: %v", err)
+	}
+	if s.db.Migrator().HasColumn(&model.MessagePart{}, "group_id") {
+		t.Fatal("schema check mutated the database")
+	}
+}
+
 func testOpenMigratesDomainKeys(t *testing.T, config Config) {
 	t.Helper()
 	config.OperationTimeout = 10 * time.Second

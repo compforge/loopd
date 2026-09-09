@@ -79,7 +79,7 @@ func TestMessageReadHTTP(t *testing.T) {
 		t.Fatalf("revision conflict=%d", r.StatusCode())
 	}
 
-	// +case=`Read limits reject oversized content explicitly, without truncating persisted data.`
+	// +case=`Accepted large blocks remain readable through logical block and snapshot APIs; physical frames never escape storage.`
 	for _, size := range []int{2 << 20, 9 << 20} {
 		data, err := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{}, "blocks": []any{
 			map[string]any{"id": "large", "type": "text", "content": strings.Repeat("x", size)},
@@ -92,15 +92,11 @@ func TestMessageReadHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		path := "/v1/conversations/other/messages/" + message.ID
-		if r := performJSON(t, engine, "GET", path+"/blocks/large", ""); r.StatusCode() != 413 {
+		if r := performJSON(t, engine, "GET", path+"/blocks/large", ""); r.StatusCode() != 200 {
 			t.Fatalf("large block=%d", r.StatusCode())
 		}
-		expected := 200
-		if size > 8<<20 {
-			expected = 413
-		}
-		if r := performJSON(t, engine, "GET", path+"/content", ""); r.StatusCode() != expected {
-			t.Fatalf("large snapshot=%d want=%d", r.StatusCode(), expected)
+		if r := performJSON(t, engine, "GET", path+"/content", ""); r.StatusCode() != 200 {
+			t.Fatalf("large snapshot=%d", r.StatusCode())
 		}
 		if err := store.DeleteMessage(ctx, message.ID); err != nil {
 			t.Fatal(err)

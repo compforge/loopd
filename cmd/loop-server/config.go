@@ -13,9 +13,7 @@ import (
 type config struct {
 	harnessRunConcurrency int
 	messageTTL            time.Duration
-	messageInlineBlocks   int
-	messageInlineBytes    int
-	messagePartBytes      int
+	contentMaxBytes       int
 	address               string
 	databaseDriver        string
 	databaseDSN           string
@@ -61,6 +59,7 @@ func loadConfig() (config, error) {
 	value := config{
 		harnessRunConcurrency: server.DefaultHarnessRunConcurrency,
 		messageTTL:            server.DefaultMessageTTL,
+		contentMaxBytes:       server.DefaultContentMaxBytes,
 		address:               envOr("SERVER_ADDRESS", ":8080"),
 		databaseDriver:        databaseDriver,
 		databaseDSN:           databaseDSN,
@@ -95,9 +94,7 @@ func loadConfig() (config, error) {
 		target *int
 	}{
 		{"HARNESS_RUN_CONCURRENCY", &value.harnessRunConcurrency},
-		{"MESSAGE_INLINE_BLOCKS", &value.messageInlineBlocks},
-		{"MESSAGE_INLINE_BYTES", &value.messageInlineBytes},
-		{"MESSAGE_PART_BYTES", &value.messagePartBytes},
+		{"CONTENT_MAX_BYTES", &value.contentMaxBytes},
 	} {
 		if raw := os.Getenv(item.name); raw != "" {
 			n, err := strconv.Atoi(raw)
@@ -106,6 +103,9 @@ func loadConfig() (config, error) {
 			}
 			*item.target = n
 		}
+	}
+	if value.contentMaxBytes > server.DefaultContentMaxBytes {
+		return config{}, fmt.Errorf("CONTENT_MAX_BYTES must not exceed %d", server.DefaultContentMaxBytes)
 	}
 	return value, nil
 }
