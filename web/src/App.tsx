@@ -170,7 +170,7 @@ export function App() {
     // or creates a workspace. The composer choice is not the detail selection.
     setSelectedMessageID(undefined);
     setDetailSelection({ parentID: conversationID, organizer: detailOrganizer({
-      kind: "user", key: "web-user", target_kind: selectedActor.kind, target_key: selectedActor.key,
+      source_kind: "user", source_key: "web-user", target_kind: selectedActor.kind, target_key: selectedActor.key,
     }) });
     setMessages((current) => [
       ...current,
@@ -179,8 +179,8 @@ export function App() {
         status: "completed",
         conversation_id: conversationID,
         task_id: "",
-        kind: ActorKind.User,
-        key: "web-user",
+        source_kind: ActorKind.User,
+        source_key: "web-user",
         target_kind: selectedActor.kind,
         target_key: selectedActor.key,
         content: textModel(text),
@@ -258,7 +258,7 @@ export function App() {
             const active = selectedMessageID === message.id;
             return (
               <article
-                className={`message ${isOperatorKind(message.kind) ? ActorKind.Operator : message.kind} ${active ? "selected" : ""}`}
+                className={`message ${isOperatorKind(message.source_kind) ? ActorKind.Operator : message.source_kind} ${active ? "selected" : ""}`}
                 key={message.id}
                 id={`message-${message.id}`}
                 onClick={() => {
@@ -267,7 +267,7 @@ export function App() {
                 }}
               >
                 <div className="message-author">
-                  <span title={`${message.kind} / ${message.key}`}>{message.kind === ActorKind.User ? "YOU" : operatorRole(message.kind) ? operatorRole(message.kind)!.toUpperCase() : message.key.toUpperCase()}</span>
+                  <span title={`${message.source_kind} / ${message.source_key}`}>{message.source_kind === ActorKind.User ? "YOU" : operatorRole(message.source_kind) ? operatorRole(message.source_kind)!.toUpperCase() : message.source_key.toUpperCase()}</span>
                   {message.status !== "completed" && <span className="run-badge">{messageStatusLabel(message.status)}</span>}
                 </div>
                 <div className="bubble">

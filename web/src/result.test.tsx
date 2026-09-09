@@ -4,7 +4,7 @@ import { MessageBody } from "./MessageBody";
 import type { Message } from "./api";
 
 function message(blocks: unknown[]): Message {
-  return { id: "m", kind: "harness", key: "demo", status: "completed", conversation_id: "c", task_id: "", created_at: "", updated_at: "", content: { version: "1.1", biz: "chat", meta: {}, blocks } } as Message;
+  return { id: "m", source_kind: "harness", source_key: "demo", status: "completed", conversation_id: "c", task_id: "", created_at: "", updated_at: "", content: { version: "1.1", biz: "chat", meta: {}, blocks } } as Message;
 }
 it("renders structured result values including JSON strings without losing their format", () => {
   for (const content of [{ verdict: "passed" }, [1, 2], "quoted", null]) {

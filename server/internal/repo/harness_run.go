@@ -70,7 +70,7 @@ func (s *Store) CreateHarnessRun(ctx context.Context, request contract.HarnessRu
 			}
 		}
 		content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": request.Meta, "blocks": []any{}})
-		m := model.Message{ID: run.MessageID, ConversationID: run.ConversationID, Kind: request.Actor.Kind, ActorKey: request.Actor.Key, TargetKind: request.Recipient.Kind, TargetKey: request.Recipient.Key, DispatchPending: request.Recipient.Kind != contract.ActorKindUser, Revision: 1, Status: string(contract.MessageStatusStreaming), Content: content}
+		m := model.Message{ID: run.MessageID, ConversationID: run.ConversationID, SourceKind: request.Actor.Kind, SourceKey: request.Actor.Key, TargetKind: request.Recipient.Kind, TargetKey: request.Recipient.Key, DispatchPending: request.Recipient.Kind != contract.ActorKindUser, Revision: 1, Status: string(contract.MessageStatusStreaming), Content: content}
 		if err := s.saveMessage(tx, &m, true); err != nil {
 			return err
 		}

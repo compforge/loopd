@@ -151,7 +151,7 @@ func (runner convStreamRunner) Listen(_ context.Context, convID string, deliver 
 	if convID != runner.convID {
 		runner.t.Fatalf("stream conv = %q", convID)
 	}
-	m := contract.Message{ID: "message", ConversationID: convID, Status: contract.MessageStatusStreaming, Kind: contract.ActorKindOperator, Key: "router", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
+	m := contract.Message{ID: "message", ConversationID: convID, Status: contract.MessageStatusStreaming, SourceKind: contract.ActorKindOperator, SourceKey: "router", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}
 	if err := deliver(component.Event{MessageID: m.ID, Message: &m, Data: json.RawMessage(`{"stream_id":"message","op":"start","seq":1,"model":{"version":"1.1","biz":"chat","meta":{},"blocks":[]}}`)}); err != nil {
 		return err
 	}

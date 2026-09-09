@@ -37,7 +37,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	}
 	taskID, _ := performChat(t, server, conv.ID, `{"user_key":"forged","target":{"kind":"operator","key":"router"},"content":{"version":"1.0","biz":"chat","meta":{},"blocks":[]}}`)
 	task, err := store.GetDeliveryInput(ctx, taskID)
-	if err != nil || task.ActorKey != "alice" {
+	if err != nil || task.SourceKey != "alice" {
 		t.Fatalf("trusted principal=%+v %v", task, err)
 	}
 	request := contract.HumanRequest{ConversationID: conv.ID, Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "router"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: task.ID, Type: "ask", EffectKey: "scope", Title: "Scope", Prompt: "Choose", Timeout: time.Minute, AllowOther: true}
@@ -140,7 +140,7 @@ func TestHumanHTTPFlowAndTrustedResponder(t *testing.T) {
 	if err := json.Unmarshal(independent.Body(), &question); err != nil {
 		t.Fatal(err)
 	}
-	if question.Message.Kind != request.Actor.Kind || question.Message.Key != "run-uid" {
+	if question.Message.SourceKind != request.Actor.Kind || question.Message.SourceKey != "run-uid" {
 		t.Fatalf("custom actor lost: %+v", question.Message)
 	}
 	if question.Message.TaskID != "" {

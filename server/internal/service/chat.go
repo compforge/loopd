@@ -46,7 +46,7 @@ func (service *ChatService) Create(
 	taskID := uuid.V7()
 	input := model.Message{
 		ID: uuid.V7(), ConversationID: conversationID, TaskID: taskID,
-		Kind: contract.ActorKindUser, ActorKey: userKey, Content: content,
+		SourceKind: contract.ActorKindUser, SourceKey: userKey, Content: content,
 		TargetKind: target.Kind, TargetKey: target.Key, DispatchPending: true,
 	}
 	message, err := service.repo.CreateChatInput(ctx, input)

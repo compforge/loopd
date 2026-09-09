@@ -27,7 +27,7 @@ func humanStore(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	content := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	if _, err := s.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: content}); err != nil {
+	if _, err := s.CreateChatInput(ctx, model.Message{ID: "input", ConversationID: "conv", TaskID: "task", SourceKind: "user", SourceKey: "alice", Content: content}); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -158,7 +158,7 @@ func TestHumanParallelReplyAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ask.Message.Key != "operator" || ask.Message.ReplyToID != "input" {
+	if ask.Message.SourceKey != "operator" || ask.Message.ReplyToID != "input" {
 		t.Fatalf("message=%+v", ask.Message)
 	}
 	if ask.Message.Status != contract.MessageStatusCompleted || ask.Status != contract.HumanPending || confirm.Message.Status != contract.MessageStatusCompleted {

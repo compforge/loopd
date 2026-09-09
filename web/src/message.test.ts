@@ -3,7 +3,7 @@ import { decodeMessageFrame, type Message } from "./api";
 import { applyMessageEvent } from "./message";
 
 const message = (id: string): Message => ({
- status:"streaming", id, task_id:"task", conversation_id:"work",kind:"harness",key:"same-actor",
+ status:"streaming", id, task_id:"task", conversation_id:"work",source_kind:"harness",source_key:"same-actor",
  created_at:"",updated_at:"",revision:1,
  content:{version:"1.0",biz:"chat",meta:{},blocks:[]},
 });
@@ -36,7 +36,7 @@ describe("message-addressed delivery",()=>{
   const delta = frame(a, {op: "set", seq: 2, block: {id: "text", type: "text", content: "partial"}});
   expect(delta.message).toBeUndefined();
   messages = applyMessageEvent(messages, delta);
-  expect(messages[0]).toMatchObject({kind: a.kind, key: a.key, reply_to_id: "question", target_key: "alice", status: "streaming", revision: 2});
+  expect(messages[0]).toMatchObject({source_kind: a.source_kind, source_key: a.source_key, reply_to_id: "question", target_key: "alice", status: "streaming", revision: 2});
   const repaired = {...a, revision: 5, content: {...a.content, blocks: [{id: "text", type: "text", content: "recovered"}]}};
   messages = applyMessageEvent(messages, frame(repaired, {op: "start", seq: 5, model: repaired.content}));
   expect(applyMessageEvent(messages, delta)).toBe(messages);

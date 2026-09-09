@@ -29,7 +29,7 @@ func TestChatCreatesOnlyAddressedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !uuidV7Pattern.MatchString(input.ID) || !uuidV7Pattern.MatchString(input.TaskID) ||
-		input.Kind != contract.ActorKindUser || input.Key != "alice" || input.TargetKind != contract.ActorKindOperator || input.TargetKey != "router" {
+		input.SourceKind != contract.ActorKindUser || input.SourceKey != "alice" || input.TargetKind != contract.ActorKindOperator || input.TargetKey != "router" {
 		t.Fatalf("input = %+v", input)
 	}
 	history, err := store.ListMessages(ctx, conversation.ID, "", 100)

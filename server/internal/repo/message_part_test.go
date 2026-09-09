@@ -233,7 +233,7 @@ func TestMessagePartsMixedStorageAndReadPaths(t *testing.T) {
 			t.Fatal("message absent from read path")
 		}
 	}
-	input, err := s.CreateChatInput(ctx, model.Message{ID: "input-parts", ConversationID: "conv", TaskID: "parts-task", Kind: "user", ActorKey: "alice", Content: blocksContent(t, 4)})
+	input, err := s.CreateChatInput(ctx, model.Message{ID: "input-parts", ConversationID: "conv", TaskID: "parts-task", SourceKind: "user", SourceKey: "alice", Content: blocksContent(t, 4)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestMessagePartsRejectCrossMessageAndMissingReferences(t *testing.T) {
 	s := partsStore(t)
 	ctx := context.Background()
 	m := speech(t, s, 3)
-	other, err := s.CreateMessage(ctx, model.Message{ID: "other", ConversationID: "conv", Kind: "operator", ActorKey: "other", Content: blocksContent(t, 3)})
+	other, err := s.CreateMessage(ctx, model.Message{ID: "other", ConversationID: "conv", SourceKind: "operator", SourceKey: "other", Content: blocksContent(t, 3)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestMessagePartsCreateFailureAndMissingBlock(t *testing.T) {
 	if err := s.db.Exec("CREATE TRIGGER reject_part BEFORE INSERT ON message_parts BEGIN SELECT RAISE(ABORT, 'injected part failure'); END").Error; err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CreateMessage(ctx, model.Message{ID: "failed", ConversationID: "conv", Kind: "operator", ActorKey: "writer", Content: blocksContent(t, 3)})
+	_, err := s.CreateMessage(ctx, model.Message{ID: "failed", ConversationID: "conv", SourceKind: "operator", SourceKey: "writer", Content: blocksContent(t, 3)})
 	if err == nil {
 		t.Fatal("expected part creation failure")
 	}
@@ -531,7 +531,7 @@ func TestMessagePartsPreserveNumbersWhenMovingContent(t *testing.T) {
 	s.messageInlineBytes = 1
 	ctx := context.Background()
 	content := []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"b","type":"tool","result":{"integer":9007199254740993,"decimal":0.1234567890123456789012345}}]}`)
-	m, err := s.CreateMessage(ctx, model.Message{ID: "numbers", ConversationID: "conv", Kind: "operator", ActorKey: "writer", Content: content})
+	m, err := s.CreateMessage(ctx, model.Message{ID: "numbers", ConversationID: "conv", SourceKind: "operator", SourceKey: "writer", Content: content})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,8 +19,6 @@ func DomainKeys(db *gorm.DB) error {
 		oldColumn string
 		column    string
 	}{
-		{"messages", &model.Message{}, "key", "actor_key"},
-		{"messages", &model.Message{}, "sender_key", "actor_key"},
 		{"operators", &model.Operator{}, "key", "operator_key"},
 		{"harnesses", &model.Harness{}, "key", "harness_key"},
 	} {

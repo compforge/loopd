@@ -141,10 +141,10 @@ export function DetailPanel({ selection, onReply }: {
 }
 
 export function DetailMessage({ message, index, onReply }: { message: Message; index: number; onReply?(result: HumanResult): void }) {
-  const style = message.kind !== ActorKind.User ? { "--harness-color": traceColor(JSON.stringify([message.kind, message.key])) } as CSSProperties : undefined;
+  const style = message.source_kind !== ActorKind.User ? { "--harness-color": traceColor(JSON.stringify([message.source_kind, message.source_key])) } as CSSProperties : undefined;
   let model: MessageContent | undefined;
   try { model = parseMessageContent(message.content); } catch { /* Invalid persisted model is shown below. */ }
-  const actorName = typeof model?.meta.actor_display_name === "string" ? model.meta.actor_display_name : message.kind.split("/").at(-1)!;
+  const actorName = typeof model?.meta.actor_display_name === "string" ? model.meta.actor_display_name : message.source_kind.split("/").at(-1)!;
   const explicitTitle = model?.meta.title;
   const title = typeof explicitTitle === "string" && explicitTitle ? explicitTitle
     : model?.blocks[0] ? traceLabel(model.blocks[0], index) : `步骤 ${index + 1}`;
@@ -152,7 +152,7 @@ export function DetailMessage({ message, index, onReply }: { message: Message; i
     <article className={`detail-card${style ? " harness-trace" : ""}`} style={style} id={`message-${message.id}`} data-message-id={message.id}>
       <div className="timeline-node">{index + 1}</div>
       <div className="detail-card-head">
-        <span className="block-kind" title={`${message.kind} / ${message.key}`}>{actorName.toUpperCase()}</span>
+        <span className="block-kind" title={`${message.source_kind} / ${message.source_key}`}>{actorName.toUpperCase()}</span>
         {message.status !== "completed" && <span className="quiet">{messageStatusLabel(message.status)}</span>}
       </div>
       <div className="detail-card-title">{title}</div>
@@ -174,11 +174,11 @@ function activityTime(value: string): string {
 
 // Operator role messages share the owning Operator's workspace. Run keys remain
 // author identities and must not create a separate detail conversation.
-export function detailOrganizer(message?: Pick<Message, "kind" | "key" | "target_kind" | "target_key">): DetailSelection["organizer"] {
+export function detailOrganizer(message?: Pick<Message, "source_kind" | "source_key" | "target_kind" | "target_key">): DetailSelection["organizer"] {
   if (!message) return undefined;
   // A directed message opens its recipient's workspace; replies to a user and
   // broadcasts from an Operator open the author's workspace instead.
-  return operatorActor(message.target_kind, message.target_key) ?? operatorActor(message.kind, message.key);
+  return operatorActor(message.target_kind, message.target_key) ?? operatorActor(message.source_kind, message.source_key);
 }
 
 function operatorActor(kind?: ActorKind, key?: string): DetailSelection["organizer"] {

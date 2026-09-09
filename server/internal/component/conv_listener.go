@@ -299,5 +299,5 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 }
 
 func visibleMessage(m model.Message) contract.Message {
-	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, SourceKind: m.SourceKind, SourceKey: m.SourceKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }

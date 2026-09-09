@@ -112,8 +112,8 @@ func (service *MessageService) CreateMessage(
 		ID:             uuid.V7(),
 		ConversationID: conversationID,
 		TaskID:         strings.TrimSpace(taskID),
-		Kind:           kind,
-		ActorKey:       strings.TrimSpace(key),
+		SourceKind:     kind,
+		SourceKey:      strings.TrimSpace(key),
 		Content:        content,
 	})
 	if err == nil {
@@ -121,8 +121,8 @@ func (service *MessageService) CreateMessage(
 			"conversation_id", conversationID,
 			"message_id", message.ID,
 			"task_id", message.TaskID,
-			"kind", message.Kind,
-			"actor_key", message.ActorKey,
+			"source_kind", message.SourceKind,
+			"source_key", message.SourceKey,
 		)
 	}
 	return messageFromModel(message), err
@@ -152,7 +152,7 @@ func messageFromModel(value model.Message) contract.Message {
 		TargetKind: value.TargetKind, TargetKey: value.TargetKey,
 		ReplyToID: value.ReplyToID, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
-		Kind: value.Kind, Key: value.ActorKey, Content: json.RawMessage(value.Content),
+		SourceKind: value.SourceKind, SourceKey: value.SourceKey, Content: json.RawMessage(value.Content),
 		Timestamped: contract.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
 	}
 }

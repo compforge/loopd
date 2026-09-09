@@ -18,7 +18,7 @@ func (store *Store) ListInbox(ctx context.Context, conversationID string, kind c
 		return tx.
 			Where("conversation_id = ? AND id > ?", conversationID, after).
 			Where("(target_kind = ? AND target_key = ?) OR (target_kind = ? AND target_key = ?)", kind, key, "", "").
-			Where("NOT (kind = ? AND actor_key = ?)", kind, key).
+			Where("NOT (source_kind = ? AND source_key = ?)", kind, key).
 			Order("id ASC").Limit(limit)
 	})
 	if err != nil {

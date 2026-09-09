@@ -20,7 +20,7 @@ func TestInboxReturnsEveryStatus(t *testing.T) {
 	}
 	statuses := []contract.MessageStatus{contract.MessageStatusStreaming, contract.MessageStatusCompleted, contract.MessageStatusFailed, contract.MessageStatusCancelled, contract.MessageStatusExpired}
 	for _, status := range statuses {
-		_, err := s.CreateMessage(ctx, model.Message{ID: string(status), ConversationID: "conv", Kind: "operator", ActorKey: "writer", Status: string(status), Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
+		_, err := s.CreateMessage(ctx, model.Message{ID: string(status), ConversationID: "conv", SourceKind: "operator", SourceKey: "writer", Status: string(status), Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -36,8 +36,8 @@ type messageBeforeRecipients struct {
 	ID             string `gorm:"primaryKey;size:36"`
 	ConversationID string `gorm:"size:36;not null"`
 	TaskID         string `gorm:"size:36;not null"`
-	Kind           string `gorm:"size:16;not null"`
-	ActorKey       string `gorm:"size:128;not null"`
+	SourceKind     string `gorm:"size:16;not null"`
+	SourceKey      string `gorm:"size:128;not null"`
 	Content        []byte `gorm:"type:json;not null"`
 }
 
@@ -59,7 +59,7 @@ func TestRecipientMigrationDoesNotBroadcastHistoricalMessages(t *testing.T) {
 	}
 	content := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 	if err := old.Create(&messageBeforeRecipients{
-		ID: "001", ConversationID: "conv", TaskID: "old-chat", Kind: "user", ActorKey: "alice", Content: content,
+		ID: "001", ConversationID: "conv", TaskID: "old-chat", SourceKind: "user", SourceKey: "alice", Content: content,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestRecipientMigrationDoesNotBroadcastHistoricalMessages(t *testing.T) {
 	}
 	// New empty recipients are intentionally written as empty strings, not NULL.
 	if _, err := store.CreateMessage(ctx, model.Message{
-		ID: "002", ConversationID: "conv", TaskID: "new-chat", Kind: "user", ActorKey: "alice", Content: content,
+		ID: "002", ConversationID: "conv", TaskID: "new-chat", SourceKind: "user", SourceKey: "alice", Content: content,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ func TestHumanMaintenanceRecoversNotifications(t *testing.T) {
 		t.Fatal(err)
 	}
 	human := NewHumanService(store, nil)
-	q, err := human.Create(ctx, contract.HumanRequest{ConversationID: message.ConversationID, Actor: contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: contract.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
+	q, err := human.Create(ctx, contract.HumanRequest{ConversationID: message.ConversationID, Actor: contract.ActorRef{Kind: message.TargetKind, Key: message.TargetKey}, Target: contract.ActorRef{Kind: message.SourceKind, Key: message.SourceKey}, ReplyToID: message.ID, EffectKey: "ask", Type: "ask", Title: "Question", Prompt: "Reply", Timeout: time.Nanosecond, AllowOther: true})
 	if err != nil {
 		t.Fatal(err)
 	}

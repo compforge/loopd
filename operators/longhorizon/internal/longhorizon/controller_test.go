@@ -60,7 +60,7 @@ func newFixture(t *testing.T, history ...contract.Message) *fixture {
 	for _, m := range history {
 		f.messages[m.ID] = m
 	}
-	f.messages["input"] = contract.Message{ID: "input", ConversationID: "conv", TaskID: "delivery", Kind: contract.ActorKindUser, Key: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Create a correct artifact."}]}`)}
+	f.messages["input"] = contract.Message{ID: "input", ConversationID: "conv", TaskID: "delivery", SourceKind: contract.ActorKindUser, SourceKey: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Create a correct artifact."}]}`)}
 	f.pending = []contract.Message{f.messages["input"]}
 	scheme := runtime.NewScheme()
 	if err := lh.AddToScheme(scheme); err != nil {
@@ -237,7 +237,7 @@ func (f *fixture) serve(w http.ResponseWriter, r *http.Request) {
 			if in.Status == contract.MessageStatusStreaming {
 				status = contract.MessageStatusStreaming
 			}
-			f.messages[id] = contract.Message{Status: status, ID: id, ConversationID: conv, Kind: in.Actor.Kind, Key: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Revision: 1, Content: content}
+			f.messages[id] = contract.Message{Status: status, ID: id, ConversationID: conv, SourceKind: in.Actor.Kind, SourceKey: in.Actor.Key, TargetKind: in.Target.Kind, TargetKey: in.Target.Key, ReplyToID: in.ReplyToID, Revision: 1, Content: content}
 		}
 		write(f.messages[id])
 	case strings.HasPrefix(r.URL.Path, "/v1/messages/") && strings.HasSuffix(r.URL.Path, "/events"):
@@ -369,9 +369,9 @@ func TestThreeRoleLoop(t *testing.T) {
 	}
 	for _, id := range f.outputs {
 		m := f.messages[id]
-		if (m.Kind == "operator/longhorizon/harness" && !strings.HasPrefix(m.Key, string(run.UID)+"/")) ||
-			(m.Kind != "operator/longhorizon/harness" && m.Key != string(run.UID)) ||
-			!strings.HasPrefix(string(m.Kind), "operator/longhorizon/") {
+		if (m.SourceKind == "operator/longhorizon/harness" && !strings.HasPrefix(m.SourceKey, string(run.UID)+"/")) ||
+			(m.SourceKind != "operator/longhorizon/harness" && m.SourceKey != string(run.UID)) ||
+			!strings.HasPrefix(string(m.SourceKind), "operator/longhorizon/") {
 			t.Fatalf("author=%+v", m)
 		}
 		if _, err := reportFrom(m); err != nil {
@@ -518,10 +518,10 @@ func TestCompletionRequiresCurrentCleanAudit(t *testing.T) {
 }
 
 func TestNewRunReferencesOnlyImmutablePriorContext(t *testing.T) {
-	prior := contract.Message{ID: "earlier", ConversationID: "previous", Kind: contract.ActorKindUser, Key: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Artifact must include a license."}]}`)}
+	prior := contract.Message{ID: "earlier", ConversationID: "previous", SourceKind: contract.ActorKindUser, SourceKey: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Artifact must include a license."}]}`)}
 	active := prior
 	active.ID = "still-running"
-	active.Kind = contract.ActorKindOperator
+	active.SourceKind = contract.ActorKindOperator
 	f := newFixture(t, prior, active)
 	run := f.run()
 	if len(run.Spec.ContextMessages) != 1 || run.Spec.ContextMessages[0].MessageID != prior.ID {
@@ -553,8 +553,8 @@ func TestHumanGuidanceAccumulatesAndInvalidatesAudit(t *testing.T) {
 }
 
 func TestHistoricalHumanReplyUsesQuestionSnapshot(t *testing.T) {
-	question := contract.Message{ID: "a-question", ConversationID: "previous", Kind: ActorManager, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}]}`)}
-	reply := contract.Message{ID: "a-reply", ConversationID: "previous", Kind: contract.ActorKindUser, ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a","question":{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}}]}`)}
+	question := contract.Message{ID: "a-question", ConversationID: "previous", SourceKind: ActorManager, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}]}`)}
+	reply := contract.Message{ID: "a-reply", ConversationID: "previous", SourceKind: contract.ActorKindUser, ReplyToID: question.ID, Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"human","type":"human_reply","outcome":"success","value":"a","question":{"id":"human","type":"ask","prompt":"Which language?","choices":[{"value":"a","label":"Go"}]}}]}`)}
 	f := newFixture(t, question, reply)
 	history, err := f.c.history(context.Background(), f.run())
 	if err != nil || !strings.Contains(history, "Which language?") || !strings.Contains(history, "a: Go") || !strings.Contains(history, "success a") {
@@ -577,7 +577,7 @@ func TestContinuousInputCheckpointAndMessageEndIndependence(t *testing.T) {
 	if err := f.c.Client.Status().Update(context.Background(), run); err != nil {
 		t.Fatal(err)
 	}
-	extra := contract.Message{ID: "more-input", ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Also include a license."}]}`)}
+	extra := contract.Message{ID: "more-input", ConversationID: "conv", SourceKind: contract.ActorKindUser, SourceKey: "alice", Content: json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Also include a license."}]}`)}
 	f.mu.Lock()
 	f.pending = append(f.pending, extra)
 	f.messages[extra.ID] = extra
@@ -691,9 +691,9 @@ func TestRunDeadlineAndRetention(t *testing.T) {
 func TestHistoryPaginationBoundaries(t *testing.T) {
 	var history []contract.Message
 	for i := 0; i < 225; i++ {
-		history = append(history, contract.Message{ID: fmt.Sprintf("a%03d", i), ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice"})
+		history = append(history, contract.Message{ID: fmt.Sprintf("a%03d", i), ConversationID: "conv", SourceKind: contract.ActorKindUser, SourceKey: "alice"})
 	}
-	history = append(history, contract.Message{ID: "z-later", ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice"})
+	history = append(history, contract.Message{ID: "z-later", ConversationID: "conv", SourceKind: contract.ActorKindUser, SourceKey: "alice"})
 	f := newFixture(t, history...)
 	refs := f.run().Spec.ContextMessages
 	if len(refs) != 20 || refs[0].MessageID != "a205" || refs[19].MessageID != "a224" {

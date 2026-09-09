@@ -40,7 +40,7 @@ func TestInboxIncludesStreamingHarnessMessage(t *testing.T) {
 	s, run, token := runFixture(t)
 	ctx := context.Background()
 	if err := s.db.Model(&model.Message{}).Where("id = ?", run.MessageID).
-		Updates(map[string]any{"kind": "operator/op/harness", "actor_key": "worker"}).Error; err != nil {
+		Updates(map[string]any{"source_kind": "operator/op/harness", "source_key": "worker"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	later, err := s.Speak(ctx, "conv", contract.SpeakRequest{Key: "later", Actor: contract.ActorRef{Kind: "operator", Key: "other"}, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})

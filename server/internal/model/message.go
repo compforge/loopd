@@ -21,8 +21,8 @@ type Message struct {
 	ID             string             `gorm:"primaryKey;size:36"`
 	ConversationID string             `gorm:"size:36;not null;index:idx_message_conversation"`
 	TaskID         string             `gorm:"size:36;not null;index:idx_message_task"`
-	Kind           contract.ActorKind `gorm:"size:128;not null"`
-	ActorKey       string             `gorm:"size:128;not null"`
+	SourceKind     contract.ActorKind `gorm:"size:128;not null"`
+	SourceKey      string             `gorm:"size:128;not null"`
 	Content        []byte             `gorm:"type:json;not null"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time `gorm:"index:idx_message_expiry,priority:2"`

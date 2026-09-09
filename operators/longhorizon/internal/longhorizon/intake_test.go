@@ -14,7 +14,7 @@ func queueFollowup(f *fixture) contract.Message {
 	f.t.Helper()
 	// A different topic deliberately still belongs to the active Run. The fake
 	// message IDs are ordered strings; production uses UUIDv7.
-	m := contract.Message{ID: "z-followup", ConversationID: "conv", Kind: contract.ActorKindUser, Key: "alice", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Explain the history of Beijing."}]}`)}
+	m := contract.Message{ID: "z-followup", ConversationID: "conv", SourceKind: contract.ActorKindUser, SourceKey: "alice", Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"q","type":"text","content":"Explain the history of Beijing."}]}`)}
 	f.mu.Lock()
 	f.pending = append(f.pending, m)
 	f.messages[m.ID] = m
