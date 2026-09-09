@@ -35,7 +35,7 @@ loopd/
 │   ├── infra/              # HTTP/SSE 传输、超时与协议错误转换
 │   └── model/              # 共用请求、消息接口与错误类型；不执行 I/O
 ├── server/                 # 协作平台、Harness Engine 与 HTTP 服务；细节见 server/AGENTS.md
-└── web/                    # React Web；主对话与 Operator 执行详情的三栏协作界面
+└── web/                    # React Web；主对话与 Operator 执行详情，模块边界见 web/AGENTS.md
 ```
 
 ## 关键约定
@@ -63,3 +63,5 @@ loopd/
 - `deploy/docker/README.md` — loop-server、Router 与 Web 镜像构建入口
 - `deploy/k8s/README.md` — Helm Quick Start、组件拓扑与配置边界
 - `README.md` — 产品定位与使用入口
+
+- `web/AGENTS.md` — Web 模块组织、会话数据生命周期与验证入口
