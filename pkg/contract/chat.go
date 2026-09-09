@@ -33,7 +33,6 @@ type Message struct {
 	TargetKind     ActorKind       `json:"target_kind,omitempty"`
 	TargetKey      string          `json:"target_key,omitempty"`
 	ReplyToID      string          `json:"reply_to_id,omitempty"`
-	Purpose        string          `json:"purpose,omitempty"`
 	Revision       uint64          `json:"revision,omitempty"`
 	ID             string          `json:"id"`
 	ConversationID string          `json:"conversation_id"`

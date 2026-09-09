@@ -15,14 +15,14 @@ export interface HumanCard {
 export function humanCard(message: Message): HumanCard | undefined {
   const block = message.content.blocks[0];
   if (!block) return undefined;
-  if (message.purpose === "human_request" && (block.type === "ask" || block.type === "confirm")) {
+  if (block.type === "ask" || block.type === "confirm") {
     const question = block as unknown as HumanQuestion;
     return {
       type: question.type, mode: "request", question_id: message.id, question,
       selected_value: question.selected_value, editable: question.status === "pending",
     };
   }
-  if (message.purpose === "human_reply" && block.type === "human_reply" && message.reply_to_id) {
+  if (block.type === "human_reply" && message.reply_to_id) {
     const question = block.question as HumanQuestion | undefined;
     if (!question || (question.type !== "ask" && question.type !== "confirm")) return undefined;
     return {

@@ -199,7 +199,7 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 		return ctrl.Result{}, nil
 	}
 	message := polled.Messages[0]
-	if message.Kind != contract.ActorKindUser || message.Purpose != "input" {
+	if message.Kind != contract.ActorKindUser || message.IsHumanReply() {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
 	history, err := c.priorMessages(ctx, conv.Name, message.ID)
@@ -220,7 +220,7 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 			continue
 		}
 		// Human facts and completed business reports are stable prompt context.
-		if m.Purpose != "input" && m.Purpose != "human_reply" {
+		if m.Kind != contract.ActorKindUser {
 			if _, err := reportFrom(m); err != nil {
 				continue
 			}
@@ -285,19 +285,16 @@ func messageText(m contract.Message) string {
 	return strings.Join(texts, "\n")
 }
 func reportFrom(m contract.Message) (report, error) {
-	if m.Purpose == "harness" {
+	result, err := contract.ExtractResult(m.Content)
+	if err != nil {
+		return report{}, err
+	}
+	if result != nil || m.Status == contract.MessageStatusFailed || m.Status == contract.MessageStatusCancelled || m.Status == contract.MessageStatusExpired {
 		if !m.Ended() {
 			return report{}, errors.New("Harness output is incomplete")
 		}
-		result, err := contract.ExtractResult(m.Content)
-		if err != nil {
-			return report{}, err
-		}
 		if m.Status != contract.MessageStatusCompleted {
 			return report{Error: "Harness execution " + string(m.Status)}, nil
-		}
-		if result == nil {
-			return report{}, errors.New("Harness output has no result")
 		}
 		return report{Text: result.Text()}, nil
 	}
@@ -341,8 +338,9 @@ func (c *Controller) invoke(ctx context.Context, run *lh.Run, round int32, kind 
 	if active, err := c.live(ctx, run.Namespace, run.Spec.Conversation, &ref); err != nil || !active {
 		return report{}, "", "", false, err
 	}
-	author := actor(run, kind)
 	role := strings.TrimPrefix(string(kind), "operator/longhorizon/")
+	// One role Harness keeps its identity across rounds; calls have separate keys.
+	author := contract.ActorRef{Kind: contract.ActorKind(fmt.Sprintf(contract.OperatorHarnessKindFormat, "longhorizon")), Key: string(run.UID) + "/" + role}
 	key := stepKey(run, round, role)
 	call, err := c.Loop.Harness.Prompt(ctx, loopruntime.Prompt{ConversationID: run.Spec.WorkspaceID, IdempotencyKey: key, EffectKey: fmt.Sprintf("round/%d/%s", round, role), Actor: &author, Recipient: recipient(run), Target: target, Text: prompt, Timeout: timeout, Meta: map[string]any{"title": fmt.Sprintf("Round %d · %s", round, role), "actor_display_name": role}})
 	if err != nil {

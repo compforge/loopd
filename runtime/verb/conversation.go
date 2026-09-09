@@ -15,6 +15,9 @@ func NewConv(s service.Conv) Conv { return Conv{service: s} }
 
 // Poll records receipt without committing consumption. While working, pass the last
 // successful Position as After; on recovery omit After to replay uncommitted inputs.
+// +spec=`Poll returns messages in every status, including streaming. Processing partial content and deciding when to Commit belong to the Operator.`
+// Position tracks IDs, not revisions. Retain the Message ID and use Read (or a
+// Harness Call) to follow later content after advancing past a streaming message.
 func (c Conv) Poll(ctx context.Context, id string, request contract.PollRequest) (contract.PollResult, error) {
 	return c.service.Poll(ctx, id, request)
 }

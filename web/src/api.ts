@@ -21,7 +21,6 @@ export interface Message {
   target_kind?: ActorKind;
   target_key?: string;
   reply_to_id?: string;
-  purpose?: "harness" | "input" | "output" | "human_request" | "human_reply";
   revision?: number;
   conversation_id: string;
   task_id: string;

@@ -10,7 +10,7 @@ import (
 func CurrentSchema(db *gorm.DB) error {
 	for table, obsolete := range map[string][]string{
 		"conversations": {"parent_message_id", "task_id", "parent_conversation_id"},
-		"messages":      {"reply_to_message_id"},
+		"messages":      {"reply_to_message_id", "purpose"},
 	} {
 		if !db.Migrator().HasTable(table) {
 			continue

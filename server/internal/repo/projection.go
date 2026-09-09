@@ -46,8 +46,10 @@ func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, sta
 	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if m.Purpose == "harness" && !harnessWrite {
-		return ErrConflict
+	if !harnessWrite {
+		if err := requireUnownedMessage(tx, m.ID); err != nil {
+			return err
+		}
 	}
 	c, err := openMessageContent(tx, m)
 	if err != nil {
@@ -55,6 +57,10 @@ func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, sta
 	}
 	snapshot := c.snapshot
 	meta, _ := snapshot["meta"].(map[string]any)
+	// Typed interactions are updated by Human actions, not arbitrary events.
+	if !harnessWrite && meta["human"] != nil {
+		return ErrConflict
+	}
 	output, _ := meta["output"].(map[string]any)
 	if event.Seq <= m.Revision {
 		if event.Seq == m.Revision && output["last_event"] == fingerprint {

@@ -14,7 +14,7 @@ type activeRepository struct{ ConvMessageRepository }
 
 func (activeRepository) LatestMessageID(context.Context, string) (string, error) { return "a", nil }
 func (activeRepository) ListStreamMessages(context.Context, string, string, string, int) ([]model.Message, error) {
-	return []model.Message{{ID: "a", ConversationID: "conv", Purpose: "output", Status: "streaming", Revision: 1,
+	return []model.Message{{ID: "a", ConversationID: "conv", Status: "streaming", Revision: 1,
 		Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)}}, nil
 }
 

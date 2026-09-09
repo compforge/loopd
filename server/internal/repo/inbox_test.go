@@ -5,10 +5,31 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+// +case=`Message status does not filter Poll; the Operator owns readiness and Commit decisions.`
+func TestInboxReturnsEveryStatus(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	if _, err := s.CreateConversation(ctx, model.Conversation{ID: "conv"}); err != nil {
+		t.Fatal(err)
+	}
+	statuses := []contract.MessageStatus{contract.MessageStatusStreaming, contract.MessageStatusCompleted, contract.MessageStatusFailed, contract.MessageStatusCancelled, contract.MessageStatusExpired}
+	for _, status := range statuses {
+		_, err := s.CreateMessage(ctx, model.Message{ID: string(status), ConversationID: "conv", Kind: "operator", ActorKey: "writer", Status: string(status), Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.ListInbox(ctx, "conv", "operator", "reader", "", 100)
+	if err != nil || len(rows) != len(statuses) {
+		t.Fatalf("all-status inbox=%+v err=%v", rows, err)
+	}
+}
 
 // All schema and data changes are confined to a test-owned temporary database.
 type messageBeforeRecipients struct {

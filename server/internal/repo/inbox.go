@@ -9,6 +9,8 @@ import (
 )
 
 // ListInbox queries SQL, not the CRD wake signal, for the next addressed batch.
+// All statuses are readable. The Operator decides how to use a streaming snapshot
+// and when it is safe to Commit; ID-based discovery does not replay later revisions.
 func (store *Store) ListInbox(ctx context.Context, conversationID string, kind contract.ActorKind, key, after string, limit int) ([]model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
@@ -21,13 +23,6 @@ func (store *Store) ListInbox(ctx context.Context, conversationID string, kind c
 	})
 	if err != nil {
 		return nil, mapError(err)
-	}
-	// Do not let a consumer commit past an unfinished earlier speech. The UI
-	// may display its partial snapshot, but Poll delivers complete messages.
-	for i, message := range messages {
-		if message.Purpose == "output" && !(contract.Message{Status: contract.MessageStatus(message.Status)}).Ended() {
-			return messages[:i], nil
-		}
 	}
 	return messages, nil
 }

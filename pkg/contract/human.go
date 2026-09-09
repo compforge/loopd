@@ -1,10 +1,29 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// IsHumanReply distinguishes a card answer from a new user utterance.
+func (m Message) IsHumanReply() bool {
+	var value struct {
+		Blocks []struct {
+			Type string `json:"type"`
+		} `json:"blocks"`
+	}
+	if json.Unmarshal(m.Content, &value) != nil {
+		return false
+	}
+	for _, block := range value.Blocks {
+		if block.Type == "human_reply" {
+			return true
+		}
+	}
+	return false
+}
 
 type HumanStatus string
 

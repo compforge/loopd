@@ -10,6 +10,10 @@ import (
 // ActorKind is an open string enum. The constants name built-in participants.
 type ActorKind string
 
+// OperatorHarnessKindFormat names the Harness type; the concrete Harness
+// identity belongs in ActorRef.Key and stays stable across its messages.
+const OperatorHarnessKindFormat = "operator/%s/harness"
+
 const (
 	ActorKindUser     ActorKind = "user"
 	ActorKindHarness  ActorKind = "harness"

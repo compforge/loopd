@@ -19,6 +19,19 @@ import (
 
 func HarnessResource(id string) string { return "harness-run/" + id }
 
+// Run ownership is a stored relation, never inferred from an Actor's name.
+// Call while holding the Message lock; Run and Message are created atomically.
+func requireUnownedMessage(tx *gorm.DB, id string) error {
+	var count int64
+	if err := tx.Model(&model.HarnessRun{}).Where("message_id = ?", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
 // CreateHarnessRun checks idempotency before calling admit for a new Run.
 // The caller releases any reservation if the transaction fails. Replays never
 // reserve capacity, even when this Server is full.
@@ -57,7 +70,7 @@ func (s *Store) CreateHarnessRun(ctx context.Context, request contract.HarnessRu
 			}
 		}
 		content, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": request.Meta, "blocks": []any{}})
-		m := model.Message{ID: run.MessageID, ConversationID: run.ConversationID, Kind: request.Actor.Kind, ActorKey: request.Actor.Key, TargetKind: request.Recipient.Kind, TargetKey: request.Recipient.Key, Purpose: "harness", Revision: 1, Status: string(contract.MessageStatusStreaming), Content: content}
+		m := model.Message{ID: run.MessageID, ConversationID: run.ConversationID, Kind: request.Actor.Kind, ActorKey: request.Actor.Key, TargetKind: request.Recipient.Kind, TargetKey: request.Recipient.Key, DispatchPending: request.Recipient.Kind != contract.ActorKindUser, Revision: 1, Status: string(contract.MessageStatusStreaming), Content: content}
 		if err := s.saveMessage(tx, &m, true); err != nil {
 			return err
 		}

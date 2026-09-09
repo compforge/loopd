@@ -49,8 +49,8 @@ func (store *Store) Speak(ctx context.Context, convID string, request contract.S
 		}
 		result = model.Message{ID: uuid.V7(), ConversationID: convID,
 			Kind: request.Actor.Kind, ActorKey: request.Actor.Key, TargetKind: request.Target.Kind, TargetKey: request.Target.Key,
-			ReplyToID: request.ReplyToID, Purpose: "output", OutputKey: &key, Revision: 1, Content: request.Content, Status: string(status),
-			DispatchPending: status.Terminal() && request.Target.Kind != contract.ActorKindUser}
+			ReplyToID: request.ReplyToID, OutputKey: &key, Revision: 1, Content: request.Content, Status: string(status),
+			DispatchPending: request.Target.Kind != contract.ActorKindUser}
 		return mapError(store.saveMessage(tx, &result, true))
 	})
 	return

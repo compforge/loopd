@@ -46,7 +46,7 @@ func TestMessageOutputAcrossInstances(t *testing.T) {
 	producer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientA, options), nil)
 	consumer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientB, options), nil)
 
-	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Purpose: "output", Content: initial, Revision: 1}); err != nil {
+	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Content: initial, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
 	set := marshalEvent(t, agentueui.Event{
@@ -213,12 +213,12 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 	// No Redis stream exists. Observe must recover Human snapshots from Messages.
 	seen := map[string]bool{}
 	err = listen(ctx, coordinator, "conv", func(value Event) error {
-		if value.MessageID != "" && value.Message == nil {
-			t.Fatal("missing Message envelope")
-		}
 		event, err := agentueui.Parse(value.Data)
 		if err != nil {
 			return err
+		}
+		if event.Op == agentueui.OpStart && value.Message == nil {
+			t.Fatal("snapshot missing Message envelope")
 		}
 		if value.MessageID == q.Message.ID && event.Op == agentueui.OpStart {
 			if !seen["question"] {
@@ -229,7 +229,7 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 				}
 			}
 		}
-		if value.Message != nil && value.Message.Purpose == "human_reply" {
+		if value.Message != nil && value.Message.IsHumanReply() {
 			seen["reply"] = true
 		}
 		if seen["question"] && seen["reply"] {

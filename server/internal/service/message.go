@@ -150,7 +150,7 @@ func messageFromModel(value model.Message) contract.Message {
 	return contract.Message{
 		Status:     contract.MessageStatus(value.Status),
 		TargetKind: value.TargetKind, TargetKey: value.TargetKey,
-		ReplyToID: value.ReplyToID, Purpose: value.Purpose, Revision: value.Revision,
+		ReplyToID: value.ReplyToID, Revision: value.Revision,
 		ID: value.ID, ConversationID: value.ConversationID, TaskID: value.TaskID,
 		Kind: value.Kind, Key: value.ActorKey, Content: json.RawMessage(value.Content),
 		Timestamped: contract.Timestamped{CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt},
@@ -230,9 +230,6 @@ func (service *MessageService) EmitMessage(ctx context.Context, messageID string
 	if err != nil {
 		return "", err
 	}
-	if message.Purpose != "output" {
-		return "", fmt.Errorf("%w: message is not an output", ErrInvalid)
-	}
 	event, err := parseOutputEvent(data)
 	if err != nil {
 		return "", err
@@ -288,7 +285,7 @@ func (service *MessageService) publish(ctx context.Context, message repo.Message
 	key := "message/" + message.ID
 	state, err := service.events.State(ctx, key)
 	if errors.Is(err, agentuerunner.ErrNotFound) {
-		if err := service.ensureStream(ctx, model.Message{ID: message.ID, Purpose: message.Purpose}); err != nil {
+		if err := service.ensureStream(ctx, model.Message{ID: message.ID}); err != nil {
 			return "", err
 		}
 	} else if err != nil {

@@ -195,10 +195,18 @@ func TestMessagePartsMixedStorageAndReadPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	found := false
 	for _, row := range inbox {
 		if row.ID == m.ID {
-			t.Fatal("unfinished output delivered")
+			found = true
+			if row.Status != "streaming" {
+				t.Fatalf("streaming snapshot status=%s", row.Status)
+			}
+			assertExpanded(t, row, 4)
 		}
+	}
+	if !found {
+		t.Fatal("streaming snapshot missing")
 	}
 	if err := s.ProjectOutput(ctx, m.ID, ui.End(2)); err != nil {
 		t.Fatal(err)

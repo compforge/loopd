@@ -6,12 +6,29 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/compforge/loopd/server/internal/migrations"
 	"github.com/compforge/loopd/server/internal/model"
 	"gorm.io/gorm"
 )
+
+func TestPurposeSchemaRequiresExplicitRecreation(t *testing.T) {
+	s := openTestStore(t)
+	if s.db.Migrator().HasColumn(&model.Message{}, "purpose") {
+		t.Fatal("current Message schema contains purpose")
+	}
+	// Only the test-owned SQLite database is altered; startup must never
+	// silently drop a column from an existing deployment.
+	if err := s.db.Exec("ALTER TABLE messages ADD COLUMN purpose VARCHAR(24)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.CurrentSchema(s.db); err == nil || !strings.Contains(err.Error(), "messages.purpose") {
+		t.Fatalf("obsolete schema accepted: %v", err)
+	}
+}
 
 func TestOpenMigratesDomainKeys(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {

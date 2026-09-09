@@ -40,7 +40,6 @@ export class MessagePoller {
 
 function isActive(message: Message): boolean {
   if (message.status === "streaming") return true;
-  if (message.purpose !== "human_request") return false;
   return parseMessageContent(message.content).blocks.some((block) =>
     (block.type === "ask" || block.type === "confirm") && block.status === "pending");
 }
