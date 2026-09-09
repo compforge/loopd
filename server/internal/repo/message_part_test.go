@@ -24,7 +24,6 @@ func TestLogicalMessageReadsIgnorePartLayout(t *testing.T) {
 			s := partsStore(t)
 			if !external {
 				s.messageInlineBlocks = 1000
-				s.messageInlineBytes = 1 << 20
 			}
 			ctx := context.Background()
 			m := speech(t, s, 105)
@@ -102,8 +101,6 @@ func partsStore(t *testing.T) *Store {
 	t.Helper()
 	s := humanStore(t)
 	s.messageInlineBlocks = 1
-	s.messageInlineBytes = 128
-	s.messagePartBytes = 120
 	return s
 }
 func blocksContent(t *testing.T, n int) []byte {
@@ -183,8 +180,8 @@ func TestMessagePartsMixedStorageAndReadPaths(t *testing.T) {
 	if refAt(t, s, m.ID, 0) != "" || refAt(t, s, m.ID, 1) == "" || refAt(t, s, m.ID, 1) != refAt(t, s, m.ID, 2) {
 		t.Fatal("expected inline prefix and packed reference blocks")
 	}
-	if len(storedParts(t, s, m.ID)) != 2 {
-		t.Fatal("expected two parts")
+	if len(storedParts(t, s, m.ID)) != 1 {
+		t.Fatal("expected small external blocks packed into one part")
 	}
 	again := speech(t, s, 4)
 	if again.ID != m.ID {
@@ -257,7 +254,15 @@ func TestMessagePartsMixedStorageAndReadPaths(t *testing.T) {
 func TestMessagePartsLatePatchMovesOnlyAffectedBlock(t *testing.T) {
 	s := partsStore(t)
 	ctx := context.Background()
-	m := speech(t, s, 4)
+	content := snapshotOf(t, blocksContent(t, 4))
+	for _, i := range []int{2, 3} {
+		content["blocks"].([]any)[i].(map[string]any)["content"] = strings.Repeat("x", 40<<10)
+	}
+	raw, _ := json.Marshal(content)
+	m, err := s.Speak(ctx, "conv", contract.SpeakRequest{Status: contract.MessageStatusStreaming, Key: "speech", Actor: contract.ActorRef{Kind: contract.ActorKindHarness, Key: "writer"}, Content: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
 	old := refAt(t, s, m.ID, 1)
 	untouched := refAt(t, s, m.ID, 3)
 	before := storedParts(t, s, m.ID)
@@ -269,7 +274,7 @@ func TestMessagePartsLatePatchMovesOnlyAffectedBlock(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	event := ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b1", "content": strings.Repeat("界", 200)}}
+	event := ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b1", "content": strings.Repeat("界", 10000)}}
 	if err := s.ProjectOutput(ctx, m.ID, event); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +309,7 @@ func TestMessagePartsLatePatchMovesOnlyAffectedBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	blocks := snapshotOf(t, actual.Content)["blocks"].([]any)
-	if got := blocks[1].(map[string]any)["content"]; got != "hello"+strings.Repeat("界", 200) {
+	if got := blocks[1].(map[string]any)["content"]; got != "hello"+strings.Repeat("界", 10000) {
 		t.Fatalf("duplicated or lost append: %v", got)
 	}
 	for i, v := range blocks {
@@ -331,7 +336,7 @@ func TestMessagePartsInlineGrowthAndSingleLargeBlock(t *testing.T) {
 	if len(storedParts(t, s, m.ID)) != 0 {
 		t.Fatal("small message allocated part")
 	}
-	event := ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b0", "content": strings.Repeat("界", 100)}}
+	event := ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b0", "content": strings.Repeat("界", 30000)}}
 	if err := s.ProjectOutput(ctx, m.ID, event); err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +345,7 @@ func TestMessagePartsInlineGrowthAndSingleLargeBlock(t *testing.T) {
 		t.Fatalf("large block was not framed: %d parts", len(parts))
 	}
 	for _, part := range parts {
-		if part.SizeBytes > s.messagePartBytes || part.SizeBytes != len(part.Content) {
+		if part.SizeBytes > s.contentMaxBytes || part.SizeBytes != len(part.Content) {
 			t.Fatalf("part %s exceeds budget: %d", part.ID, part.SizeBytes)
 		}
 	}
@@ -437,8 +442,7 @@ func TestMessagePartsRejectCrossMessageAndMissingReferences(t *testing.T) {
 
 func TestMessagePartsHumanReplyTimeoutAndRecovery(t *testing.T) {
 	s := partsStore(t)
-	s.messageInlineBytes = 1
-	s.messagePartBytes = 256 // Leave room for the frame envelope as well as data.
+	s.messageInlineBlocks = 0 // Exercise external Human content independently of its size.
 	ctx := context.Background()
 	q, err := s.CreateHuman(ctx, question("external"))
 	if err != nil {
@@ -534,7 +538,7 @@ func TestMessagePartsCreateFailureAndMissingBlock(t *testing.T) {
 
 func TestMessagePartsPreserveNumbersWhenMovingContent(t *testing.T) {
 	s := partsStore(t)
-	s.messageInlineBytes = 1
+	s.messageInlineBlocks = 0
 	ctx := context.Background()
 	content := []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"b","type":"tool","result":{"integer":9007199254740993,"decimal":0.1234567890123456789012345}}]}`)
 	m, err := s.CreateMessage(ctx, model.Message{ID: "numbers", ConversationID: "conv", SourceKind: "operator", SourceKey: "writer", Content: content})

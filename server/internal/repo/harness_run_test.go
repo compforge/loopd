@@ -168,8 +168,7 @@ func TestHarnessResultAndTerminalCommitTogetherIncludingParts(t *testing.T) {
 	s, run, token := runFixture(t)
 	ctx := context.Background()
 	s.messageInlineBlocks = 1
-	s.messageInlineBytes = 128
-	s.messagePartBytes = 128
+	s.contentMaxBytes = 4096
 	event := ui.Event{Op: ui.OpSet, Block: map[string]any{"id": "progress", "type": "text", "content": "working"}}
 	if err := s.AppendHarnessOutput(ctx, token, run.ID, 1, "hash", event); err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,54 @@ import (
 	"github.com/compforge/loopd/pkg/contract"
 	"github.com/compforge/loopd/server/internal/model"
 )
+
+// +case=`One configured byte budget bounds both root and Part content, including JSON envelopes; logical reads remain complete.`
+func TestContentMaxBytesAppliesToMessageAndParts(t *testing.T) {
+	const budget = 1024
+	s, err := Open(Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "content.db"), ContentMaxBytes: budget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	if _, err := s.CreateConversation(ctx, model.Conversation{ID: "conv"}); err != nil {
+		t.Fatal(err)
+	}
+	m := speech(t, s, 1)
+	text := strings.Repeat("界", 2000)
+	if err := s.ProjectOutput(ctx, m.ID, ui.Event{Op: ui.OpAppend, Seq: 2, Mask: "block.content", Block: map[string]any{"id": "b0", "content": text}}); err != nil {
+		t.Fatal(err)
+	}
+	root, err := storedMessage(s, ctx, m.ID)
+	if err != nil || len(root.Content) > budget {
+		t.Fatalf("root bytes=%d err=%v", len(root.Content), err)
+	}
+	parts := storedParts(t, s, m.ID)
+	if len(parts) < 2 {
+		t.Fatal("configured budget did not split large block")
+	}
+	for _, part := range parts {
+		if len(part.Content) > budget {
+			t.Fatalf("part bytes=%d exceeds budget", len(part.Content))
+		}
+	}
+	got, err := s.GetMessage(ctx, m.ID)
+	if err != nil || snapshotOf(t, got.Content)["blocks"].([]any)[0].(map[string]any)["content"] != "hello"+text {
+		t.Fatalf("logical read failed: %v", err)
+	}
+	content := func(meta string) []byte {
+		raw, _ := json.Marshal(map[string]any{"version": "1.1", "biz": "chat", "meta": map[string]any{"text": meta}, "blocks": []any{}})
+		return raw
+	}
+	raw := content(strings.Repeat("x", budget-len(content(""))))
+	if _, err := s.CreateMessage(ctx, model.Message{ID: "boundary", ConversationID: "conv", SourceKind: "user", Content: raw}); err != nil {
+		t.Fatal(err)
+	}
+	raw = content(strings.Repeat("x", budget-len(content(""))+1))
+	if _, err := s.UpdateMessageContent(ctx, "conv", "boundary", raw); !errors.Is(err, ErrContentTooLarge) {
+		t.Fatalf("oversized root error=%v", err)
+	}
+}
 
 // +case=`Large logical blocks round-trip through <=64 KiB physical rows; retries, replacement, rollback and deletion never retain mixed frame revisions.`
 func TestMessageFramesLifecycle(t *testing.T) {

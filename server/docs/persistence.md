@@ -91,11 +91,12 @@ loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.gr
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
 | MESSAGE_INLINE_BLOCKS | 32 | 内联前缀的最大 block 数量 |
-| MESSAGE_INLINE_BYTES | 65536 | 内联 block JSON 的累计字节预算 |
-| MESSAGE_PART_BYTES | 65536 | 一个 Part 的最大编码字节数，含包装开销 |
+| CONTENT_MAX_BYTES | 65536 | Message 和 Part 的 content 列统一编码字节上限，含包装开销 |
 
-`message.content` 和每个 `message_parts.content` 的编码大小均不超过 64 KiB，字节预算配置
-只能调小，不能突破此上限。根 content 计入 meta、引用目录和包装开销；必要时外置更多内联
+`message.content` 和每个 `message_parts.content` 均使用 `CONTENT_MAX_BYTES` 限制编码大小，
+配置只能调小，不能超过 64 KiB。这是存储列的预算，不是逻辑消息或整个事务的大小上限；
+目的是避免大字段写入带来的 binlog、复制与 I/O 压力。
+根 content 计入 meta、引用目录和包装开销；必要时外置更多内联
 block。如果 meta 和引用目录仍无法放下，则在事务提交前拒绝写入，不建立多级索引。
 
 小 block 按内容量装入普通 Part。一个 block 放不下时，repo 使用 AgentUE Go `storage.Frame`

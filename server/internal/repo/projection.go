@@ -103,7 +103,7 @@ func (s *Store) projectOutput(tx *gorm.DB, id string, event agentueui.Event, sta
 	if err != nil {
 		return err
 	}
-	if err := c.persist(s.messagePartBytes); err != nil {
+	if err := c.persist(s.contentMaxBytes); err != nil {
 		return err
 	}
 	updates := map[string]any{"content": content, "revision": event.Seq}

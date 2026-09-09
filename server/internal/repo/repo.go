@@ -19,6 +19,10 @@ import (
 
 const defaultOperationTimeout = 10 * time.Second
 
+// DefaultContentMaxBytes bounds each encoded content column, reducing large-field
+// write, binlog and replication pressure. It does not bound total transaction size.
+const DefaultContentMaxBytes = 64 << 10
+
 var (
 	ErrNotFound        = errors.New("not found")
 	ErrConflict        = errors.New("conflict")
@@ -28,8 +32,7 @@ var (
 
 type Config struct {
 	MessageInlineBlocks int
-	MessageInlineBytes  int
-	MessagePartBytes    int
+	ContentMaxBytes     int
 	Driver              string
 	DSN                 string
 	OperationTimeout    time.Duration
@@ -41,13 +44,18 @@ type Config struct {
 
 type Store struct {
 	messageInlineBlocks int
-	messageInlineBytes  int
-	messagePartBytes    int
+	contentMaxBytes     int
 	db                  *gorm.DB
 	operationTimeout    time.Duration
 }
 
 func Open(config Config) (*Store, error) {
+	if config.ContentMaxBytes == 0 {
+		config.ContentMaxBytes = DefaultContentMaxBytes
+	}
+	if config.ContentMaxBytes < 0 || config.ContentMaxBytes > DefaultContentMaxBytes {
+		return nil, fmt.Errorf("content max bytes must be between 1 and %d", DefaultContentMaxBytes)
+	}
 	if config.OperationTimeout <= 0 {
 		config.OperationTimeout = defaultOperationTimeout
 	}
@@ -97,17 +105,7 @@ func Open(config Config) (*Store, error) {
 	if config.MessageInlineBlocks <= 0 {
 		config.MessageInlineBlocks = defaultMessageInlineBlocks
 	}
-	if config.MessageInlineBytes <= 0 {
-		config.MessageInlineBytes = defaultMessageInlineBytes
-	}
-	if config.MessagePartBytes <= 0 {
-		config.MessagePartBytes = defaultMessagePartBytes
-	}
-	if config.MessagePartBytes > maxStoredContentBytes || config.MessageInlineBytes > maxStoredContentBytes {
-		_ = sqlDB.Close()
-		return nil, errors.New("message storage budgets must not exceed 64 KiB")
-	}
-	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: config.MessageInlineBlocks, messageInlineBytes: config.MessageInlineBytes, messagePartBytes: config.MessagePartBytes}
+	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: config.MessageInlineBlocks, contentMaxBytes: config.ContentMaxBytes}
 	ctx, cancel := store.withTimeout(context.Background())
 	defer cancel()
 	if err := sqlDB.PingContext(ctx); err != nil {

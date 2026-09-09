@@ -93,12 +93,7 @@ func (s *Store) MessageBlocks(ctx context.Context, convID, id, blockID, cursor s
 	return result, mapError(err)
 }
 
-const (
-	defaultMessageInlineBlocks = 32
-	defaultMessageInlineBytes  = 64 << 10
-	defaultMessagePartBytes    = 64 << 10
-	maxStoredContentBytes      = 64 << 10
-)
+const defaultMessageInlineBlocks = 32
 
 type partContent struct {
 	Blocks []map[string]any `json:"blocks"`
@@ -321,13 +316,13 @@ func (s *Store) packContent(c *messageContent) ([]byte, error) {
 			return nil, err
 		}
 		id := b["id"].(string)
-		if !external && c.originalRefs[id] == "" && count < s.messageInlineBlocks && bytes+len(data) <= s.messageInlineBytes {
+		if !external && c.originalRefs[id] == "" && count < s.messageInlineBlocks && bytes+len(data) <= s.contentMaxBytes {
 			count++
 			bytes += len(data)
 			continue
 		}
 		external = true
-		ref, err := c.place(b, s.messagePartBytes)
+		ref, err := c.place(b, s.contentMaxBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -339,13 +334,13 @@ func (s *Store) packContent(c *messageContent) ([]byte, error) {
 	stored, err := json.Marshal(c.snapshot)
 	// The root limit includes metadata and the reference directory, not just
 	// inline block bytes. Externalize remaining inline suffixes when necessary.
-	for i := len(c.snapshot["blocks"].([]any)) - 1; err == nil && len(stored) > maxStoredContentBytes && i >= 0; i-- {
+	for i := len(c.snapshot["blocks"].([]any)) - 1; err == nil && len(stored) > s.contentMaxBytes && i >= 0; i-- {
 		blocks := c.snapshot["blocks"].([]any)
 		block := blocks[i].(map[string]any)
 		if _, ref := block["ref"]; ref {
 			continue
 		}
-		ref, placeErr := c.place(block, s.messagePartBytes)
+		ref, placeErr := c.place(block, s.contentMaxBytes)
 		if placeErr != nil {
 			return nil, placeErr
 		}
@@ -353,15 +348,14 @@ func (s *Store) packContent(c *messageContent) ([]byte, error) {
 		c.snapshot["version"] = ui.ProtocolVersion
 		stored, err = json.Marshal(c.snapshot)
 	}
-	if err == nil && len(stored) > maxStoredContentBytes {
-		return nil, fmt.Errorf("%w: metadata and block references must fit within 64 KiB", ErrContentTooLarge)
+	if err == nil && len(stored) > s.contentMaxBytes {
+		return nil, fmt.Errorf("%w: metadata and block references must fit within %d bytes", ErrContentTooLarge, s.contentMaxBytes)
 	}
 	return stored, err
 }
 
 // +spec=`Every stored content column is bounded; frame replacement and revision updates commit in the owning Message transaction.`
 func (c *messageContent) persist(maxBytes int) error {
-	maxBytes = min(maxBytes, maxStoredContentBytes)
 	for _, p := range c.parts {
 		if !p.dirty {
 			continue
@@ -449,7 +443,7 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 	if err != nil {
 		return err
 	}
-	if len(incoming.parts) == 0 && len(incoming.originalRefs) == 0 && len(full) <= maxStoredContentBytes {
+	if len(incoming.parts) == 0 && len(incoming.originalRefs) == 0 && len(full) <= s.contentMaxBytes {
 		stored = full
 	}
 	m.Content = stored
@@ -491,7 +485,7 @@ func (s *Store) saveMessage(tx *gorm.DB, m *model.Message, create bool) error {
 			p.dirty = true
 		}
 	}
-	if err := incoming.persist(s.messagePartBytes); err != nil {
+	if err := incoming.persist(s.contentMaxBytes); err != nil {
 		return err
 	}
 	q := tx.Where("message_id = ?", m.ID)

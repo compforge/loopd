@@ -54,8 +54,8 @@ kubectl -n loopd port-forward service/loopd-loopd-web 8080:80
 
 ### Message 内容存储
 
-loop-server 支持 `MESSAGE_INLINE_BLOCKS`（默认 32）、`MESSAGE_INLINE_BYTES`（默认 65536）
-和 `MESSAGE_PART_BYTES`（默认 65536）三个正整数环境变量。字节预算不能超过 65536。
+loop-server 支持 `MESSAGE_INLINE_BLOCKS`（默认 32）和 `CONTENT_MAX_BYTES`（默认 65536）
+两个正整数环境变量。`CONTENT_MAX_BYTES` 统一限制 Message 和 Part 的 content 列，不能超过 65536。
 超过内联预算的 block 保存到
 数据库 `message_parts`，读取时由 server 展开，页面与 Operator 接收完整正文。
 根 content 和单个 Part content 编码后均不超过 64 KiB；大 block 自动拆为存储 frames，
