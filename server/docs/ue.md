@@ -145,7 +145,9 @@ Ask/Confirm 已发送的卡片仍可能待答，因此其交互状态独立观�
 连接期间的增量发现和状态校验由 Listener 承担；浏览器不另开常驻消息轮询。
 Listener 随请求取消，不放入全局注册表，也不负责消息 GC。
 
-任一 server 实例都可观察同一 Conv。Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
+页面与 Operator 的订阅可落到任一共享 DB/Redis 的 server 实例，不必与输出写入端位于同一 Pod，
+也不需要调用方感知 Redis key；共享流的寻址见 [持久化约定](persistence.md#agentue-快照与实时事件流)。
+Redis 丢失后，已接受的内容可以从 SQL 快照恢复，
 但不会重新生成每个中间增量；AgentUE Bridge 负责事件协议和续接，server 负责消息寻址与快照。
 
 ### 消息结束与重试

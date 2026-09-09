@@ -187,6 +187,13 @@ Redis 将实时观察者与执行端解耦，使页面从事件流接收增量�
 执行不依赖浏览器连接，实时订阅的关闭也不撤销已接受的输入或调用；生命周期见
 [提交与观察](ue.md#提交与观察)。
 
+这也解除了输出交付对单个 Server Pod 的绑定。各实例使用共享 DB 和同一 Redis 流命名空间，
+写入可由 Pod A 接受，页面或 Operator 可经 Pod B 订阅；Server 根据会话或 Run 定位 Message，
+再定位对应的 Redis 流并返回 AgentUE event。调用方只使用协作 API，不需要取得 Redis key、
+直连 Redis 或寻找原先处理请求的 Pod，也不要求负载均衡保持粘性会话。
+跨 Pod 交付不等于执行自动迁移：驱动者接管与执行恢复仍遵守 Harness Engine、Adapter 和
+Operator 各自的恢复契约。
+
 实时交付有两个消费视角，共用按 Message ID 寻址的 Redis 流：
 
 - `GET /v1/conversations/:conversation_id/stream` 聚合会话内消息，服务 UI。

@@ -129,7 +129,8 @@ End 只表示说完这条消息，不结束 Conv 或业务工作。页面流只�
 执行与实时观察各自持有生命周期：输入或调用一旦被持久接受，关闭、刷新浏览器或断开 SSE
 只结束观察，不取消已经开始的工作。工作由 Operator/Harness 判断完成，或由其执行策略收口；
 用户显式停止是另一种控制动作，当前页面尚未提供通用停止入口。
-任意 server 实例可以续接页面流；Redis 提供 append-only 实时 Message 事件，DB 提供消息快照，
+输出写入与观察不要求落在同一 Server Pod：共享 DB/Redis 的任意 server 实例都可服务页面或
+Operator 的流订阅，不要求粘性会话。Redis 提供 append-only 实时 Message 事件，DB 提供消息快照，
 实时观察者不依赖逐增量读取 DB。Redis 丢失时只能恢复已固化快照，而不是重演全部中间事件。
 
 Server 是人、Operator、Harness 的协作平台；loop-runtime 是 Operator toolkit。
