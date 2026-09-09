@@ -11,19 +11,19 @@ function message(id: string, type = "ask"): Message {
 describe("Human messages", () => {
  it("routes equal block IDs to different Messages and ignores a stale snapshot", () => {
   const a = message("a"), b = message("b", "confirm");
-  b.content.blocks[0].status = "success"; b.revision = 2;
+  b.content!.blocks[0].status = "success"; b.revision = 2;
   const frame = `data: ${JSON.stringify({ message: b, event: { stream_id: "b", op: "start", seq: 2, model: b.content } })}`;
   const event = decodeMessageFrame(frame);
   const updated = applyMessageEvent([a, message("b", "confirm")], event);
-  expect(updated[0].content.blocks[0].status).toBe("pending");
-  expect(updated[1].content.blocks[0].status).toBe("success");
+  expect(updated[0].content!.blocks[0].status).toBe("pending");
+  expect(updated[1].content!.blocks[0].status).toBe("success");
   const stale = message("b", "confirm");
   const old = decodeMessageFrame(`data: ${JSON.stringify({ message: stale, event: { stream_id: "b", op: "start", seq: 1, model: stale.content } })}`);
   expect(applyMessageEvent(updated, old)).toBe(updated);
  });
  it("renders a reply without the original message loaded and preserves its selected label", () => {
   const reply = message("reply"); reply.source_kind = "user"; reply.reply_to_id = "question";
-  reply.content.blocks = [{ id: "human", type: "human_reply", outcome: "success", value: "small", question: question("success", "small") }];
+  reply.content!.blocks = [{ id: "human", type: "human_reply", outcome: "success", value: "small", question: question("success", "small") }];
   const html = renderToStaticMarkup(<MessageBody message={reply} onReply={() => {}} />);
   expect(html).toContain("Small"); expect(html).toContain('checked=""'); expect(html).toContain("is-selected");
   expect(html).toContain('disabled=""'); expect(html).not.toContain("<button"); expect(html).not.toContain("textarea");
@@ -32,7 +32,7 @@ describe("Human messages", () => {
  });
  it("keeps options visible for terminal questions and distinguishes cancellation from refusal", () => {
   const m = message("budget", "confirm");
-  const block = m.content.blocks[0];
+  const block = m.content!.blocks[0];
   block.confirm_label = "Deploy"; block.decline_label = "Skip";
   let html = renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Deploy"); expect(html).toContain("Skip"); expect(html).toContain("忽略 / 取消");
@@ -50,27 +50,27 @@ describe("Human messages", () => {
   const m=message("scope");
   expect(renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />)).toContain("textarea");
   m.source_kind="user";
-  m.content.blocks=[{id:"human",type:"human_reply",outcome:"success",value:"custom answer",question:question("success","custom answer")}];
+  m.content!.blocks=[{id:"human",type:"human_reply",outcome:"success",value:"custom answer",question:question("success","custom answer")}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("custom answer"); expect(html).not.toContain("textarea"); expect(html).not.toContain('checked=""');
  });
  it("shows the original question's selection without loading its reply", () => {
   const m=message("scope");
-  m.content.blocks[0].status="success"; m.content.blocks[0].selected_value="small";
+  m.content!.blocks[0].status="success"; m.content!.blocks[0].selected_value="small";
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Small"); expect(html).toContain('checked=""');
   expect(html).not.toContain("<button"); expect(html).not.toContain("textarea");
  });
  it("renders a cancelled reply with its question but no invented selection", () => {
   const m=message("cancel"); m.source_kind="user";
-  m.content.blocks=[{id:"human",type:"human_reply",outcome:"dismissed",question:question("dismissed")}];
+  m.content!.blocks=[{id:"human",type:"human_reply",outcome:"dismissed",question:question("dismissed")}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Scope"); expect(html).toContain("Small"); expect(html).toContain("已忽略");
   expect(html).not.toContain('checked=""'); expect(html).not.toContain("<button");
  });
  it("does not treat ordinary messages or reply references as Human actions", () => {
   const m=message("ordinary");
-  m.content.blocks=[{id:"text",type:"text",content:"Choose"}];
+  m.content!.blocks=[{id:"text",type:"text",content:"Choose"}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Choose"); expect(html).not.toContain("<fieldset"); expect(html).not.toContain("<button");
   expect(renderToStaticMarkup(<ReplyReference message={m} />)).toContain('href="#message-input"');
@@ -83,7 +83,7 @@ function question(status: HumanQuestion["status"], value?: string): HumanQuestio
 
 it("renders mixed content blocks without interpreting plain text as Markdown or executing HTML", () => {
  const m=message("content");
- m.content.blocks=[{id:"plain",type:"text",content:"**plain**"},{id:"md",type:"markdown",content:"**bold**\n\n`code`\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))"},{id:"tool",type:"tool",name:"Search",status:"completed",content:"Found result"}];
+ m.content!.blocks=[{id:"plain",type:"text",content:"**plain**"},{id:"md",type:"markdown",content:"**bold**\n\n`code`\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))"},{id:"tool",type:"tool",name:"Search",status:"completed",content:"Found result"}];
  const html=renderToStaticMarkup(<MessageBody message={m} />);
  expect(html).toContain("**plain**");expect(html).toContain("<strong>bold</strong>");expect(html).toContain("<code>code</code>");
  expect(html).toContain("Search");expect(html).toContain("Found result");expect(html).not.toContain("<script>");expect(html).not.toContain('href="javascript:');

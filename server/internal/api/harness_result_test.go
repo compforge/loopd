@@ -21,7 +21,7 @@ import (
 	"github.com/compforge/loopd/server/internal/service"
 )
 
-// +case=`A succeeded Run with a multi-MiB result remains readable after a lost stream through Call.Get, Call.Result and Message reads; storage framing is invisible.`
+// +case=`A succeeded Run with a multi-MiB result remains readable through Call.Get, Call.Result and Message reads without subscribing to output; storage framing is invisible.`
 func TestLargeHarnessResultRuntimeReads(t *testing.T) {
 	store, err := repo.Open(repo.Config{DSN: filepath.Join(t.TempDir(), "result.db")})
 	if err != nil {
@@ -39,7 +39,7 @@ func TestLargeHarnessResultRuntimeReads(t *testing.T) {
 	s.Register(engine)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/stream") {
-			// Exercise recovery from DB, not an in-memory result or live event.
+			t.Error("result-only reads must not subscribe to output")
 			http.Error(w, "stream unavailable", http.StatusServiceUnavailable)
 			return
 		}

@@ -87,42 +87,33 @@ func (c *Call) Cancel(ctx context.Context) error {
 	return write(c.client, ctx, "/v1/harness/runs/"+url.PathEscape(c.id)+"/cancel", struct{}{}, nil)
 }
 
-// Wait observes the stream and checks durable state when it ends or disconnects.
-// +spec=`A disconnected observer reattaches the same Call; only persisted terminal state proves execution has ended.`
+// Wait polls durable execution state without subscribing to output content.
+// +spec=`Waiting never opens an output stream; only persisted terminal state proves execution has ended.`
 // Cancelling this observer does not cancel the Run.
 func (c *Call) Wait(ctx context.Context) (contract.HarnessCall, error) {
-	for attempt := 0; ; attempt++ {
-		events, failures := c.Stream(ctx)
-		for range events {
-		}
-		var observationErr error
-		for err := range failures {
-			observationErr = err
-		}
+	failures := 0
+	for {
 		if err := ctx.Err(); err != nil {
 			return contract.HarnessCall{}, model.WrapError(err)
 		}
 		value, err := c.Get(ctx)
-		if err == nil && value.Phase.Terminal() {
-			if value.Phase != contract.CallSucceeded {
-				return value, &model.Error{Message: value.Error}
+		if err == nil {
+			failures = 0
+			if value.Phase.Terminal() {
+				if value.Phase != contract.CallSucceeded {
+					return value, &model.Error{Message: value.Error}
+				}
+				return value, nil
 			}
-			return value, nil
+		} else {
+			failures++
+			if !model.IsRetryable(err) || failures >= 3 {
+				return value, err
+			}
+			// Bound consecutive observation failures, not execution duration. Extend
+			// recovery only alongside regression cases from real failures.
+			c.client.Logger().WarnContext(ctx, "retry Harness observation", "call_id", c.id, "attempt", failures+1)
 		}
-		if err != nil {
-			observationErr = err
-		}
-		if observationErr == nil {
-			observationErr = model.ErrHarnessStreamIncomplete
-		}
-		if attempt == 2 || !model.IsRetryable(observationErr) {
-			return value, observationErr
-		}
-		// Healthy streams do not poll SQL. Retry only after losing observation,
-		// with at most three connections and a delay to avoid a tight loop.
-		// Keep recovery limited to observed disconnect/unavailability cases;
-		// extend it with regression cases from real failures, not speculative policies.
-		c.client.Logger().WarnContext(ctx, "retry Harness observation", "call_id", c.id, "attempt", attempt+2)
 		timer := time.NewTimer(time.Second)
 		select {
 		case <-ctx.Done():
@@ -137,7 +128,7 @@ func (c *Call) Result(ctx context.Context) (*contract.HarnessResult, error) {
 	return value.Result, err
 }
 
-// Stream observes one remote Call; reconnect and terminal-state decisions belong to Wait.
+// Stream observes output independently of Wait; callers own stream reconnection.
 func (c *Call) Stream(ctx context.Context) (<-chan ui.Event, <-chan error) {
 	events := make(chan ui.Event)
 	failures := make(chan error, 1)

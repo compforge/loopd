@@ -1,11 +1,12 @@
 import { ActorKind, operatorOwner } from "./actor";
 import { MessageBody, ReplyReference } from "./MessageBody";
+import { LazyMessage } from "./LazyMessage";
 import type { HumanResult } from "./api";
 import { messageStatusLabel, mergeMessage } from "./message";
 import { useConversationStream } from "./streams";
 import { applyMessageEvent } from "./message";
 import { MessagePoller } from "./message-poll";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { parseMessageContent, type MessageContent } from "./content";
 import { findDetailConversation, type Conversation, type Message } from "./api";
 import { traceColor, traceLabel } from "./trace";
@@ -16,6 +17,8 @@ interface Detail {
   conversation?: Conversation;
   messages: Message[];
   error?: string;
+  hasOlder?: boolean;
+  loadingOlder?: boolean;
 }
 
 export interface DetailSelection {
@@ -28,7 +31,9 @@ export function DetailPanel({ selection, onReply }: {
   selection?: DetailSelection;
   onReply?(result: HumanResult): void;
 }) {
-  const history = useRef<{ scope: string; poller: MessagePoller } | undefined>(undefined);
+  const history = useRef<{ scope: string; poller: MessagePoller; signal: AbortSignal } | undefined>(undefined);
+  const container = useRef<HTMLDivElement>(null);
+  const anchor = useRef<{ id: string; top: number } | undefined>(undefined);
   const [detail, setDetail] = useState<Detail>();
   const parentID = selection?.parentID;
   const organizer = selection?.organizer;
@@ -49,14 +54,14 @@ export function DetailPanel({ selection, onReply }: {
         conversation ??= await findDetailConversation(parentID!, actorKind!, actorKey!, controller.signal);
         if (conversation) {
           poller ??= new MessagePoller(conversation.id);
-          history.current = { scope, poller };
+          history.current = { scope, poller, signal: controller.signal };
           for (const message of await poller.poll(controller.signal)) messages = mergeMessage(messages, message);
           loaded = true;
         }
         if (!controller.signal.aborted) setDetail((current) => {
           let merged = current?.scope === scope ? current.messages : [];
           for (const message of messages) merged = mergeMessage(merged, message);
-          return { scope, conversation, messages: merged };
+          return { scope, conversation, messages: merged, hasOlder: poller?.hasOlder };
         });
       } catch (cause) {
         if (!controller.signal.aborted) {
@@ -73,24 +78,48 @@ export function DetailPanel({ selection, onReply }: {
   const selected = detail?.scope === scope ? detail : undefined;
   useConversationStream(selected?.conversation?.id, (event) => {
     if (!event.event.stream_id) return;
+    history.current?.poller.observe(event.event.stream_id);
     setDetail((current) => current?.scope === scope
       ? { ...current, messages: applyMessageEvent(current.messages, event) } : current);
   }, async (signal) => {
     const source = history.current;
     if (source?.scope !== scope) return;
     try {
-      const updates = await source.poller.sync(signal);
-      if (signal.aborted) return;
-      setDetail((current) => {
-        if (current?.scope !== scope) return current;
-        let messages = current.messages;
-        for (const message of updates) messages = mergeMessage(messages, message);
-        return { ...current, messages };
+      await source.poller.sync(signal, (updates) => {
+        if (signal.aborted) return;
+        setDetail((current) => {
+          if (current?.scope !== scope) return current;
+          let messages = current.messages;
+          for (const message of updates) messages = mergeMessage(messages, message);
+          return { ...current, messages, hasOlder: source.poller.hasOlder };
+        });
       });
     } catch (cause) {
       if (!signal.aborted) setDetail((current) => current?.scope === scope ? { ...current, error: String(cause) } : current);
     }
   });
+  useLayoutEffect(() => {
+    if (!anchor.current || !container.current) return;
+    const element = document.getElementById(`message-${anchor.current.id}`);
+    if (element) container.current.scrollTop += element.getBoundingClientRect().top - anchor.current.top;
+    anchor.current = undefined;
+  }, [detail]);
+
+  async function loadOlder() {
+    const source = history.current;
+    if (source?.scope !== scope || selected?.loadingOlder) return;
+    setDetail((current) => current?.scope === scope ? { ...current, loadingOlder: true } : current);
+    try {
+      const items = await source.poller.older(source.signal);
+      if (source.signal.aborted) return;
+      const first = selected?.messages[0];
+      const element = first && document.getElementById(`message-${first.id}`);
+      if (element) anchor.current = { id: first.id, top: element.getBoundingClientRect().top };
+      setDetail((current) => current?.scope === scope ? { ...current, messages: items.reduce(mergeMessage, current.messages), hasOlder: source.poller.hasOlder, loadingOlder: false } : current);
+    } catch (cause) {
+      if (!source.signal.aborted) setDetail((current) => current?.scope === scope ? { ...current, error: String(cause), loadingOlder: false } : current);
+    }
+  }
   const visible = selected?.messages ?? [];
   const groups = groupParallelMessages(visible);
   const indices = new Map(visible.map((item, index) => [item.id, index]));
@@ -106,11 +135,13 @@ export function DetailPanel({ selection, onReply }: {
           <p>{selected?.error ?? (!selection ? "发送消息或选择历史消息，查看相关 Operator 的工作会话。" : !organizer ? "这条消息未关联 Operator 工作会话。" : !selected ? `正在查找 ${actorKey} 的工作会话…` : `等待 ${actorKey} 创建工作会话…`)}</p>
         </div>
       ) : (
-        <div className="detail-content" data-conversation-id={selected.conversation.id}>
+        <div className="detail-content" ref={container} data-conversation-id={selected.conversation.id}>
           <div className="task-summary">
             <div><small>OPERATOR CONVERSATION</small><code>{selected.conversation.actor_key}</code></div>
           </div>
           <div className="timeline">
+            {selected.hasOlder && <button className="load-history" type="button" disabled={selected.loadingOlder} onClick={() => void loadOlder()}>{selected.loadingOlder ? "加载中…" : "加载更早的消息"}</button>}
+            {selected.error && <p role="alert">{selected.error}</p>}
             {visible.length === 0 && <div className="muted-state">等待处理消息…</div>}
             {groups.map((group) => (
               <section className="detail-group" key={group.columns[0][0].id}>
@@ -118,7 +149,10 @@ export function DetailPanel({ selection, onReply }: {
                   <div className="parallel-columns" style={{ gridTemplateColumns: `repeat(${group.columns.length}, 240px)` }}>
                     {group.columns.map((column) => (
                       <div className="parallel-column" key={column[0].id}>
-                        {column.map((item) => <DetailMessage key={item.id} message={item} index={indices.get(item.id)!} onReply={(result) => {
+                        {column.map((item) => <LazyMessage key={item.id} message={item} onLoad={(value) => setDetail((current) => current?.scope === scope ? { ...current, messages: mergeMessage(current.messages, value) } : current)}><DetailMessage message={item} index={indices.get(item.id)!} onLoad={(value) => {
+                          history.current?.poller.observe(value.id);
+                          setDetail((current) => current?.scope === scope ? { ...current, messages: mergeMessage(current.messages, value) } : current);
+                        }} onReply={(result) => {
                           setDetail((current) => {
                             if (current?.scope !== scope) return current;
                             let messages = mergeMessage(current.messages, result.message);
@@ -126,7 +160,7 @@ export function DetailPanel({ selection, onReply }: {
                             return { ...current, messages };
                           });
                           onReply?.(result);
-                        }} />)}
+                        }} /></LazyMessage>)}
                       </div>
                     ))}
                   </div>
@@ -140,7 +174,7 @@ export function DetailPanel({ selection, onReply }: {
   );
 }
 
-export function DetailMessage({ message, index, onReply }: { message: Message; index: number; onReply?(result: HumanResult): void }) {
+export function DetailMessage({ message, index, onReply, onLoad }: { message: Message; index: number; onReply?(result: HumanResult): void; onLoad?(message: Message): void }) {
   const style = message.source_kind !== ActorKind.User ? { "--harness-color": traceColor(JSON.stringify([message.source_kind, message.source_key])) } as CSSProperties : undefined;
   let model: MessageContent | undefined;
   try { model = parseMessageContent(message.content); } catch { /* Invalid persisted model is shown below. */ }
@@ -159,7 +193,7 @@ export function DetailMessage({ message, index, onReply }: { message: Message; i
       <div className="detail-card-time" title={`${message.created_at} → ${message.updated_at}`}>
         {activityTime(message.created_at)} → {activityTime(message.updated_at)}
       </div>
-      <ReplyReference message={message} />
+      <ReplyReference message={message} onLoad={onLoad} />
       <MessageBody message={message} onReply={onReply} />
     </article>
   );

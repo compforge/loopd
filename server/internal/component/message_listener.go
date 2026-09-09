@@ -8,6 +8,7 @@ import (
 
 	runner "github.com/compforge/agentue/sdks/go/runner"
 	ui "github.com/compforge/agentue/sdks/go/ui"
+	"github.com/compforge/loopd/server/internal/eventbridge"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -63,7 +64,7 @@ func (c *MessageListener) Run(ctx context.Context, deliver func(ui.Event) error)
 		}
 		reading = true
 		go func() {
-			err := (runner.Replayer{Bridge: c.events}).Stream(ctx, "message/"+message.ID, "", func(d runner.Delivery) error {
+			err := (runner.Replayer{Bridge: c.events}).Stream(ctx, eventbridge.MessageKey(message.ID), "", func(d runner.Delivery) error {
 				event, err := ui.Parse(d.Data)
 				if err != nil {
 					return err

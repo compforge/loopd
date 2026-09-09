@@ -11,6 +11,7 @@ import (
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	ui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/server/internal/eventbridge"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/qiankunli/go-stdx/uuid"
@@ -278,7 +279,7 @@ func (service *MessageService) EmitMessage(ctx context.Context, messageID string
 }
 
 func (service *MessageService) publish(ctx context.Context, message repo.MessageState, event ui.Event) (string, error) {
-	key := "message/" + message.ID
+	key := eventbridge.MessageKey(message.ID)
 	state, err := service.events.State(ctx, key)
 	if errors.Is(err, agentuerunner.ErrNotFound) {
 		if err := service.ensureStream(ctx, model.Message{ID: message.ID}); err != nil {
@@ -318,7 +319,7 @@ func (service *MessageService) publish(ctx context.Context, message repo.Message
 	return "", nil
 }
 
-func streamKey(message model.Message) string { return "message/" + message.ID }
+func streamKey(message model.Message) string { return eventbridge.MessageKey(message.ID) }
 func (service *MessageService) ensureStream(ctx context.Context, message model.Message) error {
 	key := streamKey(message)
 	if _, err := service.events.State(ctx, key); err == nil {

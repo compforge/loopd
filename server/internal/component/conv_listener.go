@@ -9,6 +9,7 @@ import (
 	agentuerunner "github.com/compforge/agentue/sdks/go/runner"
 	agentueui "github.com/compforge/agentue/sdks/go/ui"
 	"github.com/compforge/loopd/pkg/contract"
+	"github.com/compforge/loopd/server/internal/eventbridge"
 	"github.com/compforge/loopd/server/internal/model"
 	"github.com/compforge/loopd/server/internal/repo"
 )
@@ -92,7 +93,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 				}
 			}
 			// Readers never provision Redis keys. Missing streams are repaired from SQL.
-			_ = (agentuerunner.Replayer{Bridge: listener.events}).Stream(readerCtx, "message/"+reader.message.ID, "", func(value agentuerunner.Delivery) error {
+			_ = (agentuerunner.Replayer{Bridge: listener.events}).Stream(readerCtx, eventbridge.MessageKey(reader.message.ID), "", func(value agentuerunner.Delivery) error {
 				return send(messageDelivery{reader: reader, delivery: value})
 			})
 			_ = send(messageDelivery{reader: reader, done: true})

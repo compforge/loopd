@@ -239,8 +239,9 @@ SDK 不自动重试容量拒绝。相同幂等 key 的既有调用不受新调�
 [容量与拒绝](harness.md#容量与拒绝)。
 
 Call.Get(ctx) 通过 API 读取状态，Stream(ctx) 通过 Server 的 Run SSE 接口观察 AgentUE 增量，
-实时事件来源是 Redis。Wait(ctx) 在流结束或中断时查询持久状态，可重试的中断重新连接同一
-Call，最多三次连接；Result(ctx) 从持久终态提取结果。正常流不轮询调用状态。
+实时事件来源是 Redis。Wait(ctx) 低频查询轻量 Run 状态，不订阅或丢弃正文事件；成功后只读取
+result block，Result(ctx) 返回该结果。等待与内容订阅相互独立；已完成的调用也不重放输出。
+状态观察只对连续的可重试错误做有限重试，成功读取后重置失败计数，不限制正常执行时长。
 `loop.Harness.Call(runID)` 重建句柄，不重新提交。取消等待、关闭 toolkit 均不取消执行；显式
 Cancel(ctx) 请求停止 Server 驱动，远端是否中断由 Adapter 能力决定。
 

@@ -89,7 +89,9 @@ func TestAdditionalInputReplansAfterHarnessBatch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// Replanning observes several sequential Runs through the runtime's
+			// low-frequency state polling, not immediate output-stream completion.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {

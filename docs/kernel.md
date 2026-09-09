@@ -39,6 +39,11 @@ Consumer，同一参与者可以兼具两种职责。不同 Actor 独立消费�
 - Harness 通过 Adapter 提供智能执行；执行状态与恢复属于 Harness。
 - AgentLedger 承载完整执行轨迹，不替代可见聊天记录。
 
+Server 作为 Human、Operator、Harness 协作平台的一个直接体现，是提供协作所需的 API：
+参与者发现、会话与消息读写、消费确认、Human 交互、Harness 调用及输出观察。
+这些 API 是共享的协作边界；loop-runtime 将其封装为 Operator 使用的 Verb，屏蔽底层机制，
+而不接管参与者的业务决策与独立生命周期。
+
 公共协作模型和调用契约由 `pkg/contract`（`package contract`）定义，包含 Actor、Message、
 Conversation、Human、Harness 调用及 Speak/Poll/Commit；`pkg/k8s/v1alpha1` 定义共享的 Conv CRD。
 server、runtime 和 harness 使用同一份公共契约；CRD 可以依赖 contract，contract 不依赖 Kubernetes
@@ -121,7 +126,12 @@ Operator 自己的领域 CRD 仍通过 Kubernetes Client 操作；这与调用 S
 每条 Message 独立寻址、更新和持久化；Speak 可以一次说完，也可以逐步输出后 End。
 End 只表示说完这条消息，不结束 Conv 或业务工作。页面流只聚合传输，其连接生命周期由页面管理，
 不是 Operator 的完成动作。
-连接断开不取消执行，任意 server 实例可以续接页面流；Redis 丢失时只能恢复已固化快照。
+执行与实时观察各自持有生命周期：输入或调用一旦被持久接受，关闭、刷新浏览器或断开 SSE
+只结束观察，不取消已经开始的工作。工作由 Operator/Harness 判断完成，或由其执行策略收口；
+用户显式停止是另一种控制动作，当前页面尚未提供通用停止入口。
+输出写入与观察不要求落在同一 Server Pod：共享 DB/Redis 的任意 server 实例都可服务页面或
+Operator 的流订阅，不要求粘性会话。Redis 提供 append-only 实时 Message 事件，DB 提供消息快照，
+实时观察者不依赖逐增量读取 DB。Redis 丢失时只能恢复已固化快照，而不是重演全部中间事件。
 
 Server 是人、Operator、Harness 的协作平台；loop-runtime 是 Operator toolkit。
 Server 内置 Harness Engine，独立于 Operator 接收调用、保存输出并承接进程故障后的重新挂接。

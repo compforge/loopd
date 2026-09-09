@@ -13,7 +13,7 @@ export interface HumanCard {
 // Cards are a local rendering of one persisted message, never a relation lookup.
 // Only typed Human messages are interactive; ordinary content remains content.
 export function humanCard(message: Message): HumanCard | undefined {
-  const block = message.content.blocks[0];
+  const block = message.content?.blocks[0];
   if (!block) return undefined;
   if (block.type === "ask" || block.type === "confirm") {
     const question = block as unknown as HumanQuestion;
