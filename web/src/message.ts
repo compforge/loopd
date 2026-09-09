@@ -10,6 +10,10 @@ export function messageStatusLabel(status: Message["status"]): string {
 export function mergeMessage(messages: Message[], incoming: Message): Message[] {
   const existing = messages.find((m) => m.id === incoming.id);
   if (existing && (existing.revision ?? 0) > (incoming.revision ?? 0)) return messages;
+  // Metadata discovery must not erase an already loaded body at the same revision.
+  if (existing?.content && !incoming.content && (existing.revision ?? 0) === (incoming.revision ?? 0)) {
+    incoming = { ...incoming, content: existing.content };
+  }
   return [...messages.filter((m) => m.id !== incoming.id), incoming].sort((a, b) => a.id.localeCompare(b.id));
 }
 export function applyMessageEvent(messages: Message[], delivery: MessageEvent): Message[] {
@@ -20,7 +24,14 @@ export function applyMessageEvent(messages: Message[], delivery: MessageEvent): 
   if (existing && ((existing.revision ?? 0) > event.seq || (event.op !== "start" && (existing.revision ?? 0) === event.seq))) return messages;
   const base = message ?? existing;
   if (!base) throw new Error("Message event requires an initial snapshot");
-  const snapshot = applyPatch(structuredClone(existing?.content ?? base.content), event);
+  // Metadata alone is not a patch base. A visible body read or Start snapshot
+  // restores it; never apply a delta to a fabricated empty model. Keep its
+  // watermark so an in-flight older body cannot restore a base missing events.
+  if (!base.content && !existing?.content && event.op !== "start") {
+    return mergeMessage(messages, { ...base, revision: event.seq });
+  }
+  const initial = event.op === "start" ? event.model : existing?.content ?? base.content;
+  const snapshot = applyPatch(structuredClone(initial!), event);
   const model = parseMessageContent(snapshot);
   return mergeMessage(messages, { ...base, revision: event.seq, content: model });
 }

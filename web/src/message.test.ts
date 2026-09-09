@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeMessageFrame, type Message } from "./api";
-import { applyMessageEvent } from "./message";
+import { applyMessageEvent, mergeMessage } from "./message";
 
 const message = (id: string): Message => ({
  status:"streaming", id, task_id:"task", conversation_id:"work",source_kind:"harness",source_key:"same-actor",
@@ -13,6 +13,21 @@ const frame = (m: Message, event: Record<string, unknown>) => {
   event.op === "start" || event.op === "end" ? { message: m, event: patch } : patch,
  ));
 };
+it("merges lazy bodies without losing live output or replacing equal-revision content with metadata", () => {
+ const full = message("a");
+ const {content: _content, ...info} = full;
+ expect(mergeMessage([full], info)[0].content).toEqual(full.content);
+ const latest = {...full, revision: 3};
+ expect(mergeMessage([latest], {...full, revision: 2})[0]).toEqual(latest);
+ const newerInfo = {...info, revision: 4};
+ expect(mergeMessage([latest], newerInfo)[0].content).toBeUndefined();
+ const delta = frame(full, {op:"append", seq:5, mask:"block.content", block:{id:"text",content:"x"}});
+ const pending = applyMessageEvent([newerInfo], delta);
+ expect(pending[0]).toEqual({...newerInfo, revision:5});
+ expect(mergeMessage(pending, {...full, revision:4})).toBe(pending);
+ const restored = {...full,revision:5};
+ expect(applyMessageEvent([newerInfo],frame(restored,{op:"start",seq:5,model:restored.content}))[0].content).toEqual(full.content);
+});
 describe("message-addressed delivery",()=>{
  it("isolates equal actor, block IDs and seq across outputs and ignores duplicate deltas",()=>{
   const a=message("a"),b=message("b");
@@ -24,7 +39,7 @@ describe("message-addressed delivery",()=>{
   const delta=frame(a,{op:"append",seq:3,mask:"block.content",block:{id:"text",type:"text",content:"!"}});
   messages=applyMessageEvent(messages,delta);
   expect(applyMessageEvent(messages,delta)).toBe(messages);
-  expect(messages.map(m=>m.content.blocks[0].content)).toEqual(["a!","b"]);
+  expect(messages.map(m=>m.content!.blocks[0].content)).toEqual(["a!","b"]);
  });
  it("rejects mismatched envelope identity",()=>{
   const event=frame(message("a"),{op:"start",seq:1,model:message("a").content});
@@ -37,7 +52,7 @@ describe("message-addressed delivery",()=>{
   expect(delta.message).toBeUndefined();
   messages = applyMessageEvent(messages, delta);
   expect(messages[0]).toMatchObject({source_kind: a.source_kind, source_key: a.source_key, reply_to_id: "question", target_key: "alice", status: "streaming", revision: 2});
-  const repaired = {...a, revision: 5, content: {...a.content, blocks: [{id: "text", type: "text", content: "recovered"}]}};
+  const repaired = {...a, revision: 5, content: {...a.content!, blocks: [{id: "text", type: "text", content: "recovered"}]}};
   messages = applyMessageEvent(messages, frame(repaired, {op: "start", seq: 5, model: repaired.content}));
   expect(applyMessageEvent(messages, delta)).toBe(messages);
   const terminal = {...repaired, status: "completed" as const, revision: 6};
@@ -45,7 +60,7 @@ describe("message-addressed delivery",()=>{
   const end = decodeMessageFrame('data: {"stream_id":"a","op":"end","seq":6}');
   expect(applyMessageEvent(messages, end)).toBe(messages);
   expect(messages[0].status).toBe("completed");
-  expect(messages[0].content.blocks[0].content).toBe("recovered");
+  expect(messages[0].content!.blocks[0].content).toBe("recovered");
  });
  it("requires a known message for bare deltas and accepts unaddressed heartbeats", () => {
   const delta = frame(message("missing"), {op: "set", seq: 2, block: {id: "text", type: "text", content: "x"}});
@@ -75,7 +90,7 @@ it("preserves failed and cancelled states on End and history replay", () => {
   const terminal = {...current, status, revision: 2};
   let messages = applyMessageEvent([current], frame(terminal, {op: "end", seq: 2}));
   expect(messages[0].status).toBe(status);
-  expect(messages[0].content.meta.output).toBeUndefined();
+  expect(messages[0].content!.meta.output).toBeUndefined();
   messages = applyMessageEvent(messages, frame(current, {op: "start", seq: 1, model: current.content}));
   expect(messages[0].status).toBe(status);
   const restored = applyMessageEvent([], frame(terminal, {op: "start", seq: 2, model: terminal.content}));

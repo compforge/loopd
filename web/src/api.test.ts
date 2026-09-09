@@ -36,18 +36,13 @@ describe("Conversation navigation", () => {
       "/v1/conversations?parent_id=root%2F1&actor_kind=operator&actor_key=other",
     ]);
   });
-  it("reads all child Messages rather than truncating long tasks to one page", async () => {
-    const first = Array.from({ length: 100 }, (_, index) => ({ id: `m-${index}` }));
-    const fetch = vi.fn(async (path: string) => {
-      if (path.endsWith("/content")) return Response.json({ id: path.split("/").at(-2) });
-      return Response.json({ data: path.endsWith("after=") ? first : [{ id: "m-100" }] });
-    });
+  it("reads one metadata page without fetching bodies or following history", async () => {
+    const first = Array.from({ length: 30 }, (_, index) => ({ id: `m-${index}` }));
+    const fetch = vi.fn().mockResolvedValue(Response.json({ data: first }));
     vi.stubGlobal("fetch", fetch);
-    expect(await listMessages("child")).toHaveLength(101);
-    expect(fetch.mock.calls.filter(([path]) => !path.endsWith("/content")).map(([path]) => path)).toEqual([
-      "/v1/conversations/child/messages?limit=100&after=",
-      "/v1/conversations/child/messages?limit=100&after=m-99",
-    ]);
+    expect(await listMessages("child", { order: "desc" })).toHaveLength(30);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/v1/conversations/child/messages?limit=30&order=desc");
   });
 });
 

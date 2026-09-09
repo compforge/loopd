@@ -35,7 +35,6 @@ var (
 	ErrEndStatusInvalid        = &Error{Message: "End requires a terminal message status"}
 	ErrEndStatusConflict       = &Error{Message: "message already ended with a different status"}
 	ErrPendingMessageUpdate    = &Error{Message: "previous message update is unresolved; retry it before sending another update"}
-	ErrHarnessStreamIncomplete = &Error{Message: "Harness stream ended before durable terminal state", Retryable: true}
 )
 
 func IsConflict(err error) bool {

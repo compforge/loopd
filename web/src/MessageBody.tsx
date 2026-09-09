@@ -1,5 +1,6 @@
 import Markdown from "react-markdown";
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { messageBodies } from "./message-body-loader";
 import { parseMessageContent } from "./content";
 import { HumanMessage } from "./HumanMessage";
 import { humanCard } from "./card";
@@ -9,6 +10,7 @@ import type { HumanResult, Message } from "./api";
 export function MessageBody({ message, onReply, empty }: {
   message: Message; onReply?(result: HumanResult): void; empty?: ReactNode;
 }) {
+  if (!message.content) return <div className="message-placeholder quiet">正文按需加载…</div>;
   try {
     const card = humanCard(message);
     if (card) return <HumanMessage key={message.id} message={message} card={card} onReply={onReply} />;
@@ -32,9 +34,41 @@ export function MessageBody({ message, onReply, empty }: {
   } catch { return <p>消息内容无法显示。</p>; }
 }
 
-export function ReplyReference({ message }: { message: Message }) {
+export function ReplyReference({ message, onLoad }: { message: Message; onLoad?(message: Message): void }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  const request = useRef<AbortController | undefined>(undefined);
+  const destination = useRef<string | undefined>(undefined);
+  useEffect(() => () => request.current?.abort(), []);
+  useLayoutEffect(() => {
+    if (!destination.current) return;
+    const element = document.getElementById(destination.current);
+    if (element) {
+      element.scrollIntoView({ block: "center" });
+      destination.current = undefined;
+    }
+  });
   if (!message.reply_to_id) return null;
-  return <a className="reply-reference" href={`#message-${message.reply_to_id}`}>
-    查看所回复的消息
-  </a>;
+  const target = `message-${message.reply_to_id}`;
+  return <><a className="reply-reference" href={`#${target}`} onClick={(event) => {
+    event.stopPropagation();
+    if (document.getElementById(target) || !onLoad) return;
+    event.preventDefault();
+    if (loading) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setLoading(true);
+    setError(undefined);
+    // A reference is a point read, not a reason to fetch every intervening page.
+    void messageBodies.load(message.conversation_id, message.reply_to_id!, controller.signal)
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        destination.current = target;
+        onLoad(value);
+      })
+      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+  }}>
+    {loading ? "正在查找原消息…" : "查看所回复的消息"}
+  </a>{error && <small role="alert">{error}</small>}</>;
 }

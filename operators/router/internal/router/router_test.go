@@ -81,7 +81,9 @@ func TestReconcileRoutesSimpleAndComplexTasks(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			// Plan, work and summary each observe completion on the runtime's
+			// status polling interval; the test budget covers all three stages.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if _, err := reconciler.Reconcile(ctx, ctrl.Request{
 				NamespacedName: objectKey("conversation-1"),

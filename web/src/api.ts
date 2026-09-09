@@ -26,7 +26,7 @@ export interface Message {
   task_id: string;
   source_kind: ActorKind;
   source_key: string;
-  content: MessageContent;
+  content?: MessageContent;
   created_at: string;
   updated_at: string;
 }
@@ -66,36 +66,19 @@ export async function createConversation(name: string, signal?: AbortSignal): Pr
 }
 
 type MessageInfo = Omit<Message, "content">;
+export const messagePageSize = 30;
 
-export async function listMessages(conversationID: string, signal?: AbortSignal, after = ""): Promise<Message[]> {
-  const messages: Message[] = [];
-  for (;;) {
-    const page = await requestJSON<Page<MessageInfo>>(
-      `/v1/conversations/${encodeURIComponent(conversationID)}/messages?limit=100&after=${encodeURIComponent(after)}`,
-      { signal },
-    );
-    // Bound body reads independently of metadata discovery.
-    for (let i = 0; i < page.data.length; i += 4) {
-      const batch = await Promise.all(page.data.slice(i, i + 4).map((m) =>
-        requestJSON<Message>(`/v1/conversations/${encodeURIComponent(conversationID)}/messages/${encodeURIComponent(m.id)}/content`,{signal})));
-      messages.push(...batch);
-    }
-    if (page.data.length < 100) return messages;
-    after = page.data[page.data.length - 1].id;
-  }
+// One call discovers one metadata page, never bodies or the rest of history.
+export async function listMessages(conversationID: string, query: { after?: string; before?: string; order?: "asc" | "desc"; ids?: string } = {}, signal?: AbortSignal): Promise<Message[]> {
+  const params = new URLSearchParams({ limit: String(messagePageSize), ...query });
+  const page = await requestJSON<Page<MessageInfo>>(
+    `/v1/conversations/${encodeURIComponent(conversationID)}/messages?${params}`, { signal },
+  );
+  return page.data;
 }
 
-export async function messageChanges(conversationID: string, revisions: Map<string, number>, signal?: AbortSignal): Promise<Message[]> {
-  const entries = [...revisions];
-  const messages: Message[] = [];
-  for (let i = 0; i < entries.length; i += 100) {
-    const watch = entries.slice(i, i + 100).map(([id, revision]) => `${id}:${revision}`).join(",");
-    const page = await requestJSON<Page<Message>>(
-      `/v1/conversations/${encodeURIComponent(conversationID)}/messages?watch=${encodeURIComponent(watch)}`, { signal },
-    );
-    messages.push(...page.data);
-  }
-  return messages;
+export function readMessage(conversationID: string, messageID: string, signal?: AbortSignal): Promise<Message> {
+  return requestJSON<Message>(`/v1/conversations/${encodeURIComponent(conversationID)}/messages/${encodeURIComponent(messageID)}/content`, { signal });
 }
 
 export interface SubmitMessageRequest {

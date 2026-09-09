@@ -182,6 +182,11 @@ DB 与 Redis 保存的是同一输出的不同形态，Operator 和 Harness 输�
 因此，DB Revision 表达快照进度，Redis Stream ID 表达交付游标，两者不可互换。Harness 原生
 执行的稳定回放仍由 Harness 与 Adapter 负责，不能从 DB 快照反推出完整原生轨迹。
 
+Redis 将实时观察者与执行端解耦，使页面从事件流接收增量，避免多个页面逐增量读取 DB。
+它减少的是实时订阅的数据库读放大，不替代写入侧的快照固化：输出仍先更新 DB，再发布事件。
+执行不依赖浏览器连接，实时订阅的关闭也不撤销已接受的输入或调用；生命周期见
+[提交与观察](ue.md#提交与观察)。
+
 实时交付有两个消费视角，共用按 Message ID 寻址的 Redis 流：
 
 - `GET /v1/conversations/:conversation_id/stream` 聚合会话内消息，服务 UI。

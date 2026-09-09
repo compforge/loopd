@@ -1,6 +1,6 @@
 import { ActorKind, isOperatorKind, operatorRole } from "./actor";
 import type { MessageContent } from "./content";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import {
   createConversation,
   listActors,
@@ -11,6 +11,7 @@ import {
   type Message,
 } from "./api";
 import { MessageBody, ReplyReference } from "./MessageBody";
+import { LazyMessage } from "./LazyMessage";
 import { MessagePoller } from "./message-poll";
 import { mergeMessage, applyMessageEvent, messageStatusLabel } from "./message";
 import { DetailPanel, detailOrganizer, type DetailSelection } from "./DetailPanel";
@@ -31,9 +32,18 @@ export function App() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [hasOlder, setHasOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const messageList = useRef<HTMLElement>(null);
+  const historyAnchor = useRef<{ id: string; top: number } | undefined>(undefined);
+  const scrollToLatest = useRef(false);
+  const conversationSignal = useRef<AbortSignal | undefined>(undefined);
   const messagePoller = useRef<{ conversationID: string; poller: MessagePoller } | undefined>(undefined);
   useConversationStream(selectedConversationID, (delivery) => {
-    if (delivery.event.stream_id) setMessages((current) => applyMessageEvent(current, delivery));
+    if (delivery.event.stream_id) {
+      messagePoller.current?.poller.observe(delivery.event.stream_id);
+      setMessages((current) => applyMessageEvent(current, delivery));
+    }
   }, (signal) => refreshMessages(selectedConversationID!, signal, true));
 
   const selectedConversation = conversations.find((item) => item.id === selectedConversationID);
@@ -90,6 +100,7 @@ export function App() {
     }
     localStorage.setItem(selectedConversationKey, selectedConversationID);
     const controller = new AbortController();
+    conversationSignal.current = controller.signal;
     void refreshMessages(selectedConversationID, controller.signal).then((items) => {
       if (controller.signal.aborted) return;
       const lastMessage = items.at(-1);
@@ -101,21 +112,43 @@ export function App() {
     return () => controller.abort();
   }, [selectedConversationID]);
 
+  useLayoutEffect(() => {
+    const container = messageList.current;
+    if (!container) return;
+    const anchor = historyAnchor.current;
+    if (anchor) {
+      const element = document.getElementById(`message-${anchor.id}`);
+      if (element) container.scrollTop += element.getBoundingClientRect().top - anchor.top;
+      historyAnchor.current = undefined;
+    } else if (scrollToLatest.current && messages.length) {
+      container.scrollTop = container.scrollHeight;
+      scrollToLatest.current = false;
+    }
+  }, [messages]);
+
 
   async function refreshMessages(conversationID: string, signal?: AbortSignal, sync = false): Promise<Message[]> {
     try {
       if (messagePoller.current?.conversationID !== conversationID) {
         messagePoller.current = { conversationID, poller: new MessagePoller(conversationID) };
+        scrollToLatest.current = true;
       }
       const poller = messagePoller.current.poller;
-      const items = await (sync ? poller.sync(signal) : poller.poll(signal));
-      if (signal?.aborted) return [];
-      setMessages((current) => {
-        // Equal message revisions may carry refreshed reference previews/cards.
-        let result = current.filter((m) => m.conversation_id === conversationID && !m.id.startsWith("local-"));
-        for (const m of items) result = mergeMessage(result, m);
-        return result;
-      });
+      const receive = (items: Message[]) => {
+        if (signal?.aborted || messagePoller.current?.poller !== poller) return;
+        setHasOlder(poller.hasOlder);
+        setMessages((current) => {
+          let result = current.filter((m) => m.conversation_id === conversationID && !m.id.startsWith("local-"));
+          for (const m of items) result = mergeMessage(result, m);
+          return result;
+        });
+      };
+      if (sync && signal) {
+        await poller.sync(signal, receive);
+        return [];
+      }
+      const items = await poller.poll(signal);
+      receive(items);
       return items;
     } catch (cause) {
       if (!isAbort(cause)) setError(errorMessage(cause));
@@ -123,9 +156,28 @@ export function App() {
     }
   }
 
+  async function loadOlder() {
+    const source = messagePoller.current;
+    if (!source || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const items = await source.poller.older(conversationSignal.current);
+      if (messagePoller.current !== source || conversationSignal.current?.aborted) return;
+      const first = messages[0];
+      const element = first && document.getElementById(`message-${first.id}`);
+      if (element) historyAnchor.current = { id: first.id, top: element.getBoundingClientRect().top };
+      setMessages((current) => items.reduce(mergeMessage, current));
+      setHasOlder(source.poller.hasOlder);
+    } catch (cause) {
+      if (messagePoller.current === source && !isAbort(cause)) setError(errorMessage(cause));
+    } finally { if (messagePoller.current === source) setLoadingOlder(false); }
+  }
+
   function selectConversation(conversationID: string) {
     if (conversationID === selectedConversationID) return;
     messagePoller.current = undefined;
+    setHasOlder(false);
+    setLoadingOlder(false);
     setMessages([]);
     setSelectedMessageID(undefined);
     setDetailSelection(undefined);
@@ -135,6 +187,8 @@ export function App() {
 
   function startConversation() {
     messagePoller.current = undefined;
+    setHasOlder(false);
+    setLoadingOlder(false);
     setSelectedConversationID(undefined);
     setMessages([]);
     setSelectedMessageID(undefined);
@@ -245,7 +299,8 @@ export function App() {
           </div>
         </header>
 
-        <section className="messages" aria-live="polite">
+        <section className="messages" ref={messageList} aria-live="polite">
+          {hasOlder && <button className="load-history" type="button" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? "加载中…" : "加载更早的消息"}</button>}
           {renderedMessages.length === 0 && (
             <div className="welcome">
               <div className="welcome-symbol">↻</div>
@@ -257,6 +312,7 @@ export function App() {
             const isLive = message.status === "streaming";
             const active = selectedMessageID === message.id;
             return (
+              <LazyMessage key={message.id} message={message} onLoad={(value) => setMessages((current) => mergeMessage(current, value))}>
               <article
                 className={`message ${isOperatorKind(message.source_kind) ? ActorKind.Operator : message.source_kind} ${active ? "selected" : ""}`}
                 key={message.id}
@@ -271,7 +327,10 @@ export function App() {
                   {message.status !== "completed" && <span className="run-badge">{messageStatusLabel(message.status)}</span>}
                 </div>
                 <div className="bubble">
-                  <ReplyReference message={message} />
+                  <ReplyReference message={message} onLoad={(value) => {
+                    messagePoller.current?.poller.observe(value.id);
+                    setMessages((current) => mergeMessage(current, value));
+                  }} />
                   <MessageBody message={message} onReply={(result) => setMessages((current) => {
                     let next = mergeMessage(current, result.message);
                     if (result.reply) next = mergeMessage(next, result.reply);
@@ -279,6 +338,7 @@ export function App() {
                   })} empty={isLive ? <Typing /> : <span className="quiet">等待处理…</span>} />
                 </div>
               </article>
+              </LazyMessage>
             );
           })}
           {error && <div className="error-banner">{error}</div>}
