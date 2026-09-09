@@ -405,7 +405,7 @@ func (c *Controller) receive(ctx context.Context, run *lh.Run) (ctrl.Result, err
 			return ctrl.Result{}, err
 		}
 		for _, m := range polled.Messages {
-			if m.Kind == contract.ActorKindUser && m.Purpose == "input" {
+			if m.Kind == contract.ActorKindUser && !m.IsHumanReply() {
 				text := messageText(m)
 				if m.Key != run.Spec.UserKey || len(run.Status.InputMessageIDs) >= 100 || len(run.Status.Guidance)+len(text)+len(m.ID)+8 > 16000 {
 					break

@@ -34,6 +34,70 @@ func runFixture(t *testing.T) (*Store, model.HarnessRun, lock.Token) {
 	}
 	return s, run, token
 }
+
+// +case=`Poll returns streaming snapshots without blocking later messages; subsequent content remains readable by ID after the consumer advances.`
+func TestInboxIncludesStreamingHarnessMessage(t *testing.T) {
+	s, run, token := runFixture(t)
+	ctx := context.Background()
+	if err := s.db.Model(&model.Message{}).Where("id = ?", run.MessageID).
+		Updates(map[string]any{"kind": "operator/op/harness", "actor_key": "worker"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	later, err := s.Speak(ctx, "conv", contract.SpeakRequest{Key: "later", Actor: contract.ActorRef{Kind: "operator", Key: "other"}, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInbox := func(want int) []model.Message {
+		t.Helper()
+		rows, err := s.ListInbox(ctx, "conv", "operator", "reader", "", 100)
+		if err != nil || len(rows) != want {
+			t.Fatalf("inbox=%+v err=%v want=%d", rows, err, want)
+		}
+		return rows
+	}
+	if rows := assertInbox(2); rows[0].Status != "streaming" {
+		t.Fatalf("streaming snapshot=%+v", rows[0])
+	}
+	if err := s.AppendHarnessOutput(ctx, token, run.ID, 1, "first", ui.Event{Op: ui.OpSet, Block: map[string]any{"id": "text", "type": "text", "content": "partial"}}); err != nil {
+		t.Fatal(err)
+	}
+	assertInbox(2)
+	result := contract.TextResult("complete")
+	if _, err := s.FinishHarnessRun(ctx, token, run.ID, contract.CallSucceeded, &result, ""); err != nil {
+		t.Fatal(err)
+	}
+	rows := assertInbox(2)
+	if rows[0].ID != run.MessageID || rows[1].ID != later.ID || rows[0].Status != "completed" {
+		t.Fatalf("completed prefix=%+v", rows)
+	}
+	advanced, err := s.ListInbox(ctx, "conv", "operator", "reader", later.ID, 100)
+	if err != nil || len(advanced) != 0 {
+		t.Fatalf("ID discovery replayed a revision: %+v %v", advanced, err)
+	}
+	final, err := s.GetMessage(ctx, run.MessageID)
+	if err != nil || final.Status != "completed" {
+		t.Fatalf("retained ID cannot read completion: %+v %v", final, err)
+	}
+	if err := s.DeleteMessage(ctx, run.MessageID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("run-owned deletion=%v", err)
+	}
+}
+
+func TestHarnessKindDoesNotImplyRunOwnership(t *testing.T) {
+	s, _, _ := runFixture(t)
+	ctx := context.Background()
+	message, err := s.Speak(ctx, "conv", contract.SpeakRequest{Key: "speech", Actor: contract.ActorRef{Kind: "operator/op/harness", Key: "worker"}, Status: contract.MessageStatusStreaming, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ProjectOutput(ctx, message.ID, ui.Event{Op: ui.OpSet, Seq: 2, Block: map[string]any{"id": "text", "type": "text", "content": "hello"}}); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := s.ExpireMessages(ctx, time.Now().Add(time.Hour), 100)
+	if err != nil || len(expired) != 1 || expired[0] != message.ID {
+		t.Fatalf("ordinary Harness speech expiry=%v err=%v", expired, err)
+	}
+}
 func TestHarnessLeaseTakeoverFencesEveryWrite(t *testing.T) {
 	s, run, old := runFixture(t)
 	ctx := context.Background()

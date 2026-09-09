@@ -120,7 +120,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 			return err
 		}
 		watch.revision = revision
-		if (row.Purpose == "output" || row.Purpose == "harness") && message.Ended() {
+		if message.Ended() {
 			end := agentueui.End(revision)
 			end.StreamID = row.ID
 			data, err := end.Marshal()
@@ -142,7 +142,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 		watch.message = row
 		if !visibleMessage(row).Ended() || row.HumanDueAt != nil {
 			watching[row.ID] = watch
-			if (row.Purpose == "output" || row.Purpose == "harness") && !visibleMessage(row).Ended() {
+			if !visibleMessage(row).Ended() {
 				start(watch)
 			}
 		} else {
@@ -198,7 +198,7 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 				} else if state.Ended && state.HumanDueAt == nil {
 					stop(watch)
 					delete(watching, state.ID)
-				} else if watch.message.Purpose == "output" || watch.message.Purpose == "harness" {
+				} else if !state.Ended {
 					start(watch)
 				}
 			}
@@ -299,5 +299,5 @@ func (listener *ConvListener) Run(ctx context.Context, deliver func(Event) error
 }
 
 func visibleMessage(m model.Message) contract.Message {
-	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }

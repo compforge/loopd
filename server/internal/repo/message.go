@@ -117,7 +117,6 @@ func (store *Store) GetMessage(ctx context.Context, id string) (model.Message, e
 type MessageState struct {
 	ID             string
 	ConversationID string
-	Purpose        string
 	Revision       uint64
 	Status         contract.MessageStatus
 	Ended          bool
@@ -129,8 +128,8 @@ func (store *Store) GetMessageState(ctx context.Context, id string) (MessageStat
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var m model.Message
-	err := store.db.WithContext(ctx).Select("id", "conversation_id", "purpose", "revision", "status").First(&m, "id = ?", id).Error
-	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Purpose: m.Purpose, Revision: m.Revision, Status: contract.MessageStatus(m.Status), Ended: (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended()}, mapError(err)
+	err := store.db.WithContext(ctx).Select("id", "conversation_id", "revision", "status").First(&m, "id = ?", id).Error
+	return MessageState{ID: m.ID, ConversationID: m.ConversationID, Revision: m.Revision, Status: contract.MessageStatus(m.Status), Ended: (contract.Message{Status: contract.MessageStatus(m.Status)}).Ended()}, mapError(err)
 }
 
 func (store *Store) ListMessages(ctx context.Context, conversationID, after string, limit int) ([]model.Message, error) {
@@ -153,8 +152,8 @@ func (store *Store) UpdateMessageContent(ctx context.Context, conversationID, id
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "conversation_id = ? AND id = ?", conversationID, id).Error; err != nil {
 			return err
 		}
-		if m.Purpose == "harness" {
-			return ErrConflict
+		if err := requireUnownedMessage(tx, m.ID); err != nil {
+			return err
 		}
 		m.Content = content
 		m.Revision++
@@ -173,8 +172,8 @@ func (store *Store) DeleteMessage(ctx context.Context, id string) error {
 			return err
 		}
 		// Run-owned output and its idempotency record must be retired together.
-		if m.Purpose == "harness" {
-			return ErrConflict
+		if err := requireUnownedMessage(tx, m.ID); err != nil {
+			return err
 		}
 		if err := tx.Where("message_id = ?", id).Delete(&model.MessagePart{}).Error; err != nil {
 			return err
@@ -186,7 +185,6 @@ func (store *Store) DeleteMessage(ctx context.Context, id string) error {
 func (store *Store) CreateChatInput(ctx context.Context, input model.Message) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	input.Purpose = "input"
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var conversation model.Conversation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&conversation, "id = ?", input.ConversationID).Error; err != nil {
@@ -223,14 +221,14 @@ func (store *Store) GetMessageStates(ctx context.Context, conversationID string,
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	var rows []model.Message
-	q := store.db.WithContext(ctx).Select("id", "conversation_id", "purpose", "revision", "status", "human_due_at").Where("conversation_id = ? AND id IN ?", conversationID, ids)
+	q := store.db.WithContext(ctx).Select("id", "conversation_id", "revision", "status", "human_due_at").Where("conversation_id = ? AND id IN ?", conversationID, ids)
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, mapError(err)
 	}
 	states := make([]MessageState, 0, len(rows))
 	for _, row := range rows {
 		status := contract.MessageStatus(row.Status)
-		states = append(states, MessageState{ID: row.ID, ConversationID: row.ConversationID, Purpose: row.Purpose, Revision: row.Revision, Status: status, Ended: status.Terminal(), HumanDueAt: row.HumanDueAt})
+		states = append(states, MessageState{ID: row.ID, ConversationID: row.ConversationID, Revision: row.Revision, Status: status, Ended: status.Terminal(), HumanDueAt: row.HumanDueAt})
 	}
 	return states, nil
 }
@@ -242,7 +240,8 @@ func (store *Store) ExpireMessages(ctx context.Context, cutoff time.Time, limit 
 	defer cancel()
 	var rows []model.Message
 	err := store.db.WithContext(ctx).Select("id", "revision", "target_kind").
-		Where("status = ? AND purpose <> ? AND updated_at <= ?", contract.MessageStatusStreaming, "harness", cutoff).
+		Where("status = ? AND updated_at <= ?", contract.MessageStatusStreaming, cutoff).
+		Where("NOT EXISTS (SELECT 1 FROM harness_runs WHERE harness_runs.message_id = messages.id)").
 		Order("updated_at ASC, id ASC").Limit(limit).Find(&rows).Error
 	if err != nil {
 		return nil, mapError(err)
@@ -251,7 +250,8 @@ func (store *Store) ExpireMessages(ctx context.Context, cutoff time.Time, limit 
 	for _, row := range rows {
 		// Leave updated_at at the last actual output time: expiry is not activity.
 		result := store.db.WithContext(ctx).Model(&model.Message{}).
-			Where("id = ? AND status = ? AND purpose <> ? AND revision = ? AND updated_at <= ?", row.ID, contract.MessageStatusStreaming, "harness", row.Revision, cutoff).
+			Where("id = ? AND status = ? AND revision = ? AND updated_at <= ?", row.ID, contract.MessageStatusStreaming, row.Revision, cutoff).
+			Where("NOT EXISTS (SELECT 1 FROM harness_runs WHERE harness_runs.message_id = messages.id)").
 			UpdateColumns(map[string]any{"status": contract.MessageStatusExpired, "revision": row.Revision + 1, "dispatch_pending": row.TargetKind != contract.ActorKindUser})
 		if result.Error != nil {
 			return expired, mapError(result.Error)

@@ -86,7 +86,7 @@ func TestConversationStreamScopeDiscoveryAndExpiry(t *testing.T) {
 		if event.Message == nil {
 			return nil
 		}
-		if event.MessageID == history.ID || event.MessageID == child.ID || event.Message.Purpose == "input" {
+		if event.MessageID == history.ID || event.MessageID == child.ID || event.Message.Kind == contract.ActorKindUser {
 			t.Fatal("loaded terminal history or child conv")
 		}
 		patch, err := ui.Parse(event.Data)

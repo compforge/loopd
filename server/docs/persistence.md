@@ -56,10 +56,13 @@ task_id 仅保存在真实用户 input 上作为提交交付标识，其他 Acto
 错误发言将 AgentUE meta.error 和 failed 状态在创建事务中一同保存；
 流式输出从 streaming 开始，End 的终态与 Revision 一起保存；长期失活由 server 按 updated_at + TTL 收口为 expired。
 受控 meta.output 只保存最后一次事件指纹，用于辨别响应丢失后的重试，不承担执行检查点。
-output、human_request、human_reply 分别表达普通输出、交互问题和卡片答复，不指定唯一主回答。
+消息的收发身份由 Actor/Target 表达，发送完成由 Status 表达，交互类型由内容表达；
+通用消费和页面流不按发言来源分支。Harness 输出的写入保护与执行期限由 Run 关联负责，
+普通失活 GC 不接管 Run 的输出。
 
 Human 答复接受事务同时保存问题的最终选择，以及答复自身所需的问题快照；两条 Message
-各自可独立呈现，不新增卡片表或读取时关联富化。具体内容契约见 [交互卡片](ue.md#自包含的消息呈现)。
+各自可独立呈现，不新增卡片表或读取时关联富化。交互状态保存实际接受的答复 ID，
+不能把任意带 reply_to_id 的自由发言当作已接受的选择。具体内容契约见 [交互卡片](ue.md#自包含的消息呈现)。
 
 ## Message 内容与 Parts
 

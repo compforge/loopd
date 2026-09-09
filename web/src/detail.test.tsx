@@ -45,7 +45,7 @@ it("distinguishes no selection from a message with no related Operator", () => {
 
 it("distinguishes custom roles with a shared Run key and renders persisted report errors", () => {
   const messages = ["manager", "executor", "auditor"].map((role): Message => ({
-    status: "completed", id: role, task_id: "task", conversation_id: "work", kind: `operator/longhorizon/${role}`, key: "run-uid", purpose: "output",
+    status: "completed", id: role, task_id: "task", conversation_id: "work", kind: "operator/longhorizon/harness", key: `run-uid/${role}`,
     created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:01:00Z",
     content: { version: "1.0", biz: "chat", meta: { title: "Round 2", actor_display_name: role }, blocks: [{ id: "report", type: "text", content: "Observed artifact", error: "Command timed out" }] },
   }));

@@ -10,7 +10,9 @@ import (
 func (store *Store) GetDeliveryInput(ctx context.Context, taskID string) (model.Message, error) {
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
-	rows, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB { return tx.Where("task_id = ? AND purpose = ?", taskID, "input").Limit(1) })
+	rows, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Where("task_id = ? AND kind = ?", taskID, "user").Order("id ASC").Limit(1)
+	})
 	if err != nil {
 		return model.Message{}, err
 	}

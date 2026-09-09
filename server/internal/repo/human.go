@@ -28,6 +28,7 @@ type humanContent struct {
 			EffectKey   string        `json:"effect_key"`
 			Timeout     time.Duration `json:"timeout"`
 			Fingerprint string        `json:"fingerprint"`
+			ReplyID     string        `json:"reply_id,omitempty"`
 		} `json:"human"`
 	} `json:"meta"`
 	Blocks []contract.HumanBlock `json:"blocks"`
@@ -35,14 +36,11 @@ type humanContent struct {
 
 func decodeHuman(m model.Message) (humanContent, error) {
 	var c humanContent
-	if m.Purpose != "human_request" {
-		return c, ErrNotFound
-	}
 	if err := json.Unmarshal(m.Content, &c); err != nil {
 		return c, err
 	}
 	if len(c.Blocks) != 1 || (c.Blocks[0].Type != "ask" && c.Blocks[0].Type != "confirm") {
-		return c, fmt.Errorf("corrupt Human message %s", m.ID)
+		return c, ErrNotFound
 	}
 	return c, nil
 }
@@ -52,7 +50,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (contract.HumanRe
 	result := contract.HumanResult{Message: publicMessage(m), Status: b.Status, Deadline: b.Deadline, Reason: b.Reason}
 	if b.Status == contract.HumanSuccess || b.Status == contract.HumanDismissed {
 		var reply model.Message
-		if err := tx.First(&reply, "reply_to_id = ? AND purpose = ?", m.ID, "human_reply").Error; err != nil {
+		if err := tx.First(&reply, "id = ? AND reply_to_id = ?", c.Meta.Human.ReplyID, m.ID).Error; err != nil {
 			return result, err
 		}
 		if err := hydrateMessage(tx, &reply); err != nil {
@@ -74,7 +72,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (contract.HumanRe
 	return result, nil
 }
 func publicMessage(m model.Message) contract.Message {
-	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Purpose: m.Purpose, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func (store *Store) saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -105,22 +103,17 @@ func (store *Store) CreateHuman(ctx context.Context, r contract.HumanRequest) (r
 	data, _ := json.Marshal(r)
 	sum := sha256.Sum256(data)
 	fingerprint := hex.EncodeToString(sum[:])
+	key := fmt.Sprintf("human/%x", sha256.Sum256([]byte(r.ConversationID+"\x00"+string(r.Actor.Kind)+"\x00"+r.Actor.Key+"\x00"+r.EffectKey)))
 	err = store.withHumanContext(ctx, r, func(tx *gorm.DB) error {
-		var existing []model.Message
-		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("conversation_id = ? AND kind = ? AND actor_key = ? AND purpose = ?", r.ConversationID, r.Actor.Kind, r.Actor.Key, "human_request")
-		if err := query.Find(&existing).Error; err != nil {
-			return err
-		}
-		if err := hydrateMessages(tx.Clauses(clause.Locking{Strength: "UPDATE"}), existing); err != nil {
-			return err
-		}
-		for _, m := range existing {
+		var m model.Message
+		lookupErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("output_key = ?", key).First(&m).Error
+		if lookupErr == nil {
+			if err := hydrateMessage(tx.Clauses(clause.Locking{Strength: "UPDATE"}), &m); err != nil {
+				return err
+			}
 			c, err := decodeHuman(m)
 			if err != nil {
 				return err
-			}
-			if c.Meta.Human.EffectKey != r.EffectKey {
-				continue
 			}
 			if c.Meta.Human.Fingerprint != fingerprint {
 				return ErrConflict
@@ -130,6 +123,9 @@ func (store *Store) CreateHuman(ctx context.Context, r contract.HumanRequest) (r
 			}
 			result, err = humanResult(tx, m, c)
 			return err
+		}
+		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return lookupErr
 		}
 		now := time.Now().UTC()
 		question := domain.NewHumanQuestion(r, now)
@@ -142,7 +138,7 @@ func (store *Store) CreateHuman(ctx context.Context, r contract.HumanRequest) (r
 		if err != nil {
 			return err
 		}
-		m := model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: r.Actor.Kind, ActorKey: r.Actor.Key, TargetKind: r.Target.Kind, TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, Purpose: "human_request", Revision: 1, HumanDueAt: &deadline, Content: content}
+		m = model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: r.Actor.Kind, ActorKey: r.Actor.Key, TargetKind: r.Target.Kind, TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, OutputKey: &key, Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := store.saveMessage(tx, &m, true); err != nil {
 			return err
 		}
@@ -222,7 +218,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Meta    map[string]any             `json:"meta"`
 			Blocks  []contract.HumanReplyBlock `json:"blocks"`
 		}{"1.1", "chat", map[string]any{}, []contract.HumanReplyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value, Question: c.Blocks[0]}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Purpose: "human_reply", Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Revision: 1, Content: content}
 		var parent model.Conversation
 		if err := tx.First(&parent, "id = ?", conversationID).Error; err != nil {
 			return err
@@ -233,6 +229,9 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 		if err := store.saveMessage(tx, &reply, true); err != nil {
 			return err
 		}
+		// Persist the accepted reply identity: a free-form reply_to_id is not
+		// necessarily the answer accepted by this interaction.
+		c.Meta.Human.ReplyID = reply.ID
 		if err := store.saveHuman(tx, &m, c, true); err != nil {
 			return err
 		}

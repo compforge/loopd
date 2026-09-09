@@ -57,7 +57,7 @@ server 在同一事务内更新问题 block 的 `selected_value`，并在答复�
 `card` 或 `reply_to` 展示对象。问题页不需要加载答复，答复页不需要加载原问题；分页的
 消息集合、顺序和条数保持不变。物理 Part 的内容展开仍由 repo 负责。
 
-前端按 `purpose=human_request/human_reply` 与本条 block 生成问题或只读答复卡片。
+前端按本条消息中的 Ask/Confirm 或 Human reply block 生成问题或只读答复卡片。
 普通发言即使带有引用或类似 Ask/Confirm 的内容，也不会成为正式交互。AgentUE 普通 blocks
 继续按各自类型展示：text 保留原文，markdown 渲染 Markdown，tool 展示工具信息。
 `reply_to_id` 保留关联与“查看所回复的消息”跳转，不为引用加载预览。

@@ -6,7 +6,7 @@ import { MessageBody, ReplyReference } from "./MessageBody";
 import type { HumanQuestion } from "./human";
 
 function message(id: string, type = "ask"): Message {
- return { status: "completed", id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", purpose: "human_request", revision: 1, reply_to_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
+ return { status: "completed", id, task_id: "task", conversation_id: "conv", kind: "operator", key: "router", revision: 1, reply_to_id: "input", created_at: "", updated_at: "", content: { version: "1.0", biz: "chat", meta: {}, blocks: [{ id: "human", type, title: id, prompt: "Choose", status: "pending", deadline: "2030-01-01T00:00:00Z", choices: [{value: "small", label: "Small"}], allow_other: true }] } };
 }
 describe("Human messages", () => {
  it("routes equal block IDs to different Messages and ignores a stale snapshot", () => {
@@ -22,7 +22,7 @@ describe("Human messages", () => {
   expect(applyMessageEvent(updated, old)).toBe(updated);
  });
  it("renders a reply without the original message loaded and preserves its selected label", () => {
-  const reply = message("reply"); reply.kind = "user"; reply.purpose = "human_reply"; reply.reply_to_id = "question";
+  const reply = message("reply"); reply.kind = "user"; reply.reply_to_id = "question";
   reply.content.blocks = [{ id: "human", type: "human_reply", outcome: "success", value: "small", question: question("success", "small") }];
   const html = renderToStaticMarkup(<MessageBody message={reply} onReply={() => {}} />);
   expect(html).toContain("Small"); expect(html).toContain('checked=""'); expect(html).toContain("is-selected");
@@ -49,7 +49,7 @@ describe("Human messages", () => {
  it("renders free text answers read-only and keeps pending input available", () => {
   const m=message("scope");
   expect(renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />)).toContain("textarea");
-  m.kind="user"; m.purpose="human_reply";
+  m.kind="user";
   m.content.blocks=[{id:"human",type:"human_reply",outcome:"success",value:"custom answer",question:question("success","custom answer")}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("custom answer"); expect(html).not.toContain("textarea"); expect(html).not.toContain('checked=""');
@@ -62,14 +62,15 @@ describe("Human messages", () => {
   expect(html).not.toContain("<button"); expect(html).not.toContain("textarea");
  });
  it("renders a cancelled reply with its question but no invented selection", () => {
-  const m=message("cancel"); m.kind="user"; m.purpose="human_reply";
+  const m=message("cancel"); m.kind="user";
   m.content.blocks=[{id:"human",type:"human_reply",outcome:"dismissed",question:question("dismissed")}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Scope"); expect(html).toContain("Small"); expect(html).toContain("已忽略");
   expect(html).not.toContain('checked=""'); expect(html).not.toContain("<button");
  });
  it("does not treat ordinary messages or reply references as Human actions", () => {
-  const m=message("ordinary"); m.purpose="output";
+  const m=message("ordinary");
+  m.content.blocks=[{id:"text",type:"text",content:"Choose"}];
   const html=renderToStaticMarkup(<MessageBody message={m} onReply={() => {}} />);
   expect(html).toContain("Choose"); expect(html).not.toContain("<fieldset"); expect(html).not.toContain("<button");
   expect(renderToStaticMarkup(<ReplyReference message={m} />)).toContain('href="#message-input"');
@@ -81,7 +82,7 @@ function question(status: HumanQuestion["status"], value?: string): HumanQuestio
 }
 
 it("renders mixed content blocks without interpreting plain text as Markdown or executing HTML", () => {
- const m=message("content");m.purpose="output";
+ const m=message("content");
  m.content.blocks=[{id:"plain",type:"text",content:"**plain**"},{id:"md",type:"markdown",content:"**bold**\n\n`code`\n\n<script>alert(1)</script>\n\n[x](javascript:alert(1))"},{id:"tool",type:"tool",name:"Search",status:"completed",content:"Found result"}];
  const html=renderToStaticMarkup(<MessageBody message={m} />);
  expect(html).toContain("**plain**");expect(html).toContain("<strong>bold</strong>");expect(html).toContain("<code>code</code>");

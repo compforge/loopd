@@ -36,6 +36,33 @@ func question(key string) contract.HumanRequest {
 	return contract.HumanRequest{ConversationID: "conv", Actor: contract.ActorRef{Kind: contract.ActorKindOperator, Key: "operator"}, Target: contract.ActorRef{Kind: contract.ActorKindUser, Key: "alice"}, ReplyToID: "input", EffectKey: key, Type: "ask", Title: "Scope", Prompt: "Choose", Timeout: time.Hour, Choices: []contract.HumanChoice{{Value: "small", Label: "Small"}, {Value: "full", Label: "Full"}}}
 }
 
+// A reply reference alone does not mean a Human action accepted that message.
+func TestHumanResultUsesAcceptedReply(t *testing.T) {
+	s := humanStore(t)
+	ctx := context.Background()
+	q, err := s.CreateHuman(ctx, question("scope"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	free, err := s.Speak(ctx, "conv", contract.SpeakRequest{Key: "freeform", Actor: contract.ActorRef{Kind: "user", Key: "alice"}, ReplyToID: q.Message.ID, Content: json.RawMessage(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","type":"text","content":"Let me think"}]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := s.ReplyHuman(ctx, "conv", "alice", contract.HumanReply{ReplyToID: q.Message.ID, Outcome: contract.HumanSuccess, Value: "small"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range []func() (contract.HumanResult, error){
+		func() (contract.HumanResult, error) { return s.GetHuman(ctx, q.Message.ID) },
+		func() (contract.HumanResult, error) { return s.CreateHuman(ctx, question("scope")) },
+	} {
+		got, err := read()
+		if err != nil || got.Reply == nil || got.Reply.ID != reply.Reply.ID || got.Reply.ID == free.ID || got.Value != "small" {
+			t.Fatalf("Human result=%+v err=%v", got, err)
+		}
+	}
+}
+
 // +case=`Ask/Confirm 的问题和答复独立持久化展示数据；重试不改变快照或创建新答复。`
 func TestHumanMessageSnapshots(t *testing.T) {
 	for _, tc := range []struct {

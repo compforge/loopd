@@ -3,7 +3,7 @@ import { decodeMessageFrame, type Message } from "./api";
 import { applyMessageEvent } from "./message";
 
 const message = (id: string): Message => ({
- status:"streaming", id, task_id:"task", conversation_id:"work",kind:"harness",key:"same-actor",purpose:"output",
+ status:"streaming", id, task_id:"task", conversation_id:"work",kind:"harness",key:"same-actor",
  created_at:"",updated_at:"",revision:1,
  content:{version:"1.0",biz:"chat",meta:{},blocks:[]},
 });

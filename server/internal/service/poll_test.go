@@ -27,8 +27,8 @@ func testConversationCoordinator(t *testing.T) ConversationCoordinator {
 	return k8sclient.NewConversationClient(kube, "test", 0)
 }
 
-// +case=`Actors exchange durable messages without a UI task; Poll waits for an open earlier message, End wakes it, and Commit stays actor-local.`
-func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
+// +case=`Actors exchange messages in any status without a UI task; End can wake an uncommitted reader, and Commit stays actor-local.`
+func TestActorsConsumeSpeechIndependently(t *testing.T) {
 	ctx := context.Background()
 	store := openServiceStore(t)
 	if _, err := store.CreateConversation(ctx, model.Conversation{ID: "conv", ActorKind: "user", ActorKey: "alice"}); err != nil {
@@ -68,8 +68,8 @@ func TestActorsConsumeCompletedSpeechIndependently(t *testing.T) {
 		t.Fatal(err)
 	}
 	inbox, err := poll.Poll(ctx, "conv", contract.PollRequest{Actor: b})
-	if err != nil || len(inbox.Messages) != 0 || inbox.Position != "" {
-		t.Fatalf("consumed incomplete prefix: %+v %v", inbox, err)
+	if err != nil || len(inbox.Messages) != 2 || inbox.Messages[0].Status != contract.MessageStatusStreaming || inbox.Position != later.ID {
+		t.Fatalf("streaming message was hidden: %+v %v", inbox, err)
 	}
 	other, err := poll.Poll(ctx, "conv", contract.PollRequest{Actor: c})
 	if err != nil || len(other.Messages) != 1 || other.Messages[0].ID != third.ID {

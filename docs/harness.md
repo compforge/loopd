@@ -114,8 +114,12 @@ HTTPTimeout 限制短请求全过程（含响应体），也限制两类连接�
 
 接收事务创建 harness_runs 和独立的输出 Message，提交后返回 202 与 Call（id、message_id、
 phase、deadline_at 等），无需等待 Harness 启动。幂等范围是 Conversation + 完整 Actor 身份 + key；
-同请求复用 Run 和截止时间，参数变化返回 conflict。输出 Message 的 purpose 为 harness，
+同请求复用 Run 和截止时间，参数变化返回 conflict。Run 通过 MessageID 关联输出 Message，
 内容与终态只能通过持有当前租约的 Run 驱动者更新，普通 Emit 不能写入。
+
+Operator 发起的 Harness 使用 `operator/<operator-name>/harness` 作为 Actor kind，
+具体 Harness 标识放在 actor key，同一个 Harness 的多条消息保持该身份不变。
+角色名、步骤名用于展示，不代替 Actor 身份；执行归属按 Run 关联判断，不按 kind 前缀推断。
 
 - `GET /v1/harness/runs/:run_id` 只读取调用状态与 Conversation/Message 引用，不加载输出正文。
   runtime 在成功态通过逻辑 block 读取提取 result，不需要展开整个执行过程。

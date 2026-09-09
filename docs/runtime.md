@@ -56,6 +56,10 @@ ActorKind 的内置常量为 ActorKindUser、ActorKindOperator、ActorKindHarnes
 作为 key。自定义角色能 Speak、Poll、Commit 和发起 Human 交互，拥有独立定向信号和消费位置；
 身份不会自动注册为发送框里的服务。Actor 命名不是鉴权，API 仍采用可信部署边界。
 
+Operator 发起 Harness 时，使用 `OperatorHarnessKindFormat` 格式化
+`operator/<operator-name>/harness`，具体 Harness 标识放在 Actor.Key。
+同一个 Harness 跨消息保留身份；临时 Harness 按业务步骤分配稳定标识，重试不换身份。
+
 ## Verb 与 Effect
 
 Verb 表达“可以做什么”，Effect 分为 read 与 write。write 不自动意味着幂等或持久恢复；
@@ -180,8 +184,10 @@ AgentUE meta.error。Tell 创建 streaming 消息，终态通过 End 指定。�
 
 Speak 不依赖某次 user input 或页面连接。Target 可以是 User、其他 Operator，或留空向会话发言；
 reply_to_id 表达回应哪条消息，Target 表达说给谁听，两者不能互相替代。
-页面实时观察流式内容；其他 Operator 的 Poll 在 End 后收到已结束消息及其状态，
-不消费仍在追加的消息。failed/cancelled 可保留已输出的部分内容，不能当作完整成功结果。
+页面实时观察流式内容；Poll、Read 和 List 都允许读取任意状态的消息，包括 streaming。
+是否利用部分内容、何时等待、何时 Commit 由 Operator 决定。Poll 按消息 ID 而非 revision 推进；
+越过某条消息后，要跟进其后续内容应保留 ID 再 Read，或通过 Harness Call 观察。
+failed/cancelled 可保留已输出的部分内容，不能当作完整成功结果。
 
 server 在 User conv 接收定向消息时，按父会话 + 完整 Actor 身份创建或复用过程会话，
 在通知中写入 `spec.participants[].conversationID`。Operator 从 Conv CRD 取得 ID，将内部协作

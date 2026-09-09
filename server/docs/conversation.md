@@ -60,6 +60,10 @@ runtime 的 `Participant` helper 只合并当前 Conv 快照中的 spec/status�
 
 ## Poll 与 Commit
 
+Poll 返回所有状态的消息；streaming 是可读取的当前快照，不会阻塞后面的消息。
+Operator 自行决定如何处理部分内容以及何时 Commit。发送者创建消息时即可通知收件者；
+消息后续更新不改变 ID，已推进的游标不因此自动回退，需要时按已知 ID 继续读取。
+
 消息消费参考 [Kafka Consumer](https://kafka.apache.org/41/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
 的日志、拉取与提交语义：DB 是保留的消息日志，CRD 保存各 Actor 在 Conv 中的消费位置。
 这是类比，不意味着接入 Kafka、消息出队删除或提供 Kafka 的分区与消费者组协议。

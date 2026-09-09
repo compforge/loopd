@@ -168,6 +168,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input contract.M
 			key = fmt.Sprintf("work/%d/%d", round, index)
 		}
 		call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
+			Actor:          routerHarnessActor(input.ID, key),
 			ConversationID: workspaceID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget,
 			Text: executionPrompt(query, history, task),
 		})
@@ -192,6 +193,7 @@ func (reconciler *Reconciler) executeBatch(ctx context.Context, input contract.M
 
 func (reconciler *Reconciler) call(ctx context.Context, input contract.Message, workspaceID, key, prompt string) (string, error) {
 	call, err := reconciler.loop.Harness.Prompt(ctx, loopruntime.Prompt{
+		Actor:          routerHarnessActor(input.ID, key),
 		ConversationID: workspaceID, IdempotencyKey: input.ID + "/" + key, EffectKey: key, Target: reconciler.harnessTarget, Text: prompt,
 	})
 	if err != nil {
@@ -206,6 +208,12 @@ func (reconciler *Reconciler) call(ctx context.Context, input contract.Message, 
 		return "", fmt.Errorf("%s Harness returned an empty result", key)
 	}
 	return text, nil
+}
+
+// Router creates a temporary Harness per step. Replaying the same step keeps
+// the same actor, while parallel steps have different identities.
+func routerHarnessActor(inputID, step string) *contract.ActorRef {
+	return &contract.ActorRef{Kind: contract.ActorKind(fmt.Sprintf(contract.OperatorHarnessKindFormat, OperatorKey)), Key: inputID + "/" + step}
 }
 
 func replanningPrompt(query, history string, tasks, results []string, maxSubtasks int) string {

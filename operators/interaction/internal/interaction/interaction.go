@@ -49,7 +49,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind == contract.ActorKindUser && message.Purpose != "human_reply" {
+	if message.Kind == contract.ActorKindUser && !message.IsHumanReply() {
 		pending, err := d.interact(ctx, request.Name, message)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -66,7 +66,7 @@ func (d *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 	slog.InfoContext(ctx, "interaction input committed", "conversation_id", request.Name,
-		"message_id", message.ID, "purpose", message.Purpose)
+		"message_id", message.ID)
 	return ctrl.Result{RequeueAfter: time.Millisecond}, nil
 }
 
