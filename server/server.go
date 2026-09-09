@@ -16,6 +16,7 @@ import (
 	"github.com/compforge/loopd/pkg/harness"
 	serverapi "github.com/compforge/loopd/server/internal/api"
 	"github.com/compforge/loopd/server/internal/component"
+	"github.com/compforge/loopd/server/internal/eventbridge"
 	"github.com/compforge/loopd/server/internal/repo"
 	"github.com/compforge/loopd/server/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -163,7 +164,7 @@ func newEventBridge(config RedisConfig, ttl time.Duration) (agentuerunner.EventB
 		config.ReadCount = 100
 	}
 	if config.KeyPrefix == "" {
-		config.KeyPrefix = "loopd:agentue"
+		config.KeyPrefix = eventbridge.DefaultKeyPrefix
 	}
 	client := redis.NewClient(&redis.Options{
 		Addr: config.Address, Username: config.Username, Password: config.Password, DB: config.DB,
