@@ -71,7 +71,7 @@ Part 仅是 repo/model 内部减少正文读写量的物理优化。即便在 Se
 外部没有 Part API，runtime、Operator、Harness 和页面都不接收 Part ID 或存储引用。
 
 AgentUE 1.1 的 `blocks` 可以混合内联 `{id, type, ...}` 与引用 `{id, ref}`。
-loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.id`，
+loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.group_id`，
 解析必须同时匹配所属 `message_id` 和 block ID。引用只有 `id/ref`；type、正文、层级等字段
 只保存在完整 block 中。数组位置决定显示顺序，Part 的创建或更新时间不决定顺序。
 
@@ -79,9 +79,10 @@ loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.id
 
 | 字段 | 含义 |
 | --- | --- |
-| id | UUIDv7 主键，作为不透明引用 key |
+| id | 单个物理 Part 的 UUIDv7 主键 |
 | message_id | 所属 Message，建立索引 |
-| content | `{"blocks": [...]}`，包含一批完整 block，不允许嵌套引用 |
+| group_id | 内部引用标识；一组包含一个普通 Part 或多个 Frame Parts |
+| content | `{"blocks": [...]}`，包含完整 blocks 或存储 frames，不允许嵌套引用 |
 | size_bytes | content 序列化后的字节数 |
 
 新消息先内联。达到 block 数量或正文总字节预算后，后续 block 使用引用；已有内联 block
@@ -91,14 +92,23 @@ loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.id
 | --- | --- | --- |
 | MESSAGE_INLINE_BLOCKS | 32 | 内联前缀的最大 block 数量 |
 | MESSAGE_INLINE_BYTES | 65536 | 内联 block JSON 的累计字节预算 |
-| MESSAGE_PART_BYTES | 262144 | 一个 Part 的目标字节数 |
+| MESSAGE_PART_BYTES | 65536 | 一个 Part 的最大编码字节数，含包装开销 |
 
-Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 block 增长导致所在 Part
-超过目标大小时，把该 block 移到独立 Part，并原子更新引用。单个 block 自身超过目标大小时
-允许独占一个更大的 Part，不截断正文，也不改变 AgentUE block 身份。上述大小是装箱预算，
-不是 MySQL JSON 列上限；meta、引用目录以及单个超大 block 仍需受部署的实际容量约束。
+`message.content` 和每个 `message_parts.content` 的编码大小均不超过 64 KiB，字节预算配置
+只能调小，不能突破此上限。根 content 计入 meta、引用目录和包装开销；必要时外置更多内联
+block。如果 meta 和引用目录仍无法放下，则在事务提交前拒绝写入，不建立多级索引。
 
-流式投影先锁 Message，校验 revision、事件指纹和 status；按 block ID 只加载目标 Part，
+小 block 按内容量装入普通 Part。一个 block 放不下时，repo 使用 AgentUE Go `storage.Frame`
+生成 `type=frame` 的存储表示：`id` 标识 frame，`block_id` 指向原始 block，`seq/total` 表达
+组内位置与总数，`data` 保存原始完整 block JSON 的字符串片段。每片计算转义、字段及 Part
+包装后的大小，保留 JSON 列。一个大 block 的 frames 独占一组，以一个不透明 ref 寻址，
+不把所有 frame ID 塞进根目录。读取时通过 `storage.Unframe` 校验片数与序号并还原。
+
+旧 block 增长时只更新其所在组；若与其他 block 共用 Part 且增长超限，则移入独立组。
+整组分片、引用与 Message revision 在同一事务中替换，不混合不同版本，也不遗留旧片。
+Frame 不进入 loopd API、runtime 或页面，不增加 SSE 分帧协议。
+
+流式投影先锁 Message，校验 revision、事件指纹和 status；按 block ID 只加载目标 Part 组，
 应用 AgentUE reducer 后写入变更 Part、引用、meta 和 revision。同一事件在同一事务中全部
 提交或回滚。metadata/End 不需要加载外置正文，幂等重试不再次 append。普通交付只读取消息
 状态，桥初始化或断档修复时才加载完整快照；DB 提交后继续按现有规则尝试 Redis 交付。
@@ -118,7 +128,9 @@ Part 按内容量容纳完整 block。新 block 优先放入尾部 Part；旧 bl
 不能只删除父行而留下 Parts。领域 CRD 的清理仍不决定聊天历史保留时间。
 
 元信息、完整正文和逻辑块读取是面向使用者的访问选择；物理分片是独立的存储选择，
-两者不相互泄露。完整内容和块读取均设响应大小上限，超限明确报错，不截断已存内容。
+两者不相互泄露。大小约束在写入物理存储时执行；Snapshot、Block、Blocks 不再拒绝已接收的
+逻辑内容。块分页预算只决定在 blocks 之间换页，首个大 block 可以独占一页。HTTP 读取仍有
+请求超时，调用方可按需读取 block 避免加载整个 Message。
 
 存储边界止于 repo：service、runtime 与页面不解释 ref 或分配 Part。
 交付层可用 `GetMessageState` 仅查询寻址、revision 与完成状态；该返回类型不含 content。

@@ -161,7 +161,7 @@ Before/After 的边界均不包含自身，可同时限定一个区间。Info �
 
 Snapshot 返回同一版本的完整内容；Block 按逻辑 block ID 获取内容，Blocks 逐页遍历。
 分页期间消息版本改变会返回冲突，调用者丢弃部分结果后重读，不能混合不同版本。
-正文读取有大小上限，超过上限明确失败，不静默截断；长消息按需读取逻辑块。
+正文读取不按逻辑大小拒绝已成功写入的内容；长消息可按需读取逻辑块，请求仍受超时约束。
 这些选择与底层如何存储无关：Part 只是 Server repo/model 的存储优化，不是外部协作概念，
 runtime、Operator 与 Harness 都不解析引用或感知 Part。细节见 [持久化](../server/docs/persistence.md#message-内容与-parts)。
 

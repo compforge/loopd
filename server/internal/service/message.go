@@ -53,10 +53,6 @@ func (s *MessageService) MessageInfo(ctx context.Context, convID, id string) (co
 }
 func (s *MessageService) MessageSnapshot(ctx context.Context, convID, id string) (contract.Message, error) {
 	m, err := s.repo.MessageSnapshot(ctx, convID, id)
-	// Leave headroom for metadata below the runtime's bounded JSON response reader.
-	if err == nil && len(m.Content) > 8<<20 {
-		return contract.Message{}, repo.ErrContentTooLarge
-	}
 	return messageFromModel(m), err
 }
 func (s *MessageService) MessageBlocks(ctx context.Context, convID, id, blockID, cursor string) (contract.BlockPage, error) {

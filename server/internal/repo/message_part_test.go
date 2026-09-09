@@ -336,8 +336,13 @@ func TestMessagePartsInlineGrowthAndSingleLargeBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	parts := storedParts(t, s, m.ID)
-	if len(parts) != 1 || parts[0].SizeBytes <= s.messagePartBytes || parts[0].SizeBytes != len(parts[0].Content) {
-		t.Fatalf("large block packing=%+v", parts)
+	if len(parts) < 2 {
+		t.Fatalf("large block was not framed: %d parts", len(parts))
+	}
+	for _, part := range parts {
+		if part.SizeBytes > s.messagePartBytes || part.SizeBytes != len(part.Content) {
+			t.Fatalf("part %s exceeds budget: %d", part.ID, part.SizeBytes)
+		}
 	}
 	key := refAt(t, s, m.ID, 0)
 	if err := s.ProjectOutput(ctx, m.ID, ui.Event{Op: ui.OpSet, Seq: 3, Block: map[string]any{"id": "b0", "type": "text", "content": "small again"}}); err != nil {
@@ -433,6 +438,7 @@ func TestMessagePartsRejectCrossMessageAndMissingReferences(t *testing.T) {
 func TestMessagePartsHumanReplyTimeoutAndRecovery(t *testing.T) {
 	s := partsStore(t)
 	s.messageInlineBytes = 1
+	s.messagePartBytes = 256 // Leave room for the frame envelope as well as data.
 	ctx := context.Background()
 	q, err := s.CreateHuman(ctx, question("external"))
 	if err != nil {

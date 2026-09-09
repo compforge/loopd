@@ -22,7 +22,7 @@ const defaultOperationTimeout = 10 * time.Second
 var (
 	ErrNotFound        = errors.New("not found")
 	ErrConflict        = errors.New("conflict")
-	ErrContentTooLarge = errors.New("message content exceeds read size limit")
+	ErrContentTooLarge = errors.New("message storage content exceeds write size limit")
 	ErrInvalidContent  = errors.New("invalid message content")
 )
 
@@ -102,6 +102,10 @@ func Open(config Config) (*Store, error) {
 	}
 	if config.MessagePartBytes <= 0 {
 		config.MessagePartBytes = defaultMessagePartBytes
+	}
+	if config.MessagePartBytes > maxStoredContentBytes || config.MessageInlineBytes > maxStoredContentBytes {
+		_ = sqlDB.Close()
+		return nil, errors.New("message storage budgets must not exceed 64 KiB")
 	}
 	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: config.MessageInlineBlocks, messageInlineBytes: config.MessageInlineBytes, messagePartBytes: config.MessagePartBytes}
 	ctx, cancel := store.withTimeout(context.Background())
