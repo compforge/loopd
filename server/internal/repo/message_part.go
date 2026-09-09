@@ -93,7 +93,9 @@ func (s *Store) MessageBlocks(ctx context.Context, convID, id, blockID, cursor s
 	return result, mapError(err)
 }
 
-const defaultMessageInlineBlocks = 32
+// The block count is only a generous packing guard. ContentMaxBytes is the
+// essential limit: every encoded root and Part content must fit that byte budget.
+const defaultMessageInlineBlocks = 1024
 
 type partContent struct {
 	Blocks []map[string]any `json:"blocks"`

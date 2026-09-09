@@ -13,7 +13,6 @@ import (
 type config struct {
 	harnessRunConcurrency int
 	messageTTL            time.Duration
-	messageInlineBlocks   int
 	contentMaxBytes       int
 	address               string
 	databaseDriver        string
@@ -95,7 +94,6 @@ func loadConfig() (config, error) {
 		target *int
 	}{
 		{"HARNESS_RUN_CONCURRENCY", &value.harnessRunConcurrency},
-		{"MESSAGE_INLINE_BLOCKS", &value.messageInlineBlocks},
 		{"CONTENT_MAX_BYTES", &value.contentMaxBytes},
 	} {
 		if raw := os.Getenv(item.name); raw != "" {

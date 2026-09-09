@@ -31,15 +31,14 @@ var (
 )
 
 type Config struct {
-	MessageInlineBlocks int
-	ContentMaxBytes     int
-	Driver              string
-	DSN                 string
-	OperationTimeout    time.Duration
-	MaxOpenConns        int
-	MaxIdleConns        int
-	ConnMaxLifetime     time.Duration
-	ConnMaxIdleTime     time.Duration
+	ContentMaxBytes  int
+	Driver           string
+	DSN              string
+	OperationTimeout time.Duration
+	MaxOpenConns     int
+	MaxIdleConns     int
+	ConnMaxLifetime  time.Duration
+	ConnMaxIdleTime  time.Duration
 }
 
 type Store struct {
@@ -102,10 +101,7 @@ func Open(config Config) (*Store, error) {
 	sqlDB.SetConnMaxLifetime(config.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(config.ConnMaxIdleTime)
 
-	if config.MessageInlineBlocks <= 0 {
-		config.MessageInlineBlocks = defaultMessageInlineBlocks
-	}
-	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: config.MessageInlineBlocks, contentMaxBytes: config.ContentMaxBytes}
+	store := &Store{db: db, operationTimeout: config.OperationTimeout, messageInlineBlocks: defaultMessageInlineBlocks, contentMaxBytes: config.ContentMaxBytes}
 	ctx, cancel := store.withTimeout(context.Background())
 	defer cancel()
 	if err := sqlDB.PingContext(ctx); err != nil {

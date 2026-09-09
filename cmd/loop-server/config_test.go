@@ -93,7 +93,7 @@ func TestLoadConfigRejectsLegacyEnvironment(t *testing.T) {
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"MESSAGE_TTL", "HARNESS_RUN_CONCURRENCY", "CONTENT_MAX_BYTES", "MESSAGE_INLINE_BLOCKS",
+		"MESSAGE_TTL", "HARNESS_RUN_CONCURRENCY", "CONTENT_MAX_BYTES",
 		"SERVER_ADDRESS", "DATABASE_DRIVER", "DATABASE_DSN", "REDIS_ADDRESS", "REDIS_USERNAME", "REDIS_PASSWORD",
 		"TASK_NAMESPACE", "TASK_CLIENT_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_IDLE_TIMEOUT", "SHUTDOWN_TIMEOUT",
 		"LOOP_SERVER_MYSQL_DSN", "LOOP_SERVER_SQLITE_PATH", "LOOP_SERVER_ADDR", "LOOP_SERVER_REDIS_ADDR",
@@ -109,26 +109,21 @@ func TestMessageStorageThresholds(t *testing.T) {
 	if err != nil || defaults.contentMaxBytes != 64<<10 {
 		t.Fatalf("default content limit=%d err=%v", defaults.contentMaxBytes, err)
 	}
-	t.Setenv("MESSAGE_INLINE_BLOCKS", "12")
 	t.Setenv("CONTENT_MAX_BYTES", "4096")
 	config, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.messageInlineBlocks != 12 || config.contentMaxBytes != 4096 {
+	if config.contentMaxBytes != 4096 {
 		t.Fatal("storage thresholds not parsed")
 	}
-	for _, name := range []string{"MESSAGE_INLINE_BLOCKS", "CONTENT_MAX_BYTES"} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv(name, "-1")
+	for _, raw := range []string{"-1", "0", "invalid", "65537"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv("CONTENT_MAX_BYTES", raw)
 			if _, err := loadConfig(); err == nil {
 				t.Fatal("accepted invalid threshold")
 			}
 		})
-	}
-	t.Setenv("CONTENT_MAX_BYTES", "65537")
-	if _, err := loadConfig(); err == nil {
-		t.Fatal("accepted content limit above 64 KiB")
 	}
 }
 

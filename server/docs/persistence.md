@@ -86,11 +86,12 @@ loopd 的 `biz=chat` 存储关联由 server 管理：`ref` 是 `message_parts.gr
 | size_bytes | content 序列化后的字节数 |
 
 新消息先内联。达到 block 数量或正文总字节预算后，后续 block 使用引用；已有内联 block
-因 append 增长超限也可外置。已经外置的 block 不自动搬回。部署可通过以下正整数参数调整：
+因 append 增长超限也可外置。已经外置的 block 不自动搬回。内联 block 数量由代码默认约定；
+部署只配置 content 列的字节上限。数量阈值只是宽松的装箱策略，本质约束是
+`CONTENT_MAX_BYTES`，数量未达阈值也不能突破字节预算：
 
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| MESSAGE_INLINE_BLOCKS | 32 | 内联前缀的最大 block 数量 |
 | CONTENT_MAX_BYTES | 65536 | Message 和 Part 的 content 列统一编码字节上限，含包装开销 |
 
 `message.content` 和每个 `message_parts.content` 均使用 `CONTENT_MAX_BYTES` 限制编码大小，
