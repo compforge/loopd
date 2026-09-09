@@ -11,7 +11,7 @@ func (store *Store) GetDeliveryInput(ctx context.Context, taskID string) (model.
 	ctx, cancel := store.withTimeout(ctx)
 	defer cancel()
 	rows, err := store.readMessages(ctx, func(tx *gorm.DB) *gorm.DB {
-		return tx.Where("task_id = ? AND kind = ?", taskID, "user").Order("id ASC").Limit(1)
+		return tx.Where("task_id = ? AND source_kind = ?", taskID, "user").Order("id ASC").Limit(1)
 	})
 	if err != nil {
 		return model.Message{}, err

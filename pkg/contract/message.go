@@ -24,8 +24,8 @@ type MessageInfo struct {
 	ID             string        `json:"id"`
 	ConversationID string        `json:"conversation_id"`
 	TaskID         string        `json:"task_id"`
-	Kind           ActorKind     `json:"kind"`
-	Key            string        `json:"key"`
+	SourceKind     ActorKind     `json:"source_kind"`
+	SourceKey      string        `json:"source_key"`
 	TargetKind     ActorKind     `json:"target_kind,omitempty"`
 	TargetKey      string        `json:"target_key,omitempty"`
 	ReplyToID      string        `json:"reply_to_id,omitempty"`
@@ -35,7 +35,7 @@ type MessageInfo struct {
 }
 
 func (m Message) Info() MessageInfo {
-	return MessageInfo{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, Kind: m.Kind, Key: m.Key,
+	return MessageInfo{ID: m.ID, ConversationID: m.ConversationID, TaskID: m.TaskID, SourceKind: m.SourceKind, SourceKey: m.SourceKey,
 		TargetKind: m.TargetKind, TargetKey: m.TargetKey, ReplyToID: m.ReplyToID,
 		Status: m.Status, Revision: m.Revision, Timestamped: m.Timestamped}
 }

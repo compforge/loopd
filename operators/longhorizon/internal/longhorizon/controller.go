@@ -199,7 +199,7 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 		return ctrl.Result{}, nil
 	}
 	message := polled.Messages[0]
-	if message.Kind != contract.ActorKindUser || message.IsHumanReply() {
+	if message.SourceKind != contract.ActorKindUser || message.IsHumanReply() {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
 	history, err := c.priorMessages(ctx, conv.Name, message.ID)
@@ -208,19 +208,19 @@ func (c *Controller) Ingress(ctx context.Context, req ctrl.Request) (ctrl.Result
 	}
 	goal := messageText(message)
 	if len(goal) == 0 || len(goal) > 16000 {
-		_, err := c.Loop.Conv.Speak(ctx, conv.Name, contract.SpeakRequest{Key: message.ID + "/invalid", Actor: consumer(), Target: contract.ActorRef{Kind: message.Kind, Key: message.Key}, ReplyToID: message.ID, Content: reportContent(report{Text: "Goal must contain 1–16000 bytes of text."}, "Invalid goal", "manager")})
+		_, err := c.Loop.Conv.Speak(ctx, conv.Name, contract.SpeakRequest{Key: message.ID + "/invalid", Actor: consumer(), Target: contract.ActorRef{Kind: message.SourceKind, Key: message.SourceKey}, ReplyToID: message.ID, Content: reportContent(report{Text: "Goal must contain 1–16000 bytes of text."}, "Invalid goal", "manager")})
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: time.Millisecond}, c.Loop.Conv.Commit(ctx, conv.Name, contract.CommitRequest{Actor: consumer(), Through: polled.Position})
 	}
-	run := &lh.Run{ObjectMeta: metav1.ObjectMeta{Name: message.ID, Namespace: conv.Namespace, Labels: map[string]string{ConvLabel: conv.Name}}, Spec: lh.RunSpec{Conversation: reference(&conv), WorkspaceID: participant.ConversationID, UserKey: message.Key, DeadlineAt: metav1.NewTime(time.Now().Add(c.Config.RunTimeout)), InputMessageID: message.ID, Goal: goal, MaxRounds: c.Config.MaxRounds}}
+	run := &lh.Run{ObjectMeta: metav1.ObjectMeta{Name: message.ID, Namespace: conv.Namespace, Labels: map[string]string{ConvLabel: conv.Name}}, Spec: lh.RunSpec{Conversation: reference(&conv), WorkspaceID: participant.ConversationID, UserKey: message.SourceKey, DeadlineAt: metav1.NewTime(time.Now().Add(c.Config.RunTimeout)), InputMessageID: message.ID, Goal: goal, MaxRounds: c.Config.MaxRounds}}
 	for _, m := range history {
 		if m.ID == message.ID {
 			continue
 		}
 		// Human facts and completed business reports are stable prompt context.
-		if m.Kind != contract.ActorKindUser {
+		if m.SourceKind != contract.ActorKindUser {
 			if _, err := reportFrom(m); err != nil {
 				continue
 			}
@@ -399,7 +399,7 @@ func (c *Controller) history(ctx context.Context, run *lh.Run) (string, error) {
 		if len(text) > remaining {
 			text = strings.ToValidUTF8(text[:remaining], "") + " [context truncated]"
 		}
-		messages = append(messages, fmt.Sprintf("[%s %s/%s] %s", m.ID, m.Kind, m.Key, text))
+		messages = append(messages, fmt.Sprintf("[%s %s/%s] %s", m.ID, m.SourceKind, m.SourceKey, text))
 		remaining -= len(text)
 		if remaining <= 0 {
 			break

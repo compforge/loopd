@@ -31,7 +31,7 @@ func TestMessageOutputAcrossInstances(t *testing.T) {
 	}
 	initial := json.RawMessage(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
 	_, err = store.CreateChatInput(ctx,
-		model.Message{ID: "message-1", ConversationID: "conversation-1", TaskID: "task-1", Kind: "user", ActorKey: "user-1", Content: initial},
+		model.Message{ID: "message-1", ConversationID: "conversation-1", TaskID: "task-1", SourceKind: "user", SourceKey: "user-1", Content: initial},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestMessageOutputAcrossInstances(t *testing.T) {
 	producer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientA, options), nil)
 	consumer := NewMessageService(store, agentuerunner.NewRedisEventBridge(clientB, options), nil)
 
-	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", Kind: "operator", ActorKey: "intent", Content: initial, Revision: 1}); err != nil {
+	if _, err := store.CreateMessage(ctx, model.Message{Status: "streaming", ID: "message-2", ConversationID: "conversation-1", TaskID: "task-1", SourceKind: "operator", SourceKey: "intent", Content: initial, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
 	set := marshalEvent(t, agentueui.Event{
@@ -197,7 +197,7 @@ func TestHumanSnapshotsAreMessageAddressedAndRecoverWithoutRedis(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial := []byte(`{"version":"1.0","biz":"chat","meta":{},"blocks":[]}`)
-	_, err = store.CreateChatInput(ctx, model.Message{ID: "00000000-0000-7000-8000-000000000001", ConversationID: "conv", TaskID: "task", Kind: "user", ActorKey: "alice", Content: initial})
+	_, err = store.CreateChatInput(ctx, model.Message{ID: "00000000-0000-7000-8000-000000000001", ConversationID: "conv", TaskID: "task", SourceKind: "user", SourceKey: "alice", Content: initial})
 	if err != nil {
 		t.Fatal(err)
 	}

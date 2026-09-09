@@ -206,7 +206,7 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			value.mu.Lock()
 			var messages []contract.Message
 			if value.polls == 0 {
-				messages = []contract.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, Kind: contract.ActorKindUser, Key: "user-1", Content: semanticModel("How should this work?")}}
+				messages = []contract.Message{{ID: "message-2", ConversationID: "conversation-1", TaskID: taskID, SourceKind: contract.ActorKindUser, SourceKey: "user-1", Content: semanticModel("How should this work?")}}
 			} else if len(value.inbox) > 0 {
 				messages = value.inbox[0]
 				value.inbox = value.inbox[1:]
@@ -220,12 +220,12 @@ func newLoopServer(t *testing.T, taskID string) *loopServer {
 			_ = json.NewEncoder(response).Encode(contract.PollResult{Messages: messages, Position: position})
 		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/content"):
 			id := strings.Split(request.URL.Path, "/")[5]
-			_ = json.NewEncoder(response).Encode(contract.Message{ID: id, Kind: contract.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")})
+			_ = json.NewEncoder(response).Encode(contract.Message{ID: id, SourceKind: contract.ActorKindOperator, SourceKey: "router", Content: semanticModel("Earlier answer.")})
 		case request.Method == http.MethodGet && request.URL.Path == "/v1/conversations/conversation-1/messages":
 			response.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(response).Encode(map[string]any{
 				"data": []contract.Message{
-					{ID: "message-1", Kind: contract.ActorKindOperator, Key: "router", Content: semanticModel("Earlier answer.")},
+					{ID: "message-1", SourceKind: contract.ActorKindOperator, SourceKey: "router", Content: semanticModel("Earlier answer.")},
 				},
 			})
 		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/events"):

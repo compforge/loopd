@@ -3,7 +3,7 @@ import type { Message } from "./api";
 import { groupParallelMessages } from "./parallel";
 
 const message = (id: string, start: number, end: number): Message => ({
-  status: "completed", id, conversation_id: "detail", task_id: "task", kind: "harness", key: id,
+  status: "completed", id, conversation_id: "detail", task_id: "task", source_kind: "harness", source_key: id,
   content: { version: "1.0", biz: "chat", meta: {}, blocks: [] },
   created_at: new Date(start).toISOString(), updated_at: new Date(end).toISOString(),
 });
@@ -22,11 +22,11 @@ describe("parallel detail groups", () => {
     expect(layout([message("a", 0, 20), message("b", 10, 40), message("c", 30, 50)])).toEqual([[["a"], ["b"], ["c"]]]);
   });
   it("stacks the same actor and starts independent time groups at the left again", () => {
-    const messages = [message("a", 0, 100), message("b", 10, 20), { ...message("c", 30, 40), key: "b" }, message("d", 200, 210)];
+    const messages = [message("a", 0, 100), message("b", 10, 20), { ...message("c", 30, 40), source_key: "b" }, message("d", 200, 210)];
     expect(layout(messages)).toEqual([[["a"], ["b", "c"]], [["d"]]]);
   });
   it("includes actor kind in column identity", () => {
-    expect(layout([message("a", 0, 20), { ...message("b", 0, 20), key: "a", kind: "operator" }])).toEqual([[["a"], ["b"]]]);
+    expect(layout([message("a", 0, 20), { ...message("b", 0, 20), source_key: "a", source_kind: "operator" }])).toEqual([[["a"], ["b"]]]);
   });
   it("groups equal endpoints and zero-duration messages deterministically after refresh", () => {
     const messages = [message("c", 10, 10), message("b", 10, 20), message("a", 0, 10)];

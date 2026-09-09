@@ -30,7 +30,7 @@ export function groupParallelMessages(messages: Message[]): DetailGroup[] {
     const group = groups[groups.length - 1];
     // Columns belong to actors within this overlap group, not the whole
     // conversation. A later independent group starts at the left again.
-    const actor = JSON.stringify([interval.message.kind, interval.message.key]);
+    const actor = JSON.stringify([interval.message.source_kind, interval.message.source_key]);
     let column = actors.get(actor);
     if (column === undefined) {
       column = actors.size;

@@ -111,7 +111,7 @@ func (reconciler *Reconciler) Reconcile(ctx context.Context, request ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 	message := inbox.Messages[0]
-	if message.Kind != contract.ActorKindUser {
+	if message.SourceKind != contract.ActorKindUser {
 		return ctrl.Result{RequeueAfter: time.Millisecond}, reconciler.loop.Conv.Commit(ctx, request.Name,
 			contract.CommitRequest{Actor: routerActor, Through: inbox.Position})
 	}
@@ -232,7 +232,7 @@ func conversationText(history []contract.Message) string {
 			// History also includes typed Human cards and non-text output.
 			value = string(message.Content)
 		}
-		lines = append(lines, fmt.Sprintf("%s/%s: %s", message.Kind, message.Key, value))
+		lines = append(lines, fmt.Sprintf("%s/%s: %s", message.SourceKind, message.SourceKey, value))
 	}
 	if len(lines) == 0 {
 		return "(no earlier messages)"

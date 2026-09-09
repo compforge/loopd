@@ -121,12 +121,12 @@ func TestPollUsesTargetedSQLHistory(t *testing.T) {
 	coordinator := testConversationCoordinator(t)
 	poll := NewPollService(store, coordinator, nil)
 	for _, message := range []model.Message{
-		{ID: "001", Kind: "user", ActorKey: "alice", TargetKind: "operator", TargetKey: "a"},
-		{ID: "002", Kind: "user", ActorKey: "alice", TargetKind: "operator", TargetKey: "b"},
-		{ID: "003", Kind: "operator", ActorKey: "b", TargetKind: "user", TargetKey: "alice"},
-		{ID: "004", Kind: "user", ActorKey: "alice"},
-		{ID: "005", Kind: "operator", ActorKey: "a"},
-		{ID: "006", Kind: "user", ActorKey: "alice", TargetKind: "operator", TargetKey: "a"},
+		{ID: "001", SourceKind: "user", SourceKey: "alice", TargetKind: "operator", TargetKey: "a"},
+		{ID: "002", SourceKind: "user", SourceKey: "alice", TargetKind: "operator", TargetKey: "b"},
+		{ID: "003", SourceKind: "operator", SourceKey: "b", TargetKind: "user", TargetKey: "alice"},
+		{ID: "004", SourceKind: "user", SourceKey: "alice"},
+		{ID: "005", SourceKind: "operator", SourceKey: "a"},
+		{ID: "006", SourceKind: "user", SourceKey: "alice", TargetKind: "operator", TargetKey: "a"},
 	} {
 		message.ConversationID, message.TaskID, message.Content = "conv", "ui-chat", textContent(message.ID)
 		if _, err := store.CreateMessage(ctx, message); err != nil {
@@ -207,7 +207,7 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("pending = %+v, %v", pending, err)
 	}
-	if pending[0].Kind != "user" || pending[0].TargetKey != "router" {
+	if pending[0].SourceKind != "user" || pending[0].TargetKey != "router" {
 		t.Fatalf("pending message = %+v", pending[0])
 	}
 	detail, err := store.FindActorConversation(ctx, "conv", target.Kind, target.Key)
@@ -231,7 +231,7 @@ func TestPollRetriesCommittedNotification(t *testing.T) {
 		t.Fatalf("pending after retry = %+v, %v", pending, err)
 	}
 	result, err := recovered.Poll(ctx, "conv", contract.PollRequest{Actor: target})
-	if err != nil || len(result.Messages) != 1 || result.Messages[0].Kind != contract.ActorKindUser {
+	if err != nil || len(result.Messages) != 1 || result.Messages[0].SourceKind != contract.ActorKindUser {
 		t.Fatalf("received = %+v, %v", result, err)
 	}
 	if err := recovered.Commit(ctx, "conv", contract.CommitRequest{Actor: target, Through: result.Position}); err != nil {

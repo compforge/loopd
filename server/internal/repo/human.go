@@ -72,7 +72,7 @@ func humanResult(tx *gorm.DB, m model.Message, c humanContent) (contract.HumanRe
 	return result, nil
 }
 func publicMessage(m model.Message) contract.Message {
-	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, Kind: m.Kind, Key: m.ActorKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
+	return contract.Message{Status: contract.MessageStatus(m.Status), TargetKind: m.TargetKind, TargetKey: m.TargetKey, ID: m.ID, ConversationID: m.ConversationID, SourceKind: m.SourceKind, SourceKey: m.SourceKey, Content: m.Content, ReplyToID: m.ReplyToID, Revision: m.Revision, Timestamped: contract.Timestamped{CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}}
 }
 func (store *Store) saveHuman(tx *gorm.DB, m *model.Message, c humanContent, wake bool) error {
 	content, err := json.Marshal(c)
@@ -138,7 +138,7 @@ func (store *Store) CreateHuman(ctx context.Context, r contract.HumanRequest) (r
 		if err != nil {
 			return err
 		}
-		m = model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, Kind: r.Actor.Kind, ActorKey: r.Actor.Key, TargetKind: r.Target.Kind, TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, OutputKey: &key, Revision: 1, HumanDueAt: &deadline, Content: content}
+		m = model.Message{ID: uuid.V7(), ConversationID: r.ConversationID, SourceKind: r.Actor.Kind, SourceKey: r.Actor.Key, TargetKind: r.Target.Kind, TargetKey: r.Target.Key, ReplyToID: r.ReplyToID, OutputKey: &key, Revision: 1, HumanDueAt: &deadline, Content: content}
 		if err := store.saveMessage(tx, &m, true); err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 		}
 		var previous *domain.HumanAnswer
 		if result.Reply != nil {
-			previous = &domain.HumanAnswer{Actor: result.Reply.Key, Outcome: result.Status, Value: result.Value}
+			previous = &domain.HumanAnswer{Actor: result.Reply.SourceKey, Outcome: result.Status, Value: result.Value}
 		}
 		question := humanQuestion(m, c)
 		changed, resolveErr := question.Resolve(r, actor, previous)
@@ -218,7 +218,7 @@ func (store *Store) ReplyHuman(ctx context.Context, conversationID, actor string
 			Meta    map[string]any             `json:"meta"`
 			Blocks  []contract.HumanReplyBlock `json:"blocks"`
 		}{"1.1", "chat", map[string]any{}, []contract.HumanReplyBlock{{ID: "human", Type: "human_reply", Outcome: r.Outcome, Value: r.Value, Question: c.Blocks[0]}}})
-		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, Kind: contract.ActorKindUser, ActorKey: actor, TargetKind: m.Kind, TargetKey: m.ActorKey, DispatchPending: true, ReplyToID: m.ID, Revision: 1, Content: content}
+		reply := model.Message{ID: uuid.V7(), ConversationID: conversationID, SourceKind: contract.ActorKindUser, SourceKey: actor, TargetKind: m.SourceKind, TargetKey: m.SourceKey, DispatchPending: true, ReplyToID: m.ID, Revision: 1, Content: content}
 		var parent model.Conversation
 		if err := tx.First(&parent, "id = ?", conversationID).Error; err != nil {
 			return err

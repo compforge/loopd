@@ -33,7 +33,7 @@ func TestMessageReadHTTP(t *testing.T) {
 		if id == "c" {
 			status = contract.MessageStatusStreaming
 		}
-		_, err := store.CreateMessage(ctx, model.Message{ID: id, ConversationID: "conv", Kind: "operator", ActorKey: "writer", Status: string(status), Revision: 1, Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","type":"text","content":"hello"}]}`)})
+		_, err := store.CreateMessage(ctx, model.Message{ID: id, ConversationID: "conv", SourceKind: "operator", SourceKey: "writer", Status: string(status), Revision: 1, Content: []byte(`{"version":"1.1","biz":"chat","meta":{},"blocks":[{"id":"text","type":"text","content":"hello"}]}`)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestMessageReadHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		message, err := store.CreateMessage(ctx, model.Message{ID: "large", ConversationID: "other", Kind: "operator", ActorKey: "writer", Status: "completed", Revision: 1, Content: data})
+		message, err := store.CreateMessage(ctx, model.Message{ID: "large", ConversationID: "other", SourceKind: "operator", SourceKey: "writer", Status: "completed", Revision: 1, Content: data})
 		if err != nil {
 			t.Fatal(err)
 		}

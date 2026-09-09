@@ -22,8 +22,8 @@ const conversationID = "conv"
 func userMessage(id, taskID, text string) contract.Message {
 	content, _ := json.Marshal(map[string]any{"version": "1.0", "biz": "chat",
 		"blocks": []map[string]any{{"id": "text", "type": "text", "content": text}}})
-	return contract.Message{ID: id, ConversationID: conversationID, Kind: contract.ActorKindUser,
-		Key: "user", TargetKind: actor.Kind, TargetKey: actor.Key,
+	return contract.Message{ID: id, ConversationID: conversationID, SourceKind: contract.ActorKindUser,
+		SourceKey: "user", TargetKind: actor.Kind, TargetKey: actor.Key,
 		TaskID: taskID, Content: content}
 }
 
@@ -231,8 +231,8 @@ func TestContinuousInputAndTypedReplies(t *testing.T) {
 	f.step(time.Second)
 	f.mu.Lock()
 	f.messages = append(f.messages, userMessage("02", "", "确认"),
-		contract.Message{ID: "03", Kind: contract.ActorKindUser, Key: "user", ReplyToID: "card", Content: json.RawMessage(`{"blocks":[{"type":"human_reply","value":"accepted"}]}`)},
-		contract.Message{ID: "04", Kind: contract.ActorKindOperator, Key: "other"})
+		contract.Message{ID: "03", SourceKind: contract.ActorKindUser, SourceKey: "user", ReplyToID: "card", Content: json.RawMessage(`{"blocks":[{"type":"human_reply","value":"accepted"}]}`)},
+		contract.Message{ID: "04", SourceKind: contract.ActorKindOperator, SourceKey: "other"})
 	f.mu.Unlock()
 	f.step(time.Second)
 	f.mu.Lock()

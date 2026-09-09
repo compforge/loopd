@@ -37,8 +37,8 @@ type Message struct {
 	ID             string          `json:"id"`
 	ConversationID string          `json:"conversation_id"`
 	TaskID         string          `json:"task_id"`
-	Kind           ActorKind       `json:"kind"`
-	Key            string          `json:"key"`
+	SourceKind     ActorKind       `json:"source_kind"`
+	SourceKey      string          `json:"source_key"`
 	Content        json.RawMessage `json:"content"`
 	Timestamped
 }

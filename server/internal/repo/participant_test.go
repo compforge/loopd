@@ -20,7 +20,7 @@ func TestParticipantAllocationIsAtomicAndActorScoped(t *testing.T) {
 	if _, err := s.ParticipantConversation(ctx, "conv", actor); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("notification lookup allocated missing association: %v", err)
 	}
-	input := model.Message{ID: "input", ConversationID: "conv", Kind: contract.ActorKindUser, TargetKind: actor.Kind, TargetKey: actor.Key, Content: content}
+	input := model.Message{ID: "input", ConversationID: "conv", SourceKind: contract.ActorKindUser, TargetKind: actor.Kind, TargetKey: actor.Key, Content: content}
 	if _, err := s.CreateChatInput(ctx, input); err == nil {
 		t.Fatal("duplicate message must fail")
 	}

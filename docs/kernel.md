@@ -59,7 +59,7 @@ ActorKind 是开放字符串枚举，`user`、`operator`、`harness` 是内置�
 扩展 kind，`operator/<operator-key>/<role>` 是已有的命名惯例，不是封闭的枚举或固定层级限制。
 扩展 kind 约定沿用三个内置身份前缀，当前不强校验前缀；未知值原样读写。Actor 是这些身份的聚合概念，
 以 kind/key 共同标识；`/actors` 只发现在线注册的 Operator/Harness，不枚举全部用户或自定义角色。
-Message 的发送者和收件者各有 kind/key，
+Message 用 source_kind/source_key 表达发送者，用 target_kind/target_key 表达收件者，
 回复引用表达“回应哪条消息”，不定义执行依赖，也不等于一次业务任务。
 
 Conversation 是一个对话框。习惯上称用户的主会话为 **User conv**，Operator 组织的工作会话为

@@ -58,7 +58,7 @@ func TestConversationPollHTTP(t *testing.T) {
 	if err := json.Unmarshal(first.Body(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Messages) != 1 || result.Messages[0].Kind != contract.ActorKindUser ||
+	if len(result.Messages) != 1 || result.Messages[0].SourceKind != contract.ActorKindUser ||
 		result.Messages[0].TargetKey != "router" || result.Position != result.Messages[0].ID {
 		t.Fatalf("Poll = %+v", result)
 	}

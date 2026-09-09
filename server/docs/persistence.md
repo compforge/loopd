@@ -32,7 +32,7 @@ Conversation 不保存 task_id，也不依赖某条回答先存在。
 
 ## Message 是发言事实
 
-Message 用 kind/actor_key 表达发送者，target_kind/target_key 表达收件者。收件者均为空字符串
+Message 用 source_kind/source_key 表达发送者，target_kind/target_key 表达收件者。收件者均为空字符串
 表示对会话发言。reply_to_id 指向同一会话的具体消息，不表达任务身份或执行顺序。
 
 人可以连续追加消息，Operator 可以分多次回应；没有一问一答约束，也不预建空回答。

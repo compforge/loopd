@@ -34,7 +34,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 				"blocks": []any{map[string]any{"id": "failure", "type": "text", "content": "Router 执行失败，请重试。"}}})
 			_, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
 				Key: input.ID + "/failure", Actor: routerActor,
-				Target:    contract.ActorRef{Kind: input.Kind, Key: input.Key},
+				Target:    contract.ActorRef{Kind: input.SourceKind, Key: input.SourceKey},
 				ReplyToID: input.ID, Content: content, Status: contract.MessageStatusFailed,
 			})
 			if err != nil {
@@ -96,7 +96,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 				"blocks": []any{map[string]any{"id": "progress", "type": "text", "content": "阶段结果\n\n" + strings.Join(results, "\n\n")}}})
 			if _, err := reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
 				Key: fmt.Sprintf("%s/progress/%d", input.ID, round), Actor: routerActor,
-				Target: contract.ActorRef{Kind: input.Kind, Key: input.Key}, ReplyToID: input.ID, Content: content,
+				Target: contract.ActorRef{Kind: input.SourceKind, Key: input.SourceKey}, ReplyToID: input.ID, Content: content,
 			}); err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func (reconciler *Reconciler) run(ctx context.Context, input contract.Message, m
 					"meta":   map[string]any{"through_id": position},
 					"blocks": []any{map[string]any{"id": "answer", "type": "text", "content": answer}}})
 				_, err = reconciler.loop.Conv.Speak(ctx, input.ConversationID, contract.SpeakRequest{
-					Key: input.ID + "/answer", Actor: routerActor, Target: contract.ActorRef{Kind: input.Kind, Key: input.Key},
+					Key: input.ID + "/answer", Actor: routerActor, Target: contract.ActorRef{Kind: input.SourceKind, Key: input.SourceKey},
 					ReplyToID: input.ID, Content: content,
 				})
 				return err
@@ -143,7 +143,7 @@ func (reconciler *Reconciler) pollAdditions(ctx context.Context, convID string, 
 			*position = inbox.Position
 		}
 		for _, message := range inbox.Messages {
-			if message.Kind != contract.ActorKindUser {
+			if message.SourceKind != contract.ActorKindUser {
 				continue
 			}
 			text, err := modelText(message.Content)

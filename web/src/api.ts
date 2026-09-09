@@ -24,8 +24,8 @@ export interface Message {
   revision?: number;
   conversation_id: string;
   task_id: string;
-  kind: ActorKind;
-  key: string;
+  source_kind: ActorKind;
+  source_key: string;
   content: MessageContent;
   created_at: string;
   updated_at: string;
